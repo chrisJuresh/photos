@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "immutable-media-vault"
+version = "1.0.0"
+description = "Read-only-source, content-addressed image and video ingestion"
+requires-python = ">=3.11"
+dependencies = [
+  "blake3==1.0.9",
+  "fastapi==0.139.2",
+  "Pillow==12.3.0",
+  "ImageHash==4.3.2",
+  "uvicorn==0.51.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx==0.28.1",
+  "pytest==9.1.1",
+  "ruff==0.15.22",
+]
+
+[project.scripts]
+media-vault = "media_vault.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.setuptools.packages.find]
+include = ["media_vault*"]

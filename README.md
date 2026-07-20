@@ -43,6 +43,14 @@ Initialize an empty destination without accessing the source:
 .\run.ps1 init --vault 'G:\MediaVault'
 ```
 
+An existing schema-version-2 vault remains readable by all legacy commands and is never upgraded merely by opening it. When no writer is active, migrate it explicitly:
+
+```powershell
+.\run.ps1 migrate --vault 'G:\MediaVault'
+```
+
+`migrate` acquires the existing single-writer guard, checks backup space, creates and verifies a unique SQLite backup under `state\backups`, applies the ordered migration in one transaction, and runs schema-version, foreign-key, and integrity validation. It is repeatable. It does not enumerate or read source media or canonical objects, and it refuses a live `active-writer.lock`.
+
 After the last-access safety issue is resolved, perform the full read-only discovery/hash/capacity pass. This does not copy media objects:
 
 ```powershell
@@ -138,6 +146,12 @@ The `.blob` suffix is intentionally format-neutral. Actual format, MIME type, or
 Each new object is copied with SHA-256, SHA-512, and BLAKE3 computed during the write. The temporary file is flushed and `fsync`ed, reopened and fully rehashed, then byte-compared against the source. It is published with an atomic same-filesystem hard link that fails if the final path already exists; the temporary link is then removed. An unexpected existing path is verified and reused only if its hashes and bytes match. Otherwise it is recorded as a critical conflict and never overwritten.
 
 SQLite uses WAL mode, foreign keys, `synchronous=FULL`, small committed transactions, and a durable run ledger. A crash can leave an unreferenced `.partial` file in `state\tmp`, but it cannot make that partial file the canonical object. If publication succeeds just before a crash, the next run verifies and adopts the already completed object. Existing objects are never deleted automatically, including when all old source paths disappear.
+
+Schema changes are separate maintenance operations. Normal manifest opens accept supported schema versions without executing DDL or rewriting `schema_info`. Review-specific entry points require the current schema and report the explicit `migrate` command when an older supported manifest is encountered.
+
+## Review configuration contract
+
+`media_vault.config.ReviewConfig` defines the typed Stage 1 contract for the vault root, configurable inbox (default `G:\MediaVaultImports`), regenerable derivative root, separate dashboard/review ports (8765/8766), localhost binding, worker limits, request budgets, and analyzer versions. Its path validation keeps the inbox outside the vault and derivatives disjoint from canonical `objects`; callers must also validate each immutable source root with `assert_source_separated`. These are foundation contracts only: Stage 1 does not add review APIs, workers, import tables, or UI components.
 
 ## What is and is not deduplicated
 

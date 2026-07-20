@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f2ed">
+  <title>Media Vault</title>
+  <link rel="stylesheet" href="/static/styles.css?v=2">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>Media Vault</strong><small>Evidence console</small></span>
+      </div>
+
+      <nav class="nav-list" id="nav-list">
+        <button class="nav-item is-active" type="button" data-view="overview"><span class="nav-icon" aria-hidden="true">⌂</span>Overview</button>
+        <button class="nav-item" type="button" data-view="assets"><span class="nav-icon" aria-hidden="true">▦</span>Assets</button>
+        <button class="nav-item" type="button" data-view="sources"><span class="nav-icon" aria-hidden="true">⌘</span>Source paths</button>
+        <button class="nav-item" type="button" data-view="duplicates"><span class="nav-icon" aria-hidden="true">≡</span>Exact duplicates</button>
+        <button class="nav-item" type="button" data-view="relationships"><span class="nav-icon" aria-hidden="true">⌁</span>Relationships</button>
+        <button class="nav-item" type="button" data-view="raw-jpeg"><span class="nav-icon" aria-hidden="true">◇</span>RAW + JPEG</button>
+        <button class="nav-item" type="button" data-view="warnings"><span class="nav-icon" aria-hidden="true">!</span>Warnings</button>
+        <button class="nav-item" type="button" data-view="runs"><span class="nav-icon" aria-hidden="true">↻</span>Runs</button>
+        <button class="nav-item" type="button" data-view="schema"><span class="nav-icon" aria-hidden="true">{ }</span>Data contract</button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="guard-card">
+          <span class="guard-icon" aria-hidden="true">✓</span>
+          <div><strong>Read-only console</strong><small>GET access only. Source media is never modified.</small></div>
+        </div>
+        <button class="theme-button" id="theme-button" type="button" aria-label="Toggle color theme"><span aria-hidden="true">◐</span><span>Theme</span></button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="menu-button" id="menu-button" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
+        <div class="breadcrumbs"><span id="page-eyebrow">Vault status</span><strong id="page-title">Overview</strong></div>
+        <div class="top-actions">
+          <span class="connection" id="connection"><i></i><span>Connecting</span></span>
+          <span class="snapshot-age" id="snapshot-age">—</span>
+          <button class="icon-button" id="refresh-button" type="button" title="Refresh now" aria-label="Refresh now">↻</button>
+        </div>
+      </header>
+
+      <main id="main" tabindex="-1">
+        <div class="notice error-banner" id="global-error" role="alert" hidden></div>
+
+        <section class="view is-active" id="view-overview" data-view-panel="overview">
+          <div class="hero-row">
+            <div>
+              <p class="eyebrow">Live import intelligence</p>
+              <h1>Your archive, accounted for.</h1>
+              <p class="lede" id="hero-copy">Watching the immutable source scan and building an auditable record of every discoverable media file.</p>
+            </div>
+            <div class="read-only-pill"><span>●</span> Read-only</div>
+          </div>
+
+          <section class="card live-card" aria-labelledby="live-heading">
+            <div class="card-head">
+              <div>
+                <div class="title-with-state"><span class="state-dot" id="scan-dot"></span><h2 id="live-heading">Discovery scan</h2></div>
+                <p id="scan-subtitle">Waiting for a progress checkpoint…</p>
+              </div>
+              <span class="stage-badge" id="stage-badge">Starting</span>
+            </div>
+            <div class="scan-track" aria-label="Scan activity is indeterminate"><span id="scan-track-fill"></span></div>
+            <div class="metric-grid live-metrics">
+              <div><span>Paths this pass</span><strong id="metric-paths">—</strong><small id="metric-rate">— paths/s</small></div>
+              <div><span>Reused</span><strong id="metric-reused">—</strong><small>unchanged records</small></div>
+              <div><span>New or changed</span><strong id="metric-changed">—</strong><small>require fresh work</small></div>
+              <div><span>New media hashed</span><strong id="metric-media">—</strong><small id="metric-bytes">—</small></div>
+              <div><span>Warnings</span><strong id="metric-warnings">—</strong><small id="metric-errors">— errors</small></div>
+            </div>
+            <div class="chart-wrap">
+              <div class="chart-head"><span>Observed scan rate</span><span id="rate-caption">Local samples · last 15 minutes</span></div>
+              <svg id="rate-chart" viewBox="0 0 900 130" preserveAspectRatio="none" role="img" aria-label="Observed scan rate over time">
+                <defs><linearGradient id="area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".24"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+                <g class="chart-grid"><line x1="0" y1="25" x2="900" y2="25"/><line x1="0" y1="65" x2="900" y2="65"/><line x1="0" y1="105" x2="900" y2="105"/></g>
+                <path id="rate-area" class="chart-area" d="M0,120 L900,120 Z"/>
+                <path id="rate-line" class="chart-line" d="M0,120 L900,120"/>
+              </svg>
+            </div>
+          </section>
+
+          <div class="overview-grid">
+            <section class="card" aria-labelledby="pipeline-heading">
+              <div class="card-head"><div><h2 id="pipeline-heading">Integrity pipeline</h2><p>Each gate leaves durable evidence.</p></div><span class="muted-label">Deterministic</span></div>
+              <ol class="pipeline" id="pipeline-list">
+                <li data-step="discover"><span class="step-mark">1</span><div><strong>Discover + identify</strong><small>Signature detection, metadata, three hashes</small></div><em>Active</em></li>
+                <li data-step="capacity"><span class="step-mark">2</span><div><strong>Capacity decision</strong><small>Exact unique bytes versus free space</small></div><em>Pending</em></li>
+                <li data-step="copy"><span class="step-mark">3</span><div><strong>Verified copy</strong><small>Atomic writes, rehash, byte comparison</small></div><em>Pending</em></li>
+                <li data-step="relate"><span class="step-mark">4</span><div><strong>Relationship analysis</strong><small>Non-exact, near-duplicate, RAW/JPEG</small></div><em>Pending</em></li>
+                <li data-step="validate"><span class="step-mark">5</span><div><strong>Validate + export</strong><small>Independent object audit and JSONL</small></div><em>Pending</em></li>
+              </ol>
+            </section>
+
+            <section class="card storage-card" aria-labelledby="storage-heading">
+              <div class="card-head"><div><h2 id="storage-heading">Destination storage</h2><p id="storage-drive">G: volume</p></div><span class="muted-label" id="storage-percent">—</span></div>
+              <div class="storage-visual" id="storage-visual"><div class="storage-ring"><div><strong id="storage-free">—</strong><span>free</span></div></div></div>
+              <dl class="compact-stats">
+                <div><dt>Total</dt><dd id="storage-total">—</dd></div>
+                <div><dt>Used on volume</dt><dd id="storage-used">—</dd></div>
+                <div><dt>Known unique media</dt><dd id="known-bytes">Deferred</dd></div>
+              </dl>
+            </section>
+          </div>
+
+          <section class="card inventory-card" aria-labelledby="inventory-heading">
+            <div class="card-head">
+              <div><h2 id="inventory-heading">Vault inventory</h2><p id="inventory-note">Detailed counts are deferred while the scanner owns the manifest.</p></div>
+              <button class="secondary-button" id="load-aggregates" type="button">Load snapshot</button>
+            </div>
+            <div class="metric-grid inventory-metrics" id="inventory-metrics">
+              <div><span>Unique assets</span><strong id="inventory-assets">—</strong><small id="inventory-bytes">—</small></div>
+              <div><span>Exact duplicate sources</span><strong id="inventory-duplicates">—</strong><small>verified full-content matches</small></div>
+              <div><span>Related assets</span><strong id="inventory-relations">—</strong><small>never auto-consolidated</small></div>
+              <div><span>RAW/JPEG groups</span><strong id="inventory-raw">—</strong><small>evidence-scored pairing</small></div>
+            </div>
+            <div class="inventory-lower">
+              <div><h3>Media by kind</h3><div class="bar-list" id="kind-bars"><p class="empty-inline">Load a snapshot to see the current breakdown.</p></div></div>
+              <div><h3>Top detected formats</h3><div class="format-cloud" id="format-cloud"><p class="empty-inline">Format evidence appears as files are identified.</p></div></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-assets" data-view-panel="assets">
+          <div class="page-head"><div><p class="eyebrow">Content-addressed inventory</p><h1>Assets</h1><p>Every distinct byte stream remains a separate asset.</p></div></div>
+          <section class="card data-card">
+            <form class="filter-bar" id="asset-filters">
+              <label class="search-field"><span class="sr-only">Hash or asset ID prefix</span><i aria-hidden="true">⌕</i><input name="prefix" maxlength="128" placeholder="Asset ID or hash prefix"></label>
+              <label><span class="sr-only">Media kind</span><select name="media_kind"><option value="">All media</option><option value="image">Images</option><option value="raw_image">RAW images</option><option value="video">Videos</option></select></label>
+              <label><span class="sr-only">Object status</span><select name="object_status"><option value="">Any copy status</option><option value="missing">Not copied</option><option value="verified">Verified</option><option value="error">Error</option></select></label>
+              <button class="primary-button" type="submit">Apply</button>
+            </form>
+            <div class="table-wrap"><table><thead><tr><th>Asset</th><th>Kind</th><th>Format</th><th>Size</th><th>Captured</th><th>Dimensions</th><th>Copy status</th></tr></thead><tbody id="assets-body"></tbody></table></div>
+            <div class="empty-state" id="assets-empty" hidden><span>▦</span><h3>No matching assets</h3><p>Scanned assets will appear here as transactions are committed.</p></div>
+            <div class="pager"><span id="assets-count">—</span><button class="secondary-button" id="assets-more" type="button" hidden>Load more</button></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-sources" data-view-panel="sources">
+          <div class="page-head"><div><p class="eyebrow">Path-preserving discovery history</p><h1>Source paths</h1><p>Every observed path is retained exactly—including case and Unicode—even when content moves or disappears later.</p></div></div>
+          <section class="card data-card">
+            <form class="filter-bar" id="source-filters">
+              <label class="search-field"><span class="sr-only">Path, source ID, or asset ID</span><i aria-hidden="true">⌕</i><input name="prefix" maxlength="256" placeholder="Path, source ID, or asset ID"></label>
+              <label><span class="sr-only">Source media kind</span><select name="media_kind"><option value="">All file kinds</option><option value="image">Images</option><option value="raw_image">RAW images</option><option value="video">Videos</option></select></label>
+              <label><span class="sr-only">Presence</span><select name="present"><option value="">Present + historical</option><option value="true">Currently present</option><option value="false">Historical only</option></select></label>
+              <button class="primary-button" type="submit">Apply</button>
+            </form>
+            <div class="table-wrap"><table><thead><tr><th>Original source path</th><th>Discovery</th><th>Kind</th><th>Size</th><th>Presence</th><th>Linked asset</th><th>Last seen</th></tr></thead><tbody id="sources-body"></tbody></table></div>
+            <div class="empty-state" id="sources-empty" hidden><span>⌘</span><h3>No matching source paths</h3><p>Discovered filesystem entries will appear as scanner transactions commit.</p></div>
+            <div class="pager"><span id="sources-count">—</span><button class="secondary-button" id="sources-more" type="button" hidden>Load more</button></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-duplicates" data-view-panel="duplicates">
+          <div class="page-head"><div><p class="eyebrow">Cryptographically verified</p><h1>Exact duplicates</h1><p>Only full-content matches verified by SHA-256, SHA-512, BLAKE3, and byte comparison qualify.</p></div></div>
+          <div class="assurance-strip"><span>✓</span><div><strong>Safe automatic consolidation</strong><p>One destination object can represent multiple identical source byte streams. Every original path remains recorded.</p></div></div>
+          <section class="card data-card"><div class="table-wrap"><table><thead><tr><th>Asset</th><th>Source copies</th><th>Format</th><th>Size each</th><th>Space not repeated</th><th>Object status</th></tr></thead><tbody id="duplicates-body"></tbody></table></div><div class="empty-state" id="duplicates-empty" hidden><span>≡</span><h3>No exact duplicate groups yet</h3><p>Groups appear only after reliable full-content verification.</p></div><div class="pager"><span id="duplicates-count">—</span><button class="secondary-button" id="duplicates-more" type="button" hidden>Load more</button></div></section>
+        </section>
+
+        <section class="view" id="view-relationships" data-view-panel="relationships">
+          <div class="page-head"><div><p class="eyebrow">Evidence, not deletion</p><h1>Related assets</h1><p>Identical decoded media, near-duplicates, edits, bursts, and visual similarity remain distinct and linked.</p></div></div>
+          <section class="card data-card">
+            <form class="filter-bar" id="relationship-filters"><label><span class="sr-only">Relationship type</span><select name="relationship_type"><option value="">All relationship types</option><option value="identical_decoded_image">Identical decoded image</option><option value="near_duplicate_image">Near-duplicate image</option><option value="similar_video">Similar video</option></select></label><label><span class="sr-only">Confidence</span><select name="confidence"><option value="">Any confidence</option><option value="high">High confidence</option><option value="medium">Medium confidence</option><option value="low">Low confidence</option></select></label><button class="primary-button" type="submit">Apply</button></form>
+            <div class="relationship-list" id="relationships-list"></div><div class="empty-state" id="relationships-empty" hidden><span>⌁</span><h3>Analysis has not produced relationships yet</h3><p>This stage runs after verified copying and never removes distinct files.</p></div><div class="pager"><span id="relationships-count">—</span><button class="secondary-button" id="relationships-more" type="button" hidden>Load more</button></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-raw-jpeg" data-view-panel="raw-jpeg">
+          <div class="page-head"><div><p class="eyebrow">Conservative provenance</p><h1>RAW + JPEG groups</h1><p>Pairing uses capture time, camera identity, dimensions, names, and metadata evidence—with ambiguity preserved.</p></div></div>
+          <section class="card data-card"><div class="group-grid" id="raw-groups"></div><div class="empty-state" id="raw-empty" hidden><span>◇</span><h3>No RAW/JPEG groups yet</h3><p>Pairing occurs after discovery and is withheld whenever evidence is insufficient.</p></div><div class="pager"><span id="raw-count">—</span><button class="secondary-button" id="raw-more" type="button" hidden>Load more</button></div></section>
+        </section>
+
+        <section class="view" id="view-warnings" data-view-panel="warnings">
+          <div class="page-head"><div><p class="eyebrow">Nothing swept aside</p><h1>Warnings + exceptions</h1><p>Unsupported, malformed, corrupt, conflicting, and partially readable media remain discoverable and auditable.</p></div></div>
+          <section class="card data-card">
+            <form class="filter-bar" id="warning-filters"><label><span class="sr-only">Severity</span><select name="severity"><option value="">Any severity</option><option value="warning">Warning</option><option value="error">Error</option><option value="info">Information</option></select></label><label class="search-field"><span class="sr-only">Warning code</span><i aria-hidden="true">⌕</i><input name="code" placeholder="Exact warning code"></label><button class="primary-button" type="submit">Apply</button></form>
+            <div class="warning-list" id="warnings-list"></div><div class="empty-state" id="warnings-empty" hidden><span>✓</span><h3>No warnings in this view</h3><p>The current filter has no recorded exceptions.</p></div><div class="pager"><span id="warnings-count">—</span><button class="secondary-button" id="warnings-more" type="button" hidden>Load more</button></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-runs" data-view-panel="runs">
+          <div class="page-head"><div><p class="eyebrow">Durable audit history</p><h1>Import runs</h1><p>Commands, parameters, outcomes, reports, and timestamps remain attached to each run.</p></div></div>
+          <div class="run-list" id="runs-list"></div><div class="empty-state standalone" id="runs-empty" hidden><span>↻</span><h3>No runs recorded</h3><p>Initialize or scan a vault to begin the audit trail.</p></div>
+        </section>
+
+        <section class="view" id="view-schema" data-view-panel="schema">
+          <div class="page-head"><div><p class="eyebrow">Machine-first and versioned</p><h1>Data contract</h1><p>SQLite is authoritative. JSONL and per-asset records make the vault portable and rebuildable.</p></div></div>
+          <div class="schema-grid">
+            <section class="card"><div class="card-head"><div><h2>Authoritative stores</h2><p>Exact locations, preserved as Unicode paths.</p></div><span class="schema-version" id="schema-version">v—</span></div><dl class="path-list"><div><dt>SQLite manifest</dt><dd id="schema-db">—</dd></div><div><dt>Portable JSONL</dt><dd id="schema-jsonl">—</dd></div><div><dt>Per-asset records</dt><dd id="schema-records">—</dd></div></dl></section>
+            <section class="card"><div class="card-head"><div><h2>Identity + verification</h2><p>Stable IDs follow content, not source paths.</p></div></div><ul class="check-list"><li><span>✓</span><div><strong>Exact identity</strong><small>Size + SHA-256 + SHA-512 + BLAKE3</small></div></li><li><span>✓</span><div><strong>Collision safeguard</strong><small>Independent hashes plus byte-for-byte verification</small></div></li><li><span>✓</span><div><strong>Source history</strong><small>Every observed path and version is retained</small></div></li><li><span>✓</span><div><strong>Non-exact evidence</strong><small>Method, score, confidence, and ambiguity</small></div></li></ul></section>
+          </div>
+          <section class="card"><div class="card-head"><div><h2>Manifest tables</h2><p>Schema designed for unattended downstream processing.</p></div></div><div class="table-chip-list" id="schema-tables"></div></section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="mobile-scrim" id="mobile-scrim" hidden></div>
+  <dialog class="asset-dialog" id="asset-dialog" aria-labelledby="asset-dialog-title">
+    <div class="dialog-shell">
+      <header><div><p class="eyebrow">Asset evidence</p><h2 id="asset-dialog-title">Asset details</h2></div><button class="icon-button" id="dialog-close" type="button" aria-label="Close asset details">×</button></header>
+      <div class="dialog-content" id="asset-detail"><div class="loading-state"><span></span>Loading evidence…</div></div>
+    </div>
+  </dialog>
+
+  <dialog class="asset-dialog group-dialog" id="group-dialog" aria-labelledby="group-dialog-title">
+    <div class="dialog-shell">
+      <header><div><p class="eyebrow">RAW/JPEG evidence group</p><h2 id="group-dialog-title">Group details</h2></div><button class="icon-button" id="group-dialog-close" type="button" aria-label="Close group details">×</button></header>
+      <div class="dialog-content" id="group-detail"><div class="loading-state"><span></span>Loading group evidence…</div></div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/static/app.js?v=4" defer></script>
+</body>
+</html>
