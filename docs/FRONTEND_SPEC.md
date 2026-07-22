@@ -1,6 +1,9 @@
 # Frontend and reviewed-import specification
 
-Status: approved planning baseline. This document defines the intended product outcome and safety contract. The existing repository remains the source of truth for current behavior.
+> [!CAUTION]
+> This is the historical intended product contract, not a statement that the current WIP satisfies it or is safe for live data. Runtime deviations and release blockers are documented in [SAFETY_HOLD.md](SAFETY_HOLD.md), [FINDINGS_REGISTER.md](FINDINGS_REGISTER.md), and [ACTION_PRIORITY_MATRIX.md](ACTION_PRIORITY_MATRIX.md). Where this specification conflicts with those later findings, the later safety documents control.
+
+Historical status at planning: approved baseline. This document defines the intended product outcome; the reviewed repository is evidence of current behaviour, while the later safety/review documents control readiness and authorization.
 
 ## 1. Current repository baseline
 

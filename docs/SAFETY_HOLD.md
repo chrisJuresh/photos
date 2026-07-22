@@ -2,7 +2,7 @@
 
 - Status: **WIP preservation snapshot only**
 - Reviewed: 2026-07-22
-- Applies to: the current uncommitted review application, workers, preprocessing/backfill pipeline, and related legacy entry points
+- Applies to: WIP snapshot `d49e621`, its review application, workers, preprocessing/backfill pipeline, and related legacy entry points
 
 The current implementation passes its synthetic automated tests, but the code review found blockers that make it unsuitable for the live vault. Preserve it on a review branch; do not merge it as a release and do not start it against `G:\MediaVault`, `G:\photos`, or the live inbox.
 
@@ -10,10 +10,11 @@ The current implementation passes its synthetic automated tests, but the code re
 
 Until every release gate below is satisfied:
 
+- Do not run **any** `media-vault`/`run.ps1` command against the live source, vault, or inbox. This includes `init`, `preflight`, `finalize-preflight`, `import`, `analyze`, `validate`, `export`, `status`, `progress`, `ui`, `review-ui`, `worker`, `preprocess`, `inbox-scan`, `rebuild-index`, and `migrate`; even nominal readers/path-driven recovery have unresolved write/privacy/containment behaviour. `--help` without live paths and wholly synthetic labs remain allowed.
 - Do not run `review-ui`, `worker`, `inbox-scan`, or `preprocess --backfill` against the live vault.
 - Do not double-click `Resume Live Vault Backfill.cmd`.
 - Do not run legacy `analyze` or `validate` against the live vault; those paths can read original sources without applying the source access-time guard.
-- Do not migrate the live database. Test only on an isolated copied database while all live writers remain stopped.
+- Do not migrate the live database. Test only on an isolated copied database while all live writers remain stopped and live roots are OS-denied/unmounted so persisted absolute paths cannot escape the rehearsal.
 - Do not treat the absence of `state\active-writer.lock` as proof that no writer exists; API metadata writes do not participate in that lock.
 - Do not recover a stuck job by editing SQLite manually. Preserve evidence and fix/test the recovery protocol first.
 
@@ -83,22 +84,30 @@ Evidence: `media_vault/relations.py`, `_asset_path` and image analysis; `media_v
 
 ### 8. The documented review-UI import path cannot satisfy this machine's access-time policy
 
-The README records that NTFS last-access updates are enabled and requires an explicit acknowledgement for source/inbox reads. The embedded worker started by `review-ui` has no CLI option to pass that acknowledgement, so inbox discovery, review-preview preparation, or reviewed copy can fail at the guard on this machine. The one-click launcher also omits it. The guard must not be silently weakened.
+Historical workstation evidence records that NTFS last-access updates are enabled, while the current code contains a hidden acknowledgement for some source/inbox reads. The embedded worker started by `review-ui` has no way to carry it, so inbox discovery, review-preview preparation, or reviewed copy can fail at the guard on this machine. More importantly, a waiver is not an acceptable way to preserve immutable source/canonical/inbox metadata. The guard must not be silently weakened.
 
-Required outcome: preferably fix and verify the filesystem last-access policy. If an exception remains necessary, make it an explicit, durable, path-scoped local operator acknowledgement outside the HTTP API; surface the blocked reason in the UI; and test/document the exact flow.
+Required outcome: fix and verify the filesystem last-access policy or use a reviewed snapshot/block method that avoids mounted-file reads. Route every protected-media read through that policy, surface the blocked reason in the UI, and provide no CLI/HTTP/browser waiver for live roots.
 
-Evidence: `media_vault/cli.py`, review UI parser; `media_vault/review_api.py`, embedded worker startup; `media_vault/review_runtime.py`; the configured policy in `README.md`.
+Evidence: `media_vault/cli.py`, review UI parser; `media_vault/review_api.py`, embedded worker startup; `media_vault/review_runtime.py`; the configured-workstation evidence retained in the historical frontend progress ledger.
+
+### 9. Hard-link publication can leave a mutable alias to a canonical object
+
+Canonical publication creates a hard link from a writable `.partial` file to the final object and then unlinks the temporary name. A crash or unlink failure between those operations leaves two names for the same inode: the canonical path and a writable alias under mutable `state\tmp`. Writing through that alias changes the canonical object's bytes. Published objects are not subsequently protected with a verified read-only ACL/attribute.
+
+Required outcome: adopt a proven atomic no-replace publication primitive with no post-publication writable alias, or publish from a protected directory with enforced/verified immutable permissions before exposure. Reconcile interrupted aliases on startup without ever modifying the inode, fsync the required file/directory state, and add power-loss/fault-boundary tests. Apply the same durability analysis to migration-backup publication.
+
+Evidence: `media_vault/vault_ops.py` and `media_vault/review_copy.py`, hard-link publication; `media_vault/migrations.py`, backup publication.
 
 ## Minimum release gates
 
 All of the following must be true before the hold is lifted:
 
-1. The eight blockers above are fixed in code and covered by deterministic synthetic tests.
+1. The nine blockers above and every other P0 action in [ACTION_PRIORITY_MATRIX.md](ACTION_PRIORITY_MATRIX.md) are fixed in code and covered by deterministic synthetic tests.
 2. The full Python, frontend unit, Svelte/type, smoke, and automated accessibility suites pass with capture disabled.
 3. Concurrent-writer and abrupt-process-death tests pass repeatedly.
 4. A clean package is built and installed into an empty environment, and its bundled review UI starts from the installed artifact.
-5. A copied production-size database is migrated, backfilled, interrupted/resumed, audited, backed up, restored elsewhere, and audited again.
+5. A production-size copied state with live roots OS-denied/unmounted and persisted paths proven unreachable is migrated, backfilled, interrupted/resumed, audited, backed up, restored elsewhere, and audited again.
 6. Source and canonical-object content plus filesystem metadata are proven unchanged around every test that could reach them.
 7. A human reviews the complete action register and explicitly approves live rollout.
 
-The detailed rankings, architecture options, operating instructions, and backup procedure will live in the accompanying review documentation. This hold is intentionally short enough to remain the first operational stop sign.
+Use [RELEASE_GATES.md](RELEASE_GATES.md) for the full evidence checklist. The detailed findings, rankings, architecture options, operating instructions, and backup procedure are linked from [the repository README](../README.md). This hold is intentionally short enough to remain the first operational stop sign.

@@ -1,6 +1,9 @@
 # Frontend and reviewed-import implementation plan
 
-Status: approved, not implemented.
+> [!CAUTION]
+> This is a historical staged plan, not current live authorization or proof that a stage's acceptance criteria hold across all entry points. Use [SAFETY_HOLD.md](SAFETY_HOLD.md), [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md), and [RELEASE_GATES.md](RELEASE_GATES.md) for current status and required evidence.
+
+Historical status at plan inception: approved, not implemented. The stages were later attempted and recorded in `FRONTEND_PROGRESS.md`; current implementation safety/readiness is governed by the later review documents linked above.
 
 This plan must be implemented one numbered stage at a time. Each stage must update `docs/FRONTEND_PROGRESS.md`, pass its verification gates, and stop at its stated boundary before the next stage begins. The repository and `docs/FRONTEND_SPEC.md` are the source of truth if an implementation detail is unclear.
 
