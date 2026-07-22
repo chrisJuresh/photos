@@ -2,24 +2,24 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
 from . import __version__
+from .config import DEFAULT_INBOX_ROOT, ReviewConfig
 from .core import (
     JsonlLogger,
     VaultRunLock,
     VaultLayout,
     assert_source_vault_separated,
+    assert_source_read_policy,
     executable_path,
     json_text,
     new_run_id,
     run_host,
     tool_identity,
     utc_now,
-    windows_last_access_policy,
 )
 from .db import ManifestDB
 from .migrations import migrate_vault
@@ -50,14 +50,8 @@ def _jsonable_args(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _immutability_check(source: Path, allow_unsafe_atime: bool) -> dict[str, Any]:
-    policy = windows_last_access_policy()
-    if os.name == "nt" and policy.get("safe") is not True and not allow_unsafe_atime:
-        raise RuntimeError(
-            "Windows last-access updates are not confirmed disabled. Reading the source could alter access "
-            "timestamps, so this run is refused. Correct the filesystem policy; do not bypass this for an "
-            "immutable source. Evidence: " + json_text(policy)
-        )
-    return policy
+    del source  # The shared policy is filesystem-wide; retain the legacy call contract.
+    return assert_source_read_policy(allow_unsafe_atime)
 
 
 def _start_run(
@@ -366,8 +360,84 @@ def command_ui(args: argparse.Namespace) -> int:
         host=args.host,
         port=args.port,
         cache_root=args.cache_root,
+        derivative_root=args.derivative_root,
         open_browser=args.open_browser,
     )
+    return 0
+
+
+def _review_config(args: argparse.Namespace) -> ReviewConfig:
+    return ReviewConfig(
+        vault_root=args.vault,
+        inbox_root=getattr(args, "inbox", DEFAULT_INBOX_ROOT),
+        derivative_root=getattr(args, "derivative_root", None),
+        review_host=getattr(args, "host", "127.0.0.1"),
+        review_port=getattr(args, "port", 8766),
+    )
+
+
+def command_review_ui(args: argparse.Namespace) -> int:
+    from .review_api import serve_review_app
+
+    exiftool, ffprobe, ffmpeg = _resolve_tools(args)
+    serve_review_app(
+        _review_config(args),
+        open_browser=args.open_browser,
+        run_worker=args.run_worker,
+        exiftool=exiftool,
+        ffprobe=ffprobe,
+        ffmpeg=ffmpeg,
+    )
+    return 0
+
+
+def command_worker(args: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from .review_runtime import run_worker_loop
+
+    exiftool, ffprobe, ffmpeg = _resolve_tools(args)
+    result = run_worker_loop(
+        _review_config(args),
+        once=args.once,
+        poll_interval=args.poll_interval,
+        worker_id=args.worker_id,
+        allow_unsafe_atime=args.allow_unsafe_atime,
+        exiftool=exiftool,
+        ffprobe=ffprobe,
+        ffmpeg=ffmpeg,
+    )
+    print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True, indent=2))
+    return 0 if result.failed == 0 else 1
+
+
+def command_preprocess(args: argparse.Namespace) -> int:
+    from .review_runtime import preprocess_vault
+
+    exiftool, ffprobe, ffmpeg = _resolve_tools(args)
+    result = preprocess_vault(
+        _review_config(args),
+        backfill=args.backfill,
+        exiftool=exiftool,
+        ffprobe=ffprobe,
+        ffmpeg=ffmpeg,
+        allow_unsafe_atime=args.allow_unsafe_atime,
+    )
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
+    return 0 if result["worker"]["failed"] == 0 else 1
+
+
+def command_inbox_scan(args: argparse.Namespace) -> int:
+    from .review_runtime import scan_inbox
+
+    exiftool, _ffprobe, _ffmpeg = _resolve_tools(args)
+    result = scan_inbox(
+        _review_config(args),
+        exiftool=exiftool,
+        allow_unsafe_atime=args.allow_unsafe_atime,
+        reuse_unchanged=args.reuse_unchanged,
+    )
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
     return 0
 
 
@@ -474,8 +544,59 @@ def build_parser() -> argparse.ArgumentParser:
         "--cache-root", type=_path, default=Path.cwd() / ".ui-cache",
         help="Preview cache outside the source and vault (default: project .ui-cache)",
     )
+    dashboard.add_argument(
+        "--derivative-root",
+        type=_path,
+        help="Prepared derivative root (default: <vault>/derivatives)",
+    )
     dashboard.add_argument("--no-open", dest="open_browser", action="store_false", help="Do not open a browser tab")
     dashboard.set_defaults(func=command_ui, open_browser=True)
+
+    review_ui = sub.add_parser("review-ui", help="Open the separate localhost media review application")
+    _add_common_vault(review_ui)
+    review_ui.add_argument("--inbox", type=_path, default=DEFAULT_INBOX_ROOT)
+    review_ui.add_argument("--derivative-root", type=_path, help="Prepared derivative root")
+    review_ui.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost", "::1"))
+    review_ui.add_argument("--port", type=int, default=8766)
+    review_ui.add_argument("--exiftool", help="Explicit ExifTool executable for the optional local worker")
+    review_ui.add_argument("--ffprobe", help="Explicit ffprobe executable for the optional local worker")
+    review_ui.add_argument("--ffmpeg", help="Explicit ffmpeg executable for the optional local worker")
+    review_ui.add_argument("--no-open", dest="open_browser", action="store_false", help="Do not open a browser tab")
+    review_ui.add_argument("--no-worker", dest="run_worker", action="store_false", help="Do not run the local job worker")
+    review_ui.set_defaults(func=command_review_ui, open_browser=True, run_worker=True)
+
+    worker = sub.add_parser("worker", help="Run durable reviewed-copy and preprocessing jobs")
+    _add_common_vault(worker)
+    worker.add_argument("--inbox", type=_path, default=DEFAULT_INBOX_ROOT)
+    worker.add_argument("--derivative-root", type=_path, help="Prepared derivative root")
+    worker.add_argument("--exiftool", help="Explicit ExifTool executable")
+    worker.add_argument("--ffprobe", help="Explicit ffprobe executable")
+    worker.add_argument("--ffmpeg", help="Explicit ffmpeg executable")
+    worker.add_argument("--worker-id", default="review-worker")
+    worker.add_argument("--poll-interval", type=float, default=2.0)
+    worker.add_argument("--once", action="store_true", help="Process at most one ready job and exit")
+    worker.add_argument("--allow-unsafe-atime", action="store_true", help=argparse.SUPPRESS)
+    worker.set_defaults(func=command_worker)
+
+    preprocess = sub.add_parser("preprocess", help="Run queued derivative/metadata jobs")
+    _add_common_vault(preprocess)
+    preprocess.add_argument("--inbox", type=_path, default=DEFAULT_INBOX_ROOT)
+    preprocess.add_argument("--derivative-root", type=_path, help="Prepared derivative root")
+    preprocess.add_argument("--exiftool", help="Explicit ExifTool executable")
+    preprocess.add_argument("--ffprobe", help="Explicit ffprobe executable")
+    preprocess.add_argument("--ffmpeg", help="Explicit ffmpeg executable")
+    preprocess.add_argument("--backfill", action="store_true", help="Enqueue every ready asset before running")
+    preprocess.add_argument("--allow-unsafe-atime", action="store_true", help=argparse.SUPPRESS)
+    preprocess.set_defaults(func=command_preprocess)
+
+    inbox_scan = sub.add_parser("inbox-scan", help="Discover top-level inbox batches and enqueue review previews")
+    _add_common_vault(inbox_scan)
+    inbox_scan.add_argument("--inbox", type=_path, default=DEFAULT_INBOX_ROOT)
+    inbox_scan.add_argument("--derivative-root", type=_path, help="Prepared derivative root")
+    inbox_scan.add_argument("--exiftool", help="Explicit ExifTool executable")
+    inbox_scan.add_argument("--reuse-unchanged", action="store_true", help="Reuse unchanged manifest observations")
+    inbox_scan.add_argument("--allow-unsafe-atime", action="store_true", help=argparse.SUPPRESS)
+    inbox_scan.set_defaults(func=command_inbox_scan)
 
     rebuild = sub.add_parser("rebuild-index", help="Build a new recovery SQLite index from sidecars and objects")
     _add_common_vault(rebuild)

@@ -17,6 +17,7 @@ class WorkerLimits:
     total_workers: int = 2
     media_io_workers: int = 1
     analysis_workers: int = 1
+    backfill_batch_size: int = 32
 
     def __post_init__(self) -> None:
         if self.total_workers < 1:
@@ -25,6 +26,8 @@ class WorkerLimits:
             raise ValueError("worker class limits must be at least 1")
         if max(self.media_io_workers, self.analysis_workers) > self.total_workers:
             raise ValueError("worker class limits may not exceed total_workers")
+        if not 1 <= self.backfill_batch_size <= 500:
+            raise ValueError("backfill_batch_size must be between 1 and 500")
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,11 @@ class AnalyzerVersions:
     extended_metadata: str = "extended-metadata-v1"
     quality_features: str = "quality-features-v1"
     materialized_view: str = "materialized-view-v1"
+    stack_features: str = "stack-features-v1"
+    stack_profile: str = "stack-profile-v1"
+    junk_signals: str = "junk-signals-v1"
+    junk_profile: str = "junk-profile-v1"
+    junk_calibration: str = "junk-calibration-v1"
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():

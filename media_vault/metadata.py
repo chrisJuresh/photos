@@ -223,9 +223,12 @@ def classify(path: Path, metadata: dict[str, Any], sniffed: str | None) -> Disco
 
 
 class ExifToolReader:
-    def __init__(self, executable: Path, temp_dir: Path):
+    def __init__(self, executable: Path, temp_dir: Path, *, timeout_seconds: float = 180.0):
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
         self.executable = executable
         self.temp_dir = temp_dir
+        self.timeout_seconds = timeout_seconds
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def read_batch(self, paths: list[Path]) -> list[dict[str, Any]]:
@@ -249,7 +252,11 @@ class ExifToolReader:
                 "-InternalSerialNumber", "-CameraSerialNumber", "-LensModel", "-LensType", "-LensID",
                 "-Orientation", "-Rotation", "-Duration", "-MediaDuration", "-TrackDuration",
                 "-VideoCodec", "-CompressorID", "-CompressorName", "-CodecID", "-AudioCodec",
-                "-AudioFormat", "-AudioFormatVersion", "-Warning", "-Error", "-@", str(argfile),
+                "-AudioFormat", "-AudioFormatVersion", "-GPSLatitude", "-GPSLatitudeRef",
+                "-GPSLongitude", "-GPSLongitudeRef", "-GPSHPositioningError", "-ISO", "-FNumber",
+                "-Aperture", "-ExposureTime", "-ShutterSpeed", "-FocalLength", "-ExposureCompensation",
+                "-Software", "-CreatorTool", "-ProcessingSoftware", "-History", "-DerivedFrom",
+                "-DocumentAncestors", "-Warning", "-Error", "-@", str(argfile),
             ]
             proc = subprocess.run(
                 command,
@@ -258,6 +265,7 @@ class ExifToolReader:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=self.timeout_seconds,
             )
             try:
                 values = json.loads(proc.stdout or "[]")

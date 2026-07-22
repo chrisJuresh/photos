@@ -263,6 +263,22 @@ def windows_last_access_policy() -> dict[str, Any]:
     return result
 
 
+def assert_source_read_policy(allow_unsafe_atime: bool) -> dict[str, Any]:
+    """Apply the repository's read-only source access-time guard.
+
+    The explicit waiver is limited to access timestamps. It does not relax any
+    other source-content, metadata, naming, attribute, or directory-entry rule.
+    """
+    policy = windows_last_access_policy()
+    if os.name == "nt" and policy.get("safe") is not True and not allow_unsafe_atime:
+        raise RuntimeError(
+            "Windows last-access updates are not confirmed disabled. Reading the source could alter access "
+            "timestamps, so this run is refused. Correct the filesystem policy; do not bypass this for an "
+            "immutable source. Evidence: " + json_text(policy)
+        )
+    return policy
+
+
 def disk_usage_for(path: Path) -> shutil._ntuple_diskusage:
     probe = path
     while not probe.exists() and probe.parent != probe:

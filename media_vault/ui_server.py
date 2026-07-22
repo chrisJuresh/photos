@@ -5,8 +5,6 @@ import json
 import os
 import shutil
 import sqlite3
-import subprocess
-import tempfile
 import threading
 import webbrowser
 from dataclasses import dataclass
@@ -17,10 +15,8 @@ from typing import Any, Iterator
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageOps
-
 from . import __version__
-from .core import VaultLayout, executable_path, process_is_alive
+from .core import VaultLayout, process_is_alive
 
 
 UI_API_VERSION = 1
@@ -97,10 +93,41 @@ def _latest_log_activity(layout: VaultLayout, progress: dict[str, Any] | None) -
         return None
 
 
+def _known_immutable_roots(layout: VaultLayout) -> tuple[Path, ...]:
+    if not layout.database.is_file():
+        return ()
+    uri = f"file:{layout.database.as_posix()}?mode=ro"
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=3)
+        conn.execute("PRAGMA query_only=ON")
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('source_roots','import_batches')"
+            ).fetchall()
+        }
+        values: set[str] = set()
+        if "source_roots" in tables:
+            values.update(row[0] for row in conn.execute("SELECT path_text FROM source_roots").fetchall())
+        if "import_batches" in tables:
+            values.update(
+                value
+                for row in conn.execute("SELECT inbox_root_text,batch_root_text FROM import_batches").fetchall()
+                for value in row
+            )
+        return tuple(Path(value) for value in sorted(values))
+    except sqlite3.Error as exc:
+        raise ValueError(f"Cannot validate dashboard storage boundaries: {exc}") from exc
+    finally:
+        if "conn" in locals():
+            conn.close()
+
+
 @dataclass(frozen=True)
 class DashboardState:
     layout: VaultLayout
     cache_root: Path
+    derivative_root: Path
 
     @property
     def previews(self) -> Path:
@@ -125,102 +152,76 @@ class DashboardState:
                 conn.close()
 
 
-def _asset_source_path(state: DashboardState, conn: sqlite3.Connection, asset_id: str) -> tuple[Path, dict[str, Any]]:
-    asset = conn.execute("SELECT * FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
+def _prepared_preview(
+    state: DashboardState,
+    conn: sqlite3.Connection,
+    asset_id: str,
+) -> tuple[Path | None, str | None, str]:
+    asset = conn.execute("SELECT 1 FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
     if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
-    if asset["object_status"] == "verified":
-        object_path = state.layout.root / Path(asset["object_relpath"])
-        if object_path.is_file():
-            return object_path, _row(asset) or {}
-    source = conn.execute(
-        """SELECT sf.path_text FROM asset_sources aus
-           JOIN source_versions sv ON sv.source_version_id=aus.source_version_id
-           JOIN source_files sf ON sf.source_file_id=sv.source_file_id
-           WHERE aus.asset_id=? AND sf.present=1
-           ORDER BY aus.is_initial_representative DESC,sv.source_version_id DESC LIMIT 1""",
-        (asset_id,),
+    table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='derivatives'"
     ).fetchone()
-    if source is None or not Path(source["path_text"]).is_file():
-        raise HTTPException(status_code=404, detail="No currently readable source or destination object")
-    return Path(source["path_text"]), _row(asset) or {}
+    states: list[str] = []
+    if table is not None:
+        rows = conn.execute(
+            """SELECT status,mime_type,checksum_sha256,byte_size,file_mtime_ns,relative_path_text,long_edge
+               FROM derivatives WHERE subject_type='asset' AND subject_id=? AND is_current=1
+                 AND derivative_kind IN ('thumbnail','detail')
+               ORDER BY CASE WHEN long_edge=1536 THEN 0 WHEN long_edge=768 THEN 1
+                             WHEN long_edge=2560 THEN 2 ELSE 3 END,derivative_id""",
+            (asset_id,),
+        ).fetchall()
+        for row in rows:
+            states.append(str(row["status"]))
+            if (
+                row["status"] != "ready"
+                or not row["relative_path_text"]
+                or not row["checksum_sha256"]
+                or row["byte_size"] is None
+                or row["file_mtime_ns"] is None
+            ):
+                continue
+            path = state.derivative_root / Path(row["relative_path_text"])
+            if (
+                _path_within(path, state.derivative_root)
+                and path.is_file()
+                and path.stat().st_size == int(row["byte_size"])
+                and path.stat().st_mtime_ns == int(row["file_mtime_ns"])
+            ):
+                return path, row["mime_type"] or "image/webp", "ready"
+    legacy = state.previews / f"{asset_id}.jpg"
+    if legacy.is_file():
+        return legacy, "image/jpeg", "ready_legacy_cache"
+    if any(value in {"queued", "processing"} for value in states):
+        return None, None, "preparing"
+    return None, None, "unavailable"
 
 
-def _image_preview(source: Path, target: Path) -> None:
-    Image.MAX_IMAGE_PIXELS = 100_000_000
-    with Image.open(source) as opened:
-        oriented = ImageOps.exif_transpose(opened)
-        oriented.thumbnail((1280, 960), Image.Resampling.LANCZOS)
-        converted = oriented.convert("RGB")
-        converted.save(target, format="JPEG", quality=87, optimize=True)
-
-
-def _raw_preview(exiftool: Path, source: Path, target: Path) -> bool:
-    for tag in ("-PreviewImage", "-JpgFromRaw", "-ThumbnailImage"):
-        proc = subprocess.run(
-            [str(exiftool), "-b", tag, str(source)],
-            capture_output=True,
-            check=False,
-            timeout=120,
-        )
-        if proc.returncode == 0 and proc.stdout.startswith(b"\xff\xd8"):
-            target.write_bytes(proc.stdout)
-            return True
-    return False
-
-
-def _video_preview(ffmpeg: Path, source: Path, target: Path) -> None:
-    command = [
-        str(ffmpeg), "-v", "error", "-ss", "1", "-i", str(source), "-frames:v", "1",
-        "-vf", "scale=1280:960:force_original_aspect_ratio=decrease", "-q:v", "3", "-y", str(target),
-    ]
-    proc = subprocess.run(command, capture_output=True, check=False, timeout=180)
-    if proc.returncode != 0 or not target.exists():
-        raise RuntimeError(proc.stderr.decode("utf-8", "replace")[:1000] or "FFmpeg produced no frame")
-
-
-def _create_preview(state: DashboardState, asset_id: str) -> Path:
-    state.previews.mkdir(parents=True, exist_ok=True)
-    target = state.previews / f"{asset_id}.jpg"
-    if target.is_file():
-        return target
-    with state.db() as conn:
-        source, asset = _asset_source_path(state, conn, asset_id)
-    fd, raw_temp = tempfile.mkstemp(prefix=f"{asset_id}.", suffix=".tmp.jpg", dir=state.previews)
-    os.close(fd)
-    temp = Path(raw_temp)
-    with contextlib.suppress(FileNotFoundError):
-        temp.unlink()
-    try:
-        kind = asset.get("media_kind")
-        if kind == "video":
-            ffmpeg = executable_path("ffmpeg")
-            if ffmpeg is None:
-                raise RuntimeError("FFmpeg is unavailable")
-            _video_preview(ffmpeg, source, temp)
-        elif kind == "raw_image":
-            exiftool = executable_path("exiftool")
-            if exiftool is None or not _raw_preview(exiftool, source, temp):
-                _image_preview(source, temp)
-        else:
-            _image_preview(source, temp)
-        os.replace(temp, target)
-        return target
-    except Exception as exc:
-        with contextlib.suppress(FileNotFoundError):
-            temp.unlink()
-        raise HTTPException(status_code=422, detail=f"Preview unavailable: {type(exc).__name__}: {exc}") from exc
-
-
-def create_dashboard_app(vault: Path, cache_root: Path | None = None) -> FastAPI:
+def create_dashboard_app(
+    vault: Path,
+    cache_root: Path | None = None,
+    *,
+    derivative_root: Path | None = None,
+) -> FastAPI:
     layout = VaultLayout(vault.absolute())
     cache = (cache_root or (Path.cwd() / ".ui-cache")).absolute()
+    derivatives = (derivative_root or (layout.root / "derivatives")).absolute()
     if _path_within(cache, layout.root):
         raise ValueError("The dashboard cache must be outside the destination vault")
+    if _path_within(derivatives, layout.objects) or _path_within(layout.objects, derivatives):
+        raise ValueError("Prepared derivatives must remain separate from canonical objects")
     latest = _latest_progress(layout)
-    if latest and latest.get("source") and _path_within(cache, Path(latest["source"])):
-        raise ValueError("The dashboard cache must be outside the immutable source")
-    state = DashboardState(layout, cache)
+    immutable_roots = set(_known_immutable_roots(layout))
+    if latest and latest.get("source"):
+        immutable_roots.add(Path(latest["source"]))
+    for immutable_root in immutable_roots:
+        if _path_within(cache, immutable_root):
+            raise ValueError("The dashboard cache must be outside every immutable source")
+        if _path_within(derivatives, immutable_root) or _path_within(immutable_root, derivatives):
+            raise ValueError("Prepared derivatives must remain separate from every immutable source")
+    state = DashboardState(layout, cache, derivatives)
     app = FastAPI(
         title="Immutable Media Vault",
         version=__version__,
@@ -237,9 +238,12 @@ def create_dashboard_app(vault: Path, cache_root: Path | None = None) -> FastAPI
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Cache-Control"] = (
-            "no-store" if request.url.path.startswith("/api/") or request.url.path == "/" else "public, max-age=300"
-        )
+        if "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = (
+                "no-store"
+                if request.url.path.startswith("/api/") or request.url.path == "/"
+                else "public, max-age=300"
+            )
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
@@ -472,6 +476,7 @@ def create_dashboard_app(vault: Path, cache_root: Path | None = None) -> FastAPI
             warnings = conn.execute(
                 "SELECT * FROM warnings WHERE asset_id=? ORDER BY warning_id DESC LIMIT 500", (asset_id,)
             ).fetchall()
+            _preview_path, _preview_mime, preview_state = _prepared_preview(state, conn, asset_id)
         return {
             "asset": _row(asset),
             "exact_group": _row(exact),
@@ -481,12 +486,27 @@ def create_dashboard_app(vault: Path, cache_root: Path | None = None) -> FastAPI
             "raw_jpeg_groups": _rows(raw_groups),
             "warnings": _rows(warnings),
             "preview_url": f"/api/assets/{asset_id}/preview",
+            "preview_state": preview_state,
         }
 
     @app.get("/api/assets/{asset_id}/preview")
-    def asset_preview(asset_id: str) -> FileResponse:
-        path = _create_preview(state, asset_id)
-        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    def asset_preview(asset_id: str) -> Response:
+        with state.db() as conn:
+            path, media_type, preview_state = _prepared_preview(state, conn, asset_id)
+        if path is None:
+            status = 425 if preview_state == "preparing" else 404
+            return JSONResponse(
+                status_code=status,
+                content={
+                    "detail": "Preview is being prepared" if status == 425 else "Preview is unavailable",
+                    "preview_state": preview_state,
+                },
+            )
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @app.get("/api/duplicates")
     def duplicates(limit: int = Query(50, ge=1, le=100), cursor: str | None = None) -> dict[str, Any]:
@@ -643,13 +663,14 @@ def serve_dashboard(
     host: str = "127.0.0.1",
     port: int = 8765,
     cache_root: Path | None = None,
+    derivative_root: Path | None = None,
     open_browser: bool = True,
 ) -> None:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("The read-only dashboard may bind only to localhost")
     import uvicorn
 
-    app = create_dashboard_app(vault, cache_root)
+    app = create_dashboard_app(vault, cache_root, derivative_root=derivative_root)
     url = f"http://{host}:{port}/"
     print(f"Read-only Media Vault dashboard: {url}")
     print("Press Ctrl+C to stop the dashboard. This does not stop the scanner.")

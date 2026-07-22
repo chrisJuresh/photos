@@ -12,6 +12,7 @@ dependencies = [
   "fastapi==0.139.2",
   "Pillow==12.3.0",
   "ImageHash==4.3.2",
+  "numpy==2.5.1",
   "uvicorn==0.51.0",
 ]
 
@@ -31,3 +32,10 @@ addopts = "-ra"
 
 [tool.setuptools.packages.find]
 include = ["media_vault*"]
+
+[tool.setuptools.package-data]
+media_vault = [
+  "ui/*",
+  "review_ui_dist/*",
+  "review_ui_dist/**/*",
+]

@@ -30,6 +30,13 @@ synthetic-work/
 *.tmp
 *.partial
 
+# Frontend dependencies and generated test output
+review_ui/node_modules/
+review_ui/.svelte-kit/
+review_ui/.playwright-output/
+review_ui/test-results/
+review_ui/playwright-report/
+
 # Vault state, canonical objects, and generated derivatives
 objects/
 records/

@@ -1,0 +1,1 @@
+function e(e){typeof document>`u`||(document.documentElement.dataset.theme=e)}export{e as t};

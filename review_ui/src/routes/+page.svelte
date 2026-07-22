@@ -1,0 +1,61 @@
+<svelte:head>
+  <title>Media Vault Review</title>
+  <meta name="description" content="Private, local media review workspace" />
+</svelte:head>
+
+<header class="page-header">
+  <p class="eyebrow">Local review workspace</p>
+  <h1>Your media, prepared for careful review.</h1>
+  <p class="lede">This independent application uses persisted metadata and ready derivatives. Original source files and canonical vault objects remain immutable.</p>
+</header>
+
+<section class="route-grid" aria-label="Application areas">
+  <a class="route-card" href="/imports/">
+    <span class="card-kicker">Inbox</span>
+    <h2>Reviewed imports</h2>
+    <p>Discover, review, approve, control, and audit durable inbox batches without changing source media.</p>
+    <span class="card-action">Open route <span aria-hidden="true">→</span></span>
+  </a>
+  <a class="route-card" href="/library/">
+    <span class="card-kicker">Vault</span>
+    <h2>Library</h2>
+    <p>Browse logical photos through bounded virtualized pages, persisted derivatives, saved views, and metadata-only actions.</p>
+    <span class="card-action">Open route <span aria-hidden="true">→</span></span>
+  </a>
+  <a class="route-card" href="/organize/">
+    <span class="card-kicker">Perspectives</span>
+    <h2>Organize</h2>
+    <p>Navigate persisted calendar, folder, equipment, and private offline map views over the same logical photos.</p>
+    <span class="card-action">Explore views <span aria-hidden="true">→</span></span>
+  </a>
+  <a class="route-card" href="/junk/">
+    <span class="card-kicker">Explainable signals</span>
+    <h2>Junk review</h2>
+    <p>Preview persisted reasons, protect favourites, record feedback, and choose a versioned profile without automatic actions.</p>
+    <span class="card-action">Review evidence <span aria-hidden="true">→</span></span>
+  </a>
+  <a class="route-card" href="/bulk-reject/">
+    <span class="card-kicker">Reversible metadata</span>
+    <h2>Bulk reject</h2>
+    <p>Brush or range-select prepared candidates, confirm warnings, reject metadata only, and undo the complete action.</p>
+    <span class="card-action">Open bulk review <span aria-hidden="true">→</span></span>
+  </a>
+  <a class="route-card" href="/settings/">
+    <span class="card-kicker">Preferences</span>
+    <h2>Workspace settings</h2>
+    <p>Theme, density, and saved workspace views are stored in the vault database.</p>
+    <span class="card-action">Configure <span aria-hidden="true">→</span></span>
+  </a>
+</section>
+
+<section class="principles" aria-labelledby="principles-title">
+  <div>
+    <p class="eyebrow">Permanent boundary</p>
+    <h2 id="principles-title">Review changes metadata, never media.</h2>
+  </div>
+  <ul>
+    <li><span aria-hidden="true">01</span> Originals and canonical objects are immutable.</li>
+    <li><span aria-hidden="true">02</span> Media work runs in durable background jobs.</li>
+    <li><span aria-hidden="true">03</span> The application stays private and localhost-only.</li>
+  </ul>
+</section>

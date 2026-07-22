@@ -101,6 +101,30 @@ def test_dashboard_rejects_cache_inside_vault(tmp_path: Path) -> None:
         create_dashboard_app(layout.root, layout.root / "dashboard-cache")
 
 
+def test_dashboard_rejects_derivatives_inside_known_immutable_source(tmp_path: Path) -> None:
+    layout = _synthetic_vault(tmp_path)
+    source = tmp_path / "immutable-source"
+    source.mkdir()
+    db = ManifestDB(layout.database)
+    try:
+        now = "2026-07-21T00:00:00Z"
+        db.execute(
+            """INSERT INTO source_roots(
+                   source_root_id,path_text,first_seen_at,last_seen_at
+               ) VALUES('source-test',?,?,?)""",
+            (str(source), now, now),
+        )
+        db.commit()
+    finally:
+        db.close()
+    with pytest.raises(ValueError, match="separate from every immutable source"):
+        create_dashboard_app(
+            layout.root,
+            tmp_path / "cache",
+            derivative_root=source / "generated",
+        )
+
+
 def test_process_liveness_handles_windows_missing_pid_shape() -> None:
     assert process_is_alive(os.getpid()) is True
     assert process_is_alive(-1) is False

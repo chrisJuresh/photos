@@ -26,6 +26,36 @@ from media_vault.db import (
 from media_vault.migrations import InsufficientMigrationSpaceError, migrate_vault
 
 
+STAGE8_TABLES = {
+    "calendar_buckets",
+    "calendar_bucket_items",
+    "folder_hierarchy_nodes",
+    "folder_hierarchy_items",
+    "equipment_rollups",
+    "equipment_rollup_items",
+    "map_entity_locations",
+    "map_unknown_location_items",
+    "map_clusters",
+    "map_cluster_items",
+}
+
+STAGE9_TABLES = {
+    "stack_feature_inputs",
+    "stack_candidate_edges",
+    "stack_profiles",
+    "stacks",
+    "stack_members",
+    "stack_cover_events",
+}
+
+STAGE10_TABLES = {
+    "junk_signals",
+    "junk_profiles",
+    "junk_effective_results",
+    "junk_feedback",
+}
+
+
 def _snapshot(root: Path) -> dict[str, tuple[int, int, int, int, str]]:
     result: dict[str, tuple[int, int, int, int, str]] = {}
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
@@ -67,6 +97,105 @@ def _create_v2(layout: VaultLayout) -> None:
         conn.close()
 
 
+def _create_v3(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=3)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v4(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=4)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v5(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v6(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=6)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v7(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=7)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v8(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=8)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v9(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=9)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v10(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
+def _create_v11(layout: VaultLayout) -> None:
+    layout.state.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(layout.database)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        initialize_manifest_connection(conn, target_version=11)
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
+
+
 def _read_version(path: Path) -> int:
     conn = sqlite3.connect(path)
     try:
@@ -79,9 +208,9 @@ def test_migrate_fresh_database_and_repeat_safely(protected_layout: VaultLayout)
     first = migrate_vault(protected_layout)
     assert first.previous_version is None
     assert first.schema_version == SCHEMA_VERSION
-    assert first.applied_migrations == (3,)
+    assert first.applied_migrations == (3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
     assert first.backup is None
-    assert first.validation == {"schema_version": 3, "integrity_check": "ok", "foreign_key_issues": 0}
+    assert first.validation == {"schema_version": SCHEMA_VERSION, "integrity_check": "ok", "foreign_key_issues": 0}
 
     second = migrate_vault(protected_layout)
     assert second.already_current is True
@@ -142,8 +271,8 @@ def test_v2_migration_creates_and_verifies_backup(protected_layout: VaultLayout)
     result = migrate_vault(protected_layout)
 
     assert result.previous_version == 2
-    assert result.schema_version == 3
-    assert result.applied_migrations == (3,)
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
     assert result.backup is not None
     backup = Path(result.backup.path)
     assert backup.is_file()
@@ -156,9 +285,388 @@ def test_v2_migration_creates_and_verifies_backup(protected_layout: VaultLayout)
 
     migrated = sqlite3.connect(protected_layout.database)
     try:
-        assert validate_manifest_connection(migrated, expected_version=3)["foreign_key_issues"] == 0
-        row = migrated.execute("SELECT version,name FROM schema_migrations").fetchone()
-        assert row == (3, "stage_1_ordered_migration_framework")
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+        rows = migrated.execute("SELECT version,name FROM schema_migrations ORDER BY version").fetchall()
+        assert rows == [
+            (3, "stage_1_ordered_migration_framework"),
+            (4, "stage_2_review_import_manifest"),
+            (5, "stage_3_reviewed_copy_telemetry"),
+            (6, "stage_4_preprocessing_derivatives_features"),
+            (7, "stage_5_review_application_foundation"),
+            (8, "stage_6_import_interface_materializations"),
+            (9, "stage_7_virtualized_library_browser"),
+            (10, "stage_8_alternate_organization_views"),
+            (11, "stage_9_similarity_stacks"),
+            (12, "stage_10_explainable_junk_review"),
+        ]
+    finally:
+        migrated.close()
+
+
+def test_v3_copy_migrates_through_stage_2_to_stage_7_schema(protected_layout: VaultLayout) -> None:
+    _create_v3(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 3
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=3)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        assert migrated.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='import_batches'"
+        ).fetchone() == (1,)
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v4_copy_migrates_through_stage_3_to_stage_7_schema(protected_layout: VaultLayout) -> None:
+    _create_v4(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 4
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=4)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        required = {
+            "import_batch_approvals",
+            "import_approval_items",
+            "background_job_attempts",
+            "import_item_copy_attempts",
+            "import_progress_samples",
+            "import_events",
+            "import_errors",
+            "legacy_import_history",
+            "derivatives",
+            "asset_features",
+            "asset_extended_metadata",
+            "user_preferences",
+            "saved_views",
+            "review_application_state",
+            "api_idempotency_records",
+            "import_manifest_views",
+            "import_manifest_view_items",
+            "facet_rollups",
+            "photo_entities",
+            "photo_entity_members",
+            "materialized_views",
+            "materialized_view_items",
+            "photo_user_state",
+            "photo_user_state_events",
+        } | STAGE8_TABLES | STAGE9_TABLES | STAGE10_TABLES
+        tables = {
+            row[0]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert required <= tables
+        assert STAGE10_TABLES <= tables
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v5_copy_migrates_through_stage_4_to_stage_7_schema(protected_layout: VaultLayout) -> None:
+    _create_v5(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 5
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (6, 7, 8, 9, 10, 11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=5)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        tables = {
+            row[0]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert {
+            "derivatives",
+            "asset_features",
+            "asset_extended_metadata",
+            "user_preferences",
+            "saved_views",
+            "review_application_state",
+            "api_idempotency_records",
+            "import_manifest_views",
+            "import_manifest_view_items",
+            "facet_rollups",
+            "photo_entities",
+            "photo_entity_members",
+            "materialized_views",
+            "materialized_view_items",
+            "photo_user_state",
+            "photo_user_state_events",
+        } | STAGE8_TABLES | STAGE9_TABLES | STAGE10_TABLES <= tables
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v6_copy_migrates_through_stage_5_to_stage_7_schema(protected_layout: VaultLayout) -> None:
+    _create_v6(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 6
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (7, 8, 9, 10, 11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=6)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        tables = {
+            row[0]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert {
+            "user_preferences",
+            "saved_views",
+            "review_application_state",
+            "api_idempotency_records",
+            "import_manifest_views",
+            "import_manifest_view_items",
+            "photo_entities",
+            "photo_entity_members",
+            "materialized_views",
+            "materialized_view_items",
+            "photo_user_state",
+            "photo_user_state_events",
+            "facet_rollups",
+        } | STAGE8_TABLES | STAGE9_TABLES | STAGE10_TABLES <= tables
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v7_copy_migrates_through_stage_6_to_stage_7_schema(protected_layout: VaultLayout) -> None:
+    _create_v7(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 7
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (8, 9, 10, 11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=7)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        tables = {
+            row[0]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert {
+            "import_manifest_views",
+            "import_manifest_view_items",
+            "photo_entities",
+            "photo_entity_members",
+            "materialized_views",
+            "materialized_view_items",
+            "photo_user_state",
+            "photo_user_state_events",
+            "facet_rollups",
+        } | STAGE8_TABLES | STAGE9_TABLES | STAGE10_TABLES <= tables
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v8_copy_migrates_through_stage_7_to_stage_8_schema(protected_layout: VaultLayout) -> None:
+    _create_v8(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 8
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (9, 10, 11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=8)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        tables = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert {
+            "photo_entities",
+            "photo_entity_members",
+            "materialized_views",
+            "materialized_view_items",
+            "photo_user_state",
+            "photo_user_state_events",
+            "facet_rollups",
+        } | STAGE8_TABLES <= tables
+        indexes = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        }
+        assert {
+            "idx_photo_entities_capture",
+            "idx_photo_entities_import",
+            "idx_photo_entities_filename",
+            "idx_photo_entities_height",
+            "idx_photo_user_state_favourite",
+            "idx_photo_user_state_rejected",
+            "idx_photo_user_state_rating",
+            "idx_materialized_views_ready",
+            "idx_materialized_view_items_entity",
+            "idx_facet_rollups_page",
+        } <= indexes
+        materialized_columns = {
+            row[1] for row in migrated.execute("PRAGMA table_info(materialized_views)").fetchall()
+        }
+        assert "state_generation" in materialized_columns
+        assert "map_clusters" in tables
+        assert STAGE9_TABLES <= tables
+        assert STAGE10_TABLES <= tables
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v9_copy_migrates_through_stage_8_to_stage_9_schema(protected_layout: VaultLayout) -> None:
+    _create_v9(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 9
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (10, 11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=9)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        tables = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert STAGE8_TABLES <= tables
+        indexes = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        }
+        assert {
+            "idx_calendar_buckets_month",
+            "idx_folder_hierarchy_children",
+            "idx_equipment_rollups_page",
+            "idx_map_clusters_viewport",
+            "idx_map_cluster_items_entity",
+        } <= indexes
+        assert STAGE9_TABLES <= tables
+        assert STAGE10_TABLES <= tables
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v10_copy_migrates_to_stage_9_schema(protected_layout: VaultLayout) -> None:
+    _create_v10(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 10
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (11, 12)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=10)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        tables = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        indexes = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        }
+        assert STAGE9_TABLES <= tables
+        assert {
+            "idx_stack_inputs_phash_bucket",
+            "idx_stack_inputs_capture",
+            "idx_stack_candidate_edges_left",
+            "idx_stack_profiles_ready",
+            "idx_stacks_page",
+            "idx_stack_members_entity",
+        } <= indexes
+        assert STAGE10_TABLES <= tables
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
+    finally:
+        migrated.close()
+
+
+def test_v11_copy_migrates_to_stage_10_schema(protected_layout: VaultLayout) -> None:
+    _create_v11(protected_layout)
+    result = migrate_vault(protected_layout)
+
+    assert result.previous_version == 11
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.applied_migrations == (12,)
+    assert result.backup is not None
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        assert validate_manifest_connection(backup, expected_version=11)["integrity_check"] == "ok"
+    finally:
+        backup.close()
+    migrated = sqlite3.connect(protected_layout.database)
+    try:
+        tables = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        indexes = {
+            row[0]
+            for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+        }
+        assert STAGE10_TABLES <= tables
+        assert {
+            "idx_junk_signals_entity",
+            "idx_junk_signals_reason_confidence",
+            "idx_junk_profiles_ready",
+            "idx_junk_results_hidden_page",
+            "idx_junk_results_entity",
+            "idx_junk_feedback_pending",
+        } <= indexes
+        assert validate_manifest_connection(migrated, expected_version=SCHEMA_VERSION)["foreign_key_issues"] == 0
     finally:
         migrated.close()
 
@@ -171,7 +679,7 @@ def test_migrate_cli_is_explicit_and_reports_result(
     assert main(["migrate", "--vault", str(protected_layout.root)]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["previous_version"] == 2
-    assert output["schema_version"] == 3
+    assert output["schema_version"] == SCHEMA_VERSION
     assert output["backup"]["integrity_check"] == "ok"
 
 
@@ -256,7 +764,18 @@ def test_failing_or_interrupted_migration_rolls_back(
     with pytest.raises(type(failure), match="synthetic failure" if isinstance(failure, RuntimeError) else None):
         migrate_vault(
             protected_layout,
-            migrations=(Migration(3, "synthetic_failure", fail_after_ddl),),
+            migrations=(
+                Migration(3, "synthetic_failure", fail_after_ddl),
+                Migration(4, "unreached", lambda _conn: None),
+                Migration(5, "unreached_stage_3", lambda _conn: None),
+                Migration(6, "unreached_stage_4", lambda _conn: None),
+                Migration(7, "unreached_stage_5", lambda _conn: None),
+                Migration(8, "unreached_stage_6", lambda _conn: None),
+                Migration(9, "unreached_stage_7", lambda _conn: None),
+                Migration(10, "unreached_stage_8", lambda _conn: None),
+                Migration(11, "unreached_stage_9", lambda _conn: None),
+                Migration(12, "unreached_stage_10", lambda _conn: None),
+            ),
         )
 
     conn = sqlite3.connect(protected_layout.database)
