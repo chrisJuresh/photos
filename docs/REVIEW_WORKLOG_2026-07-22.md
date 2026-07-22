@@ -62,8 +62,8 @@ This log records the documentation-only review requested on 2026-07-22. During t
 - [x] Complete independent storage-safety, API/UI, and operations/test review passes.
 - [x] Produce the architecture review, complete findings register, ranked action register, backup guide, user guide, release gates, and README revision.
 - [x] Reconcile every documentation link/status claim and run Markdown/repository final checks.
-- [ ] Commit and push the documentation-only review.
-- [ ] Open the preserved branch as a draft pull request, not a release-ready PR.
+- [x] Commit and push the documentation-only review.
+- [x] Open the preserved branch as a draft pull request, not a release-ready PR.
 
 ## Publishing decision
 
@@ -148,3 +148,11 @@ Final documentation checks:
 - `git diff --check` found no whitespace errors; Git emitted only the repository's expected LF-to-CRLF working-copy notices.
 
 The application suites were not rerun after the snapshot commit because every subsequent change is Markdown-only. The full synthetic baseline recorded above remains the code validation evidence for `d49e621`.
+
+### Documentation publication
+
+- Committed the 27-file Markdown-only review as `b29c83b` (`Document full safety and architecture review`).
+- Pushed `b29c83b` to `origin/codex/wip-review-interface-audit`.
+- Opened draft pull request [#1](https://github.com/chrisJuresh/photos/pull/1), titled `Preserve review interface WIP and document safety audit`, against `main`.
+- Kept the pull request in draft state. No merge, release, live-vault operation, or remote media backup was performed.
+- This publication record is the final Markdown-only follow-up on the same branch and pull request.
