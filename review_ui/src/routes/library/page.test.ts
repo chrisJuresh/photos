@@ -13,12 +13,13 @@ vi.mock('$lib/api', async (importOriginal) => {
   return { ...actual, reviewApi: api };
 });
 
+import { ApiClientError } from '$lib/api';
 import Page from './+page.svelte';
 
 function envelope<T>(data: T) {
   return {
     meta: { api_version: 'v1', schema_version: 11, generation: 4, request_id: 'request' },
-    data, page: { limit: 120, next_cursor: null }, job: null, unavailable: [], error: null
+    data, page: { limit: 60, next_cursor: null }, job: null, unavailable: [], error: null
   };
 }
 
@@ -44,16 +45,16 @@ describe('library workspace', () => {
     render(Page);
     await waitFor(() => expect(api.library).toHaveBeenCalled());
     expect(api.library).toHaveBeenCalledWith(expect.objectContaining({
-      rejected: 'hide', sort: ['capture_time:desc'], limit: 120
+      rejected: 'hide', sort: ['capture_time:desc'], limit: 60
     }));
     expect(screen.getByRole('heading', { name: 'Photo browser' })).toBeInTheDocument();
-    expect(await screen.findByText(/at most 120 entities held in memory/)).toBeInTheDocument();
+    expect(await screen.findByText(/at most 60 entities held in memory/)).toBeInTheDocument();
 
     await fireEvent.change(screen.getByLabelText('Primary sort'), { target: { value: 'quality:desc' } });
     await fireEvent.change(screen.getByLabelText('Secondary sort'), { target: { value: 'filename:asc' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Apply view' }));
     await waitFor(() => expect(api.library).toHaveBeenLastCalledWith(expect.objectContaining({
-      rejected: 'hide', sort: ['quality:desc', 'filename:asc'], limit: 120
+      rejected: 'hide', sort: ['quality:desc', 'filename:asc'], limit: 60
     })));
     await waitFor(() => expect(api.putPreference).toHaveBeenCalled());
   });
@@ -62,9 +63,24 @@ describe('library workspace', () => {
     window.history.replaceState({}, '', '/library/?organization_kind=calendar&organization_key=date%3A2024-01-02');
     render(Page);
     await waitFor(() => expect(api.library).toHaveBeenCalledWith(expect.objectContaining({
-      organizationKind: 'calendar', organizationKey: 'date:2024-01-02', limit: 120
+      organizationKind: 'calendar', organizationKey: 'date:2024-01-02', limit: 60
     })));
     expect(await screen.findByText('Linked calendar view')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to organization views' })).toHaveAttribute('href', '/organize/');
+  });
+
+  it('shows a retryable load failure instead of calling it an empty persisted view', async () => {
+    api.library.mockRejectedValueOnce(new ApiClientError(503, {
+      code: 'query_budget_exceeded',
+      message: 'The request exceeded its bounded SQLite query budget',
+      details: {}
+    }));
+
+    render(Page);
+
+    expect(await screen.findByRole('heading', { name: 'This library page could not load' })).toBeInTheDocument();
+    expect(screen.queryByText('No logical photos match this persisted view.')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('No logical photos match this persisted view.')).toBeInTheDocument();
   });
 });

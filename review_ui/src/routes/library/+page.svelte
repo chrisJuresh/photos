@@ -36,6 +36,7 @@
     grayscale: false,
     query: { rejected: 'hide', sort: ['capture_time:desc'] }
   };
+  const libraryPageSize = 60;
   const facetNames = ['media_kind', 'format', 'camera', 'lens', 'folder'];
 
   let items = $state<LibraryEntity[]>([]);
@@ -56,6 +57,7 @@
   let stackRestMembers = $state<LibraryEntity[]>([]);
   let inspectorLoading = $state(false);
   let loading = $state(true);
+  let loadError = $state<string | null>(null);
   let busy = $state(false);
   let preparing = $state<LibraryView | null>(null);
   let message = $state('Loading the persisted library catalog…');
@@ -87,8 +89,9 @@
 
   async function loadLibrary(cursor = cursorStack[pageIndex]) {
     loading = true;
+    loadError = null;
     try {
-      const response = await reviewApi.library({ ...query, limit: 120, cursor });
+      const response = await reviewApi.library({ ...query, limit: libraryPageSize, cursor });
       generation = response.meta.generation;
       items = response.data?.items ?? [];
       nextCursor = response.page?.next_cursor ?? null;
@@ -108,7 +111,8 @@
         void loadStackFoundation();
       }
     } catch (error) {
-      message = errorMessage(error, 'The library is unavailable.');
+      loadError = errorMessage(error, 'The library is unavailable.');
+      message = loadError;
     } finally {
       loading = false;
     }
@@ -588,7 +592,13 @@
       </div>
     </div>
 
-    {#if preparing && items.length === 0}
+    {#if loadError}
+      <section class="preparing-view library-load-error" aria-labelledby="library-load-error-title">
+        <h2 id="library-load-error-title">This library page could not load</h2>
+        <p>{loadError}</p>
+        <button type="button" disabled={loading} onclick={() => void loadLibrary(cursorStack[pageIndex])}>Try again</button>
+      </section>
+    {:else if preparing && items.length === 0}
       <section class="preparing-view" aria-labelledby="library-preparing-title">
         <h2 id="library-preparing-title">Prepared view in progress</h2>
         <p>{preparing.status} · job {preparing.job_id}. Grouping, sorting, and facets run in the background from persisted metadata.</p>
@@ -615,7 +625,7 @@
 
     <nav class="library-paging" aria-label="Library pages">
       <button type="button" disabled={pageIndex === 0 || loading} onclick={() => void previousPage()}>Previous page</button>
-      <span>Page {pageIndex + 1} · at most 120 entities held in memory</span>
+      <span>Page {pageIndex + 1} · at most {libraryPageSize} entities held in memory</span>
       <button type="button" disabled={!nextCursor || loading} onclick={() => void nextPage()}>Next page</button>
     </nav>
 

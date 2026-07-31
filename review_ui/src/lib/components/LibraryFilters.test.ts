@@ -10,11 +10,15 @@ describe('LibraryFilters', () => {
       density: 220,
       facets: {
         media_kind: [{ key: 'image', label: 'Images', count: 12 }],
-        format: [], camera: [], lens: [], folder: []
+        format: [], camera: [], lens: [],
+        folder: [{ key: 'family\\holidays', label: 'family\\holidays', count: 8 }]
       },
       onApply
     });
     expect(screen.getByLabelText('Rejected')).toHaveValue('hide');
+    expect(screen.getByLabelText('Catalogued folder')).toHaveValue('');
+    expect(screen.getByText(/Apply view remembers it in SQLite/)).toBeInTheDocument();
+    await fireEvent.change(screen.getByLabelText('Catalogued folder'), { target: { value: 'family\\holidays' } });
     await fireEvent.change(screen.getByLabelText('Media'), { target: { value: 'image' } });
     await fireEvent.change(screen.getByLabelText('Primary sort'), { target: { value: 'quality:desc' } });
     await fireEvent.change(screen.getByLabelText('Secondary sort'), { target: { value: 'filename:asc' } });
@@ -28,9 +32,29 @@ describe('LibraryFilters', () => {
       grayscale: true,
       query: expect.objectContaining({
         mediaKind: ['image'],
+        folder: ['family\\holidays'],
         rejected: 'hide',
         sort: ['quality:desc', 'filename:asc']
       })
     }));
+  });
+
+  it('restores a saved folder even when it is outside the first bounded facet page', async () => {
+    const view = render(LibraryFilters, {
+      query: { rejected: 'hide', sort: ['capture_time:desc'] },
+      facets: { media_kind: [], format: [], camera: [], lens: [], folder: [] }
+    });
+
+    await view.rerender({
+      query: {
+        rejected: 'hide',
+        sort: ['capture_time:desc'],
+        folder: ['archive\\family']
+      },
+      facets: { media_kind: [], format: [], camera: [], lens: [], folder: [] }
+    });
+
+    expect(screen.getByLabelText('Catalogued folder')).toHaveValue('archive\\family');
+    expect(screen.getByRole('option', { name: 'archive\\family (saved selection)' })).toBeInTheDocument();
   });
 });

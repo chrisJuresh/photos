@@ -26,6 +26,26 @@
   let primarySort = query.sort?.[0] ?? 'capture_time:desc';
   let secondarySort = query.sort?.[1] ?? '';
   let randomSeed = query.randomSeed ?? 'media-vault-default';
+  let previousQuery = query;
+
+  $: if (query !== previousQuery) {
+    previousQuery = query;
+    search = query.search ?? '';
+    mediaKind = query.mediaKind?.[0] ?? '';
+    format = query.format?.[0] ?? '';
+    camera = query.camera?.[0] ?? '';
+    lens = query.lens?.[0] ?? '';
+    folder = query.folder?.[0] ?? '';
+    rejected = query.rejected ?? 'hide';
+    favourite = query.favourite === true ? 'only' : 'include';
+    ratingMin = query.ratingMin ?? 0;
+    primarySort = query.sort?.[0] ?? 'capture_time:desc';
+    secondarySort = query.sort?.[1] ?? '';
+    randomSeed = query.randomSeed ?? 'media-vault-default';
+  }
+
+  $: folderOptions = facets.folder ?? [];
+  $: savedFolderIsListed = !folder || folderOptions.some((item) => item.key === folder);
 
   const sortOptions = [
     ['capture_time', 'Capture time'],
@@ -72,9 +92,17 @@
 
 <form class="library-controls" aria-label="Library filters and display" onsubmit={(event) => { event.preventDefault(); apply(); }}>
   <div class="library-control-grid">
-    <label class="search-control">Search persisted paths
-      <input bind:value={search} maxlength="256" placeholder="Filename or stored path" disabled={disabled} />
-    </label>
+    <div class="control-field search-control">
+      <label for="catalogued-folder">Catalogued folder</label>
+      <select id="catalogued-folder" bind:value={folder} disabled={disabled} aria-describedby="catalogued-folder-help">
+        <option value="">All catalogued folders</option>
+        {#if folder && !savedFolderIsListed}<option value={folder}>{folder} (saved selection)</option>{/if}
+        {#each folderOptions as item}<option value={item.key}>{item.label} ({item.count})</option>{/each}
+      </select>
+      <span class="control-help" id="catalogued-folder-help">
+        Choose a folder already recorded in the vault. Apply view remembers it in SQLite.
+      </span>
+    </div>
     <label>Media
       <select bind:value={mediaKind} disabled={disabled}>
         <option value="">All media</option>
@@ -99,11 +127,8 @@
         {#each facets.lens ?? [] as item}<option value={item.key}>{item.label} ({item.count})</option>{/each}
       </select>
     </label>
-    <label>Folder
-      <select bind:value={folder} disabled={disabled}>
-        <option value="">All folders</option>
-        {#each facets.folder ?? [] as item}<option value={item.key}>{item.label} ({item.count})</option>{/each}
-      </select>
+    <label>Filename or path contains
+      <input bind:value={search} maxlength="256" placeholder="Optional text filter" disabled={disabled} />
     </label>
     <label>Rejected
       <select bind:value={rejected} disabled={disabled}>
