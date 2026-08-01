@@ -31,7 +31,7 @@ Set the effort level in your client before sending. The ladder used here:
 |---|---|---|
 | `low` | Mechanical, fully specified, nothing to decide | 0 ✅, 8 |
 | `medium` | Normal implementation against a clear spec | 1 ✅, 2 ✅, 3 ✅, 5, 11, 13b |
-| `high` | Correctness-critical, or a design decision inside it | 4, 6, 7, 9, 10, 12, 13, 15, 16 |
+| `high` | Correctness-critical, or a design decision inside it | 4 ✅, 6, 7, 9, 10, 12, 13, 15, 16 |
 | `xhigh` | Irreversible, operating on data with no second copy | 14 |
 
 Effort is how hard one pass thinks. Plan mode, background and **ultracode** are execution
@@ -523,6 +523,40 @@ hold, the masked-shape counts sum to the full row count, the twenty spot-checks 
 every adopted shape has a reported EXIF agreement rate, and the independent recompute diffs
 clean against yours.
 
+**Done 2026-08-01.** All 146,034 files carry a tier, and `photo` holds one row each.
+`exif:DateTimeOriginal` 37,840 · `exif:CreateDate` 360 · `exif:DateCreated` 5 · `filename` 107 ·
+`mtime` 107,721 · `none` 1. Chain step 1 reads **37,840, not 38,767** — the gate's number was the
+manifest's `capture_time_text` count, and 562 of those are unusable (560 `0000:00:00 00:00:00`
+sentinels plus two ambiguous list reprs). EXIF across steps 1–2 is 38,205. Both halves of the
+identity hold, the shape counts sum to 251,087 exactly, and the independent recompute diffed
+**empty** on all six cells. Migration 003 adds a nullable `taken_offset`; 3,788 assets recorded
+one and its absence never downgrades a date. ~40 min.
+
+The ultracode note above held up: enumeration beat sampling. Masking every digit run in all
+251,087 relative paths gave 127,924 shapes summing exactly to the row count, and the ranking is
+directory-diluted enough (top 50 = 39.07%) that a top-N cutoff would have been the wrong unit —
+the sum is the proof, not the cutoff.
+
+Three things worth carrying forward:
+
+- **Hit count is anti-correlated with truth here.** Ten candidate rules were scored against files
+  that also have EXIF, agreeing to the day. `photos-backup-14-03-2023\` fires **30,293 times,
+  more often than the winning rule, and is wrong every single time** — it is the date the backup
+  was taken, not the photo. So is `photos-03-04-23\` (20,736 at 0.0%) and `lumix f 7-15-26 sd\`.
+  Only `YYYYMMDD_HHMMSS` in the **basename** survived, at 27,290/27,388 = 99.6%; 91 of its 93
+  misses are ±1 day on `.mp4`, where the container time is UTC and the filename is local. The
+  date-only variant looks equally good in aggregate and is not: its 58 marginal hits are
+  stock-photo ids, and none has EXIF to validate against.
+- **The filename tier is small — 107 files.** Nearly every `YYYYMMDD_HHMMSS` name also has EXIF,
+  so the tier does real work only where EXIF is absent. Its value was proving which patterns are
+  dates, which is what kept 51,029 backup-date paths out of the catalog.
+- **`capture_iso` was too narrow and step 3's numbers were slightly wrong because of it.** Seven
+  assets held a capture time in a spelling it rejected — ctime(3), and a time with seconds
+  omitted — and the mtime tier had been dating them **up to 12.6 years late**. Five are now
+  recovered. Step 3's "7 odd formats" line above is therefore 2, not 7. A future clean
+  `adopt_mediavault` run picks these up at source; the existing catalog got them via step 4,
+  because adopt never updates a row it already inserted.
+
 ---
 
 # Step 5 — Thumbnails onto NVMe
@@ -580,7 +614,7 @@ Do not copy code from v1/ — read it for what went wrong, not for what to reuse
 Build the read-only grid. One process, four routes, no framework, no bundler:
 
   GET  /                                   the page
-  GET  /api/photos?before=<sort_key>&limit=500&kind=image
+  GET  /api/photos?before=<sort_key>&before_id=<id>&limit=500&kind=image
                                            keyset page, payload [{id, w, h, th}]
   GET  /t/<sha256>.webp                    thumbnail from E:, Cache-Control immutable
   POST /api/reveal {id}                    explorer.exe /select,<path>
@@ -600,7 +634,17 @@ Perceived load delay is the stated requirement. In priority order:
   - stored width/height so justified rows lay out before a single image loads: no measuring,
     no layout shift
   - content-hash URLs with immutable caching, so the browser stops asking after pass one
-  - keyset paging with an integers-only payload — no OFFSET, ever
+  - keyset paging with an integers-only payload — no OFFSET, ever. **The cursor is the pair
+    `(sort_key, id)`, not `sort_key` alone.** Step 4 measured 146,034 photo rows over only
+    27,076 distinct sort keys: **90.5% of rows share their key with another row**, and the
+    largest single tie is 9,143 rows, because 73.8% of the library is dated by a bulk-copy
+    mtime and thousands of files land on the same second. A one-column cursor against a
+    500-row page cannot page through a 9,143-row tie at all — it either repeats the same page
+    forever or skips 8,643 photos. `WHERE (sort_key, id) < (?, ?)` against the existing
+    `(sort_key DESC, id DESC)` index is the whole fix, and `photo.id` being a primary key is
+    what makes the pair unique. Undated photos sit on the sentinel `sort_key = '-'`, which
+    collates below every digit and so lands last under DESC — one row today, more once the
+    restic inventory widens the corpus.
   - IntersectionObserver prefetching about 1000px ahead
   - DOM recycling so roughly three screens of tiles exist at once
 
