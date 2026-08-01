@@ -506,23 +506,35 @@ Walk in **directory order**, never hash order or shuffled order: random order co
 small-file regime. The zero-byte files all share `e3b0c442…`; that is one key, and collapsing
 them destroys distinct paths without losing bytes, so keep the rows.
 
-**Repo side — structural verification plus a targeted sample, not a full second pass.** Chosen
-2026-08-01 over the full per-file dump comparison. `restic --no-lock check --read-data` reads the
-406 GB of packs and proves every blob decrypts and matches its stored hash — **≈1.1 h, and this
-figure is estimated, not measured. Benchmark it with `--read-data-subset=1/20` first.** What it
-cannot prove is that the trees point at the right blobs, so add:
+**Repo side — full per-file comparison.** Decided 2026-08-01 against a 12 h window.
+`restic --no-lock dump --archive tar <snapshot> <subtree>` piped into a streaming tar reader
+hashing each member, compared against the disk-side hashes: **≈5.1 h (range 4.0–6.5)**. This is
+the only thing that rules out an in-place edit that preserved its mtime, which is the residual no
+sample and no mtime argument can exclude, and it is what the deletion gate is for.
 
-- the 9 files with post-backup mtimes, dumped and compared individually — 8,711 bytes;
-- a directory-order cluster sample spanning both regimes, ~20 GB, ~5 min.
+Invoke it **once per top-level subtree**, not once over `G`. Eight invocations cost ~16 s of extra
+startup and buy per-subtree checkpointing, visible progress, and restartability across evenings —
+a single five-hour invocation that dies at hour four loses everything.
 
-The full per-file comparison — `restic --no-lock dump --archive tar <snapshot> G` piped into a
-streaming tar reader hashing each member — costs **≈5.1 h more** and is the only thing that rules
-out an in-place edit that preserved its mtime. Measured dump rates: 105.6 MB/s in a low-dedup
-subtree, 81.3 MB/s and 883 files/s in the small-file subtree, 52.9 MB/s and falling in the
-high-dedup `10tb arch backup` region. **Dedup makes restore slower, not faster** — unique content
-was written in read order so its blobs are pack-adjacent and stream sequentially, while
-deduplicated content pulls blobs scattered across packs written at earlier moments. That inverts
-the naive expectation and it is why the whole-tree projection carries a wide band.
+`restic --no-lock check` plus `--read-data-subset=1/8` covers what the dump does not: unreferenced
+blobs and pack/index structure, ~12 min. **The full `--read-data` (436.18 GB — the repo is
+406.22 GiB, and reading that as decimal understates it by 7.4%) is not run**, because restic
+verifies each blob's plaintext hash against its ID on load, so the dump pass already reads and
+verifies every referenced data blob. If that property cannot be confirmed from restic's own
+behaviour, run the full `--read-data` at ≈1.15–1.35 h rather than assuming it.
+
+Measured dump rates: 105.6 MB/s in a low-dedup subtree, 81.3 MB/s and 883 files/s in the
+small-file subtree, 52.9 MB/s and falling in the high-dedup `10tb arch backup` region. **Dedup
+makes restore slower, not faster** — unique content was written in read order so its blobs are
+pack-adjacent and stream sequentially, while deduplicated content pulls blobs scattered across
+packs written at earlier moments. That inverts the naive expectation and it is why the whole-tree
+projection carries a wide band.
+
+**Phase order is: establish, then fail fast, then build, then verify.** The cheap decisive
+evidence runs first — a ~20 GB sample plus the 9 drifted files, compared against the repo at about
+the 35-minute mark. A same-size mismatch there means the remaining ten hours would build an
+inventory on a collapsed premise, so it is a stop. The inventory itself is written and committed
+**before** the 5.1 h repo pass begins, so an overrun costs a second evening rather than the run.
 
 Two gotchas to encode: `--no-lock` on **every** read command, because the default writes a lock
 file *into the repo*; and `dump`'s path argument must be a **bare root-entry name with no

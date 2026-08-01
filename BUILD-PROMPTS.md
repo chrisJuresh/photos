@@ -789,7 +789,12 @@ index on `file.kind` and a planner that drove the join from `file` would scan it
 
 # Step 7 — Phase 0 inventory from restic
 
-**Effort:** `high` · run in the background · **~5.5 h**, overnight
+**Effort:** `high` · run in the background · **~10.2 h** (range 9–13), overnight
+
+Budgeted against a 12 h window. The long tail is confined to the LAST phase, which is
+per-subtree checkpointed and resumable, so an overrun costs a second evening rather than the
+run. Phases A–C produce a durable committed inventory in the first ~4.5 h; everything after
+that is verification.
 
 **There is no `--force` re-read of 1.07 TB in this step any more, and the "8,052-file gap" does
 not exist.** Both were removed on 2026-08-01 after the repo was actually opened and reconciled.
@@ -864,41 +869,94 @@ Measured I/O rates on G: — use these, do not re-benchmark from scratch:
 
 === WHAT TO DO ===
 
-1. Disk-side pass: one os.scandir walk in DIRECTORY ORDER with streaming SHA-256. Never hash in
-   hash order or shuffled order. Partition by size and run the two regimes with different pool
-   sizes -- 4 workers for >1 MiB, 40 for the rest. One pool for both is wrong in both
-   directions. Capture st_nlink and the NTFS file ID from os.fstat ON THE ALREADY-OPEN HANDLE so
-   identity metadata costs no extra I/O.
-   Expected: 104,745 big files / 1,130.35 GB -> ~3.3 h; 1,257,975 small files -> ~0.9 h.
+Four phases. Report at every phase boundary before starting the next one. The ordering is
+deliberate and two parts of it are the point: the cheapest decisive evidence comes FIRST, and the
+inventory is durable on disk BEFORE the longest phase begins.
 
-   For the 251,087 rows that already carry an adopted sha256: COMPARE, never overwrite. On
-   disagreement record both values and abort. Silently replacing the adopted value destroys the
-   only evidence that v1 and this pass disagreed. Agreement across 90% of the bytes is a free
-   independent cross-check of v1's hashing and is a headline result of this step either way.
+--- PHASE A: establish. ~19 min. ---
 
-   Hash once per NTFS file ID and reuse for other names sharing it. Report how many files have
-   nlink > 1; home-chris arch backup is where hardlinked backup generations would show up.
+A1. `restic --no-lock cat config` and `restic --no-lock snapshots --json`. Record
+    chunker_polynomial; confirm no snapshot carries an `original` field. ~5 s.
 
-2. Repo-side verification:
-   a. `restic --no-lock check --read-data-subset=1/20` FIRST, as a benchmark. Report the
-      projected wall time for the full check before running it. The ~1.1 h estimate for the full
-      pass is derived from sequential pack-read throughput and has NOT been measured directly.
-   b. `restic --no-lock check --read-data` in full. This proves every blob decrypts and matches
-      its stored hash. It does NOT prove the trees point at the right blobs.
-   c. Dump and compare the 9 post-backup-mtime files individually (8,711 bytes), plus a
-      directory-order cluster sample of ~20 GB spanning both size regimes. State plainly in the
-      report that this is a CLUSTER sample, not a random one, and what that does and does not
-      license you to conclude.
-   The full per-file alternative -- dump --archive tar of root entry "G" piped into a streaming
-   tar hasher -- costs ~5.1 h more and is the only thing that rules out an in-place edit that
-   preserved its mtime. It was considered and declined on 2026-08-01. Do not silently upgrade to
-   it; if you think the evidence warrants it, say so and stop.
+A2. Metadata-only os.scandir walk of the photos root: path, size, mtime_ns, and reparse
+    classification via st_file_attributes & 0x400. ~16 min at 1,450 entries/s. This is a
+    SEPARATE pass from hashing on purpose -- it is what lets Phase C partition by size, and
+    running the two size regimes concurrently would put 44 readers on one head.
 
-3. Write origin rows: path, size, mtime_ns, sha256, nlink, file_id. 1,374,328 rows. Batch inside
-   transactions on E: (NVMe). Rows already present get sha256 CONFIRMED and nlink/file_id filled
-   in, never duplicated. Then file rows with state='pending' for anything not already adopted.
+A3. `restic --no-lock ls --json --long --recursive ce88f697`. ~2 min at 14,571 nodes/s.
 
-4. Reconcile and report:
+A4. Reconcile A2 against A3: paths present on one side only, size disagreements, and files whose
+    mtime postdates 2026-07-18 10:28:35. Expect exactly 30 / 6 / 39. <1 min.
+
+--- PHASE B: fail fast. ~15 min. THE CHECKPOINT THAT MATTERS. ---
+
+B1. Hash, on the DISK side only, the 9 files whose mtime postdates the backup plus a
+    directory-order cluster sample of ~20 GB spanning both size regimes. ~4 min.
+
+B2. Dump those same paths from the repo and compare per file. ~4 min.
+
+B3. STOP AND REPORT. If any file matches on size AND mtime but differs in hash, the backup does
+    not contain what the catalogue will claim it contains, and the remaining ~10 h would build an
+    inventory on a collapsed premise. Do not continue past a same-size mismatch without saying so
+    and waiting.
+
+    This phase exists because the previous ordering spent 4.2 h hashing before comparing a single
+    byte against the repo. ~35 min to the first real verdict instead of five hours.
+
+--- PHASE C: the inventory. ~4.4 h. This is the product. ---
+
+C1. Disk-side hash, BIG regime: 104,745 files / 1,130.35 GB, 4 workers, DIRECTORY ORDER.
+    ~3.3 h. Never hash in hash order or shuffled order -- random order costs 13x on small files
+    and is no help here.
+
+C2. Disk-side hash, SMALL regime: 1,257,975 files, 40 workers, directory order. ~52 min.
+    Skip the 8,052 reparse points entirely; they are unopenable by design.
+
+    In both: capture st_nlink and the NTFS file ID from os.fstat ON THE ALREADY-OPEN HANDLE, so
+    identity metadata costs no extra I/O. Hash once per file ID and reuse for other names sharing
+    it. Report how many files have nlink > 1 -- home-chris arch backup is where hardlinked backup
+    generations would show up, and if they exist this phase gets cheaper.
+
+C3. Write origin rows -- path, size, mtime_ns, sha256, nlink, file_id -- 1,374,328 of them,
+    batched inside transactions on E:. Then file rows with state='pending' for anything not
+    already adopted. ~5 min.
+
+    For the 251,087 rows that already carry an adopted sha256: COMPARE, never overwrite. On
+    disagreement record both values and abort. Silently replacing the adopted value destroys the
+    only evidence that v1 and this pass disagreed. Agreement across 90% of the bytes is a free
+    independent cross-check of v1's hashing and is a headline result either way.
+
+C4. COMMIT HERE, before Phase D. The inventory is the deliverable and it is now complete. Phase D
+    is verification and it is the part that may overrun the window.
+
+--- PHASE D: full per-file verification. ~5.3 h. Resumable. ---
+
+D1. `restic --no-lock check` WITHOUT --read-data, plus `--read-data-subset=1/8`. ~12 min.
+    Rationale for not running the full --read-data: restic verifies each blob's plaintext hash
+    against its ID on load, so D2 reads and verifies every referenced data blob as a side effect.
+    What --read-data uniquely adds is unreferenced blobs and pack/index structure, which plain
+    check plus a 1/8 subset covers. If you cannot confirm from restic's own behaviour that blobs
+    are hash-verified on load, say so and run the full --read-data (436.18 GB, ~1.15-1.35 h)
+    instead of assuming.
+
+D2. Full repo-side per-file comparison. `restic --no-lock dump --archive tar ce88f697 <subtree>`
+    piped into a streaming tar reader hashing each member, compared against Phase C's disk
+    hashes. ~5.1 h (range 4.0-6.5).
+
+    Invoke it ONCE PER TOP-LEVEL SUBTREE under G/photos, not once over "G". Eight invocations at
+    1.6-2.2 s startup each cost ~16 s total and buy per-subtree checkpointing, visible progress,
+    and restartability across evenings. A single 5-hour invocation that dies at hour 4 loses
+    everything.
+
+    Expect wildly uneven rates and do not treat a slow subtree as a fault: measured 105.6 MB/s in
+    low-dedup lumix, 81.3 MB/s in small-file home-chris, 52.9 MB/s and falling in high-dedup
+    10tb arch backup. Dedup makes restore SLOWER, not faster.
+
+    This is what closes the residual the earlier design left open -- an in-place edit that
+    preserved its mtime. With D2 complete the gate rests on per-file proof rather than on an
+    mtime argument plus a 1.7% sample.
+
+D3. Reconcile and report:
      files_seen_on_disk == files_hashed_from_disk == 1,374,328
      files_seen_in_snapshot                       == 1,374,298
    Those two differ by exactly 30 and the 30 are enumerated above. An earlier version of this
@@ -941,12 +999,21 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** `origin` holds 1,374,328 rows each with a `sha256`, `nlink` and `file_id`; the adopted
-251,087 agree with the independently computed values; `check --read-data` passes clean; and every
-hash disagreement lands in the benign bucket with a documented reason. **A same-size, same-mtime
-hash disagreement is the hard stop** — that is a file whose bytes changed under restic's nose,
-and it blocks the deletion gate. A size or mtime change is not that; it is a file that legitimately
-changed after 2026-07-18 and needs re-backing-up, and conflating the two would abort a correct run.
+**Gate, in two parts, because Phase C and Phase D can land on different evenings.**
+
+**Phase C gate — the inventory.** `origin` holds 1,374,328 rows each with a `sha256`, `nlink` and
+`file_id`; the 251,087 adopted hashes agree with the independently computed values;
+`count(distinct path) == count(origin rows)`. This is the deliverable and it is committed before
+Phase D starts.
+
+**Phase D gate — the deletion gate's evidence.** Every one of the 1,374,298 files in the snapshot
+has a repo-side SHA-256 equal to its disk-side SHA-256, and `restic check` passes. **A same-size,
+same-mtime hash disagreement is the hard stop** — that is a file whose bytes changed under
+restic's nose. A size or mtime change is not that; it is a file that legitimately changed after
+2026-07-18 and needs re-backing-up, and conflating the two would abort a correct run.
+
+If Phase D is interrupted, say which subtrees completed. A partially verified repo is a real and
+reportable state; it is not a pass, and step 13 must not be told otherwise.
 
 ---
 
@@ -1315,23 +1382,24 @@ fan-out is for attacking the results, not for producing them.
    both lists, at the same path, with restic holding the old bytes. If you find yourself
    comparing two lists of strings, you are running the old check.
 
-   READ THIS BEFORE RUNNING CHECK 3. An earlier version demanded "re-assert per-file agreement
-   between step 7's repo-side and disk-side sha256, and assert all four of step 7's counters are
-   equal". Step 7 no longer computes a repo-side sha256 for every file and there are no longer
-   four equal counters, so that instruction is UNSATISFIABLE and its absence is not a failure.
-   What step 7 actually establishes, and what you re-assert here:
-     - disk-side sha256 for all 1,374,328 files, of which the 251,087 adopted from MediaVault
-       agreed with an independently computed value. Re-assert that agreement count.
+   What step 7's Phase D establishes, and what you re-assert here:
+     - per-file agreement between the repo-side sha256 (from dump --archive tar, per subtree) and
+       the disk-side sha256, for all 1,374,298 files in the snapshot.
+     - disk-side sha256 for all 1,374,328 files on disk, of which the 251,087 adopted from
+       MediaVault agreed with an independently computed value. Re-assert that agreement count.
      - files_seen_on_disk == files_hashed_from_disk == 1,374,328, and
        files_seen_in_snapshot == 1,374,298, differing by exactly the 30 enumerated git objects.
-     - restic check --read-data passed, so every blob matches its own stored hash.
-     - only 39 files corpus-wide have a post-backup mtime; 9 are in the snapshot; 3 of those
-       match on size but not mtime and were compared individually.
-   The residual risk step 7 deliberately did NOT close is an in-place edit that preserved its
-   mtime, which the mtime argument cannot see and a cluster sample can only spot-check. If you
-   judge that this gate requires closing it, the cost is a full repo-side
-   `dump --archive tar <snap> G` pass at ~5.1 h. SAY SO AND STOP — do not run it unasked, and do
-   not report the gate as passed while treating the residual as closed.
+       Do NOT assert these two are equal — an earlier version of this check demanded four equal
+       counters, which predated the reconciliation and would abort on a correct run.
+     - restic check passed, and blobs are hash-verified on load so Phase D's reconstruction
+       covered every referenced data blob.
+
+   CHECK WHETHER PHASE D ACTUALLY COMPLETED before crediting it. It is per-subtree checkpointed
+   across possibly more than one evening, and a partial run is a legitimate state step 7 is
+   instructed to report. If any subtree is unverified, this check does NOT pass, and the residual
+   is specifically an in-place edit that preserved its mtime in an unverified subtree — which no
+   mtime argument and no sample can exclude. Name the subtrees and BLOCK. Do not run the missing
+   subtrees yourself; that is hours of I/O and step 13 is a ~30 min verification step.
 
 4. Does G:\ResticPhotos cover the current corpus? Step 7 established that it does, to the byte:
    1,374,298 file nodes against 1,374,328 files on disk, missing exactly 30 git loose objects,
@@ -1669,11 +1737,12 @@ The three things you asked for exist: triage happened, the grid is one infinite 
 and clicking a photo opens Explorer while `origins.jsonl` holds every original path.
 
 Four decisions from `PLAN.md` § "Open decisions" are still open and none of them block the
-above. **`restic check --read-data` is no longer one of them — it moved into step 7**, which is
-where the repo first gets opened. Note what it does not answer: it proves the repo is internally
-consistent, not that it matches the disk. Step 7's disk-side hashes plus its mtime analysis and
-sampled comparison answer that, with one stated residual — an in-place edit that preserved its
-mtime — which only a full repo-side dump pass would close.
+above. **restic verification is no longer one of them — it moved into step 7**, which is where the
+repo first gets opened. Step 7 runs `restic check` plus a `--read-data-subset`, and its Phase D
+reconstructs every file from the packs and compares per-file against the disk, which is the
+stronger claim: not merely that the repo is internally consistent, but that it holds the same
+bytes the disk holds. That closes the mtime-preserving in-place edit, which no sample and no
+mtime argument can exclude — provided Phase D completed for every subtree.
 
 **Two things this build never establishes, and the second is worse than the first.**
 
