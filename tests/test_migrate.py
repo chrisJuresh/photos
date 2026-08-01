@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 2
+LATEST = 3
 
 
 def test_applies_from_empty(pair):
@@ -50,7 +50,7 @@ def test_is_idempotent(pair):
             versions = [row[0] for row in connection.execute("SELECT version FROM schema_version ORDER BY version")]
         finally:
             connection.close()
-        assert versions == [1, 2], f"{path.name} re-applied a migration"
+        assert versions == list(range(1, LATEST + 1)), f"{path.name} re-applied a migration"
 
 
 @pytest.mark.parametrize("locked", ["main", "state"])
@@ -112,7 +112,7 @@ def test_refuses_a_database_ahead_of_the_files(pair, tmp_path):
     older.mkdir()
     shutil.copy(migrate.MIGRATIONS_DIR / "001_catalog.sql", older)
 
-    with pytest.raises(migrate.MigrationRefused, match="record version 2 but only 1"):
+    with pytest.raises(migrate.MigrationRefused, match=f"record version {LATEST} but only 1"):
         migrate.apply(catalog, state, migrations_dir=older)
 
 

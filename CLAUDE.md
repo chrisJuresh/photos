@@ -68,6 +68,15 @@ USB-HDD head time and is off by default.
 python -m photolib.adopt_mediavault
 ```
 
+To resolve capture time for every adopted file and rebuild the `photo` rows. Seconds, pure
+DB plus one read-only manifest scan. Re-running is safe and lands on the same answer.
+`--validate` additionally prints the masked-shape enumeration and the per-rule EXIF
+agreement that decided which filename patterns are adopted.
+
+```bash
+python -m photolib.capture_time
+```
+
 To run the archived test suite as a reference oracle:
 
 ```bash

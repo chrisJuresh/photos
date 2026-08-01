@@ -38,6 +38,7 @@ import argparse
 import gzip
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -146,28 +147,67 @@ def camera_name(make: str | None, model: str | None) -> str | None:
     return f"{make} {model}"
 
 
+_CTIME = re.compile(r"[A-Za-z]{3} ([A-Za-z]{3}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})")
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1
+    )
+}
+
+
 def capture_iso(text: str | None) -> str | None:
     """EXIF `2021:12:01 09:06:42` as ISO 8601 local time, or None.
 
     `DateTimeOriginal` carries no offset and is treated as authoritative local
     time -- refusing it for lacking a timezone is what left v1 with 6,451 dated
     assets out of 38,767 that had a date. Any offset present is dropped rather
-    than stored, because the schema has nowhere to put it; a later step adds the
-    column if it wants one.
+    than stored; `file.taken_offset` carries it from migration 003 on.
+
+    Two minority spellings are accepted alongside the canonical one, because
+    rejecting them demotes a real capture date to the mtime tier and the mtime
+    on this corpus is a copy date up to 26 years later:
+
+      `2020:07:17 10:36-07:00`     seconds omitted -- taken as :00
+      `Tue Jan 17 15:45:20 2012`   ctime(3), which some muxers write
+
+    `['8/1/96', '4:59 PM']` is a leaked Python list repr and stays rejected: its
+    day and month are genuinely ambiguous, so there is no reading to prefer.
+
+    A seconds field that is present but invalid is a rejection, not a fall
+    through to the minutes reading: `2020:07:17 10:36:99` must not publish
+    10:36:00.
     """
     if not text:
         return None
-    stamp = text.strip().replace("T", " ")
-    if len(stamp) < 19:
-        return None
+    text = text.strip()
+    # ctime first, and on the raw text: normalising the ISO 'T' separator to a
+    # space would eat the 'T' of 'Tue'. Matched against an explicit month table
+    # rather than strptime's %a/%b, which read the process's LC_TIME -- a
+    # setlocale call anywhere else would otherwise push these back to the mtime
+    # tier and restore a twelve-year error without touching this file.
+    ctime = _CTIME.fullmatch(text)
+    if ctime and ctime[1] in _MONTHS:
+        try:
+            return datetime(
+                int(ctime[6]), _MONTHS[ctime[1]], *(int(g) for g in ctime.group(2, 3, 4, 5))
+            ).strftime("%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return None
+    stamp = text.replace("T", " ")
     date, _, rest = stamp.partition(" ")
     date = date.replace(":", "-", 2)
     clock = rest[:8]
-    try:
-        datetime.strptime(f"{date} {clock}", "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return None
-    return f"{date}T{clock}"
+    for pattern, size in (("%Y-%m-%d %H:%M:%S", 8), ("%Y-%m-%d %H:%M", 5)):
+        if size == 5 and rest[5:6] == ":":
+            break  # a seconds field is there and it did not parse
+        try:
+            datetime.strptime(f"{date} {rest[:size]}", pattern)
+        except ValueError:
+            continue
+        clock = rest[:size] if size == 8 else f"{rest[:size]}:00"
+        return f"{date}T{clock}"
+    return None
 
 
 def path_root(relative_path: str) -> str:
