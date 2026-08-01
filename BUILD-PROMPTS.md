@@ -729,6 +729,58 @@ anything uncommitted on purpose, say which and why.
 **Gate:** scroll from newest to oldest with no blank gaps and no layout shift; click a photo
 and Explorer selects the right file; the comma/space reveal tests pass.
 
+**Done 2026-08-01.** `photolib/grid.py` + `photolib/reveal.py` + three static files, stdlib only.
+97 new tests, 218 in the suite. **Cold first paint, fresh server process per run, median of 5:
+43.4 ms at a synthetic 100,000 rows and 29.1 ms against the real 146,034** (assets 2.2 ms, the
+500-row page 12.7 ms, 60 thumbnails over 6 connections 14.1 ms for 755 KB). Browser end to end at
+1280×720: **43.5 ms to first paint, all 53 above-the-fold tiles by 95.7 ms, 0 of 53 from cache**;
+a second pass transfers **0 bytes, 53 of 53 from cache**, so the content-hash + `immutable` claim
+is measured rather than asserted.
+
+Five things worth carrying forward:
+
+- **`kind` has three values and the route table's wording hides 16,388 photos.** `file.kind` is
+  `image` 109,350 · `raw_image` 16,388 · `video` 20,296. `kind=image` read literally omits the
+  entire Lumix and Sony corpus. `image` now expands to `('image','raw_image')` wherever it
+  appears; `video` is what "hidden by default" is for. RAW-versus-not is an extension property,
+  so it belongs in a later facet rather than as a second meaning for this one.
+- **The space is the case that breaks, not the comma.** `list2cmdline(["explorer.exe",
+  f"/select,{path}"])` — v1's form at `review_api.py:465` — emits `explorer.exe
+  "/select,G:\a b\c.jpg"`, quoting the whole switch token, and Explorer's non-CRT parser then
+  fails to see a switch at all. The comma survives that form untouched. There is no argv shape
+  that works, so `lpCommandLine` is built directly (`"<exe>" /select,"<path>"`) and the module is
+  passed as `executable=`, i.e. lpApplicationName, which also closes `F50`'s CWD search. Verified
+  against real Explorer for a space, a comma, and both.
+- **Containment is by `os.path.samestat` up the parent chain, not by string prefix.** A
+  `startswith` check passes `objects_evil` against a root of `objects`; identity does not. The
+  refusal list is drive-qualified, UNC, root-anchored-without-a-drive (`is_absolute()` is
+  **False** for `\objects\x` while the join still discards the base — that is `F05`'s exact
+  shape), `..`, junction, missing, and directory.
+- **`next: null` has to come from a `limit + 1` probe.** Inferring exhaustion from
+  `len(photos) < limit` is wrong exactly when the corpus is a multiple of the page size, which is
+  a bug that reproduces only at particular row counts. There is a test at 1,000 rows and limit
+  500.
+- **A tab that loads while hidden reports `clientWidth` 0**, and packing against that gives one
+  tile per row at a few pixels with nothing to correct it. A `ResizeObserver` on the mount element
+  fixes it where a window `resize` listener cannot, because the element acquiring its first real
+  width is not a window resize. Found by running the client in a pane that never becomes visible.
+
+Two limits stated rather than implied. **There are no automated client tests** — "no npm, no
+bundler" rules out a JS runner — so the layout maths was verified by extracting `packRows`,
+`aspect` and `visibleRows` from the shipped source and running them under `node` over 146,034
+items at five widths, asserting contiguity, exact row width, monotonic tops and `visibleRows`
+against a linear scan at 300 offsets each; the runtime `?debug=1` overlay carries the same
+assertions. And **the ThumbHash decoder is unverified**: `th` is null in all 146,034 rows, so the
+branch has never run. Step 9 is what proves it.
+
+Also measured: **22,531 stills have no thumbnail** (22,059 `.svg`, then `.msg` 198, `.dng` 146,
+`.jpg` 25) and render as neutral tiles — step 8's prefilter is what removes them, not the read
+path. Every still that *does* have a thumbnail has non-null `width`/`height`, zero exceptions, so
+the fallback aspect never applies to a tile showing an image. The row-value cursor
+`(sort_key, id) < (?, ?)` gives `SEARCH p USING INDEX photo_sort (sort_key<?)`, a seek rather than
+the ordered scan the expanded `OR` form produces, and a test pins the plan because there is no
+index on `file.kind` and a planner that drove the join from `file` would scan it whole.
+
 ---
 
 # Step 7 — Phase 0 inventory from restic

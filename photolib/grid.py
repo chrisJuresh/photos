@@ -1,0 +1,557 @@
+"""The read-only grid: one infinite page of every photo, newest first.
+
+Four routes on 127.0.0.1, one process, no framework and no bundler:
+
+    GET  /                                                the page
+    GET  /api/photos?before=&before_id=&limit=&kind=      a keyset page
+    GET  /t/<sha256>.webp                                 a thumbnail, immutable
+    POST /api/reveal {"id": N}                            select it in Explorer
+
+Nothing here writes. The only surface that leaves the process is `/api/reveal`,
+and its path proof lives in `photolib.reveal` so it can be read and tested on
+its own — `F51` is v1 putting routers, SQL, security and browser launch in one
+4,700-line module.
+
+Three properties carry the stated requirement, that perceived load delay be
+small:
+
+  * `file.width`/`height` come back with the page, so justified rows lay out
+    before a single image is requested. No measuring, no layout shift.
+  * thumbnail URLs are content hashes, so `immutable` is honest and the browser
+    stops asking after the first pass. `F47` is that header on a URL whose
+    meaning can change.
+  * paging is keyset on the pair `(sort_key, id)`, never OFFSET. 90.5% of photo
+    rows share a sort_key with another row and the largest single tie is 9,143,
+    so a one-column cursor cannot page through the library at all.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import re
+import sqlite3
+import sys
+import threading
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs
+
+from photolib import db, reveal as reveal_module
+from photolib.config import load
+from photolib.thumbnails import thumb_path
+
+DEFAULT_PORT = 8770  # v1 used 8765 for the dashboard and 8766 for the review API
+
+# `kind` is a query parameter from the first commit even though it is the only
+# filter, so later facets extend the contract instead of renegotiating it.
+KINDS = frozenset({"image", "raw_image", "video"})
+DEFAULT_KINDS = ("image", "raw_image")
+
+DEFAULT_LIMIT = 500
+MAX_LIMIT = 1000
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_ROUTES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+}
+
+# 64 lowercase hex characters cannot traverse, cannot be absolute and cannot
+# hold a separator, so this pattern IS the containment proof for /t/. That is
+# structurally stronger than checking a joined path afterwards, and it costs no
+# database round-trip — one query per thumbnail would dominate first paint.
+THUMB_ROUTE = re.compile(r"^/t/([0-9a-f]{64})\.webp$")
+
+# A bound parameter, so this is a size budget rather than injection defence. It
+# admits an ISO timestamp and the '-' sentinel that undated photos sort on.
+CURSOR_KEY = re.compile(r"^[0-9T:+.Z-]{1,32}$")
+CURSOR_ID = re.compile(r"^[0-9]{1,19}$")
+LIMIT_VALUE = re.compile(r"^[0-9]{1,5}$")
+
+MAX_REVEAL_BODY = 1024
+
+SECURITY_HEADERS = (
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "no-referrer"),
+    ("X-Frame-Options", "DENY"),
+    (
+        "Content-Security-Policy",
+        # data: is for decoded ThumbHash placeholders and nothing else; every
+        # other source is 'none' or 'self', and script/style are separate files
+        # so no 'unsafe-inline' is needed anywhere.
+        "default-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    ),
+)
+
+
+class BadRequest(ValueError):
+    """A malformed query. `field` names what to tell the client, and nothing else."""
+
+    def __init__(self, field: str) -> None:
+        super().__init__(field)
+        self.field = field
+
+
+@dataclass(frozen=True)
+class Roots:
+    """Every path the server reads, so tests and the bench never touch E: or G:."""
+
+    catalog_db: Path
+    state_db: Path
+    thumb_root: Path
+    mediavault_root: Path
+    reveal_root: Path
+
+    @classmethod
+    def from_config(cls) -> Roots:
+        config = load()
+        return cls(
+            catalog_db=config.catalog_db,
+            state_db=config.state_db,
+            thumb_root=config.thumb_root,
+            mediavault_root=config.mediavault_root,
+            reveal_root=config.reveal_root,
+        )
+
+
+# --------------------------------------------------------------------------
+# query parsing
+
+
+def parse_kinds(values: list[str]) -> tuple[str, ...]:
+    """The media kinds a request selects.
+
+    `image` always means still photography, which is `image` and `raw_image`
+    both. `file.kind` has three values, not two, and reading the default as
+    `image` alone would silently hide 16,388 RAW photos — the Lumix and Sony
+    corpus. Video is what "hidden by default" is actually for.
+
+    RAW-versus-not is a property of the extension, not of the media kind, so it
+    is a later facet rather than a second meaning for this one.
+    """
+    if not values:
+        return DEFAULT_KINDS
+    tokens = [token.strip() for value in values for token in value.split(",")]
+    tokens = [token for token in tokens if token]
+    if not tokens or any(token not in KINDS for token in tokens):
+        raise BadRequest("kind")
+    selected = set(tokens)
+    if "image" in selected:
+        selected.update(DEFAULT_KINDS)
+    return tuple(sorted(selected))
+
+
+def parse_limit(values: list[str]) -> int:
+    """Page size. Clamped rather than refused — an over-large limit is a budget."""
+    if not values:
+        return DEFAULT_LIMIT
+    raw = values[-1]
+    if not LIMIT_VALUE.match(raw):
+        raise BadRequest("limit")
+    return min(max(int(raw), 1), MAX_LIMIT)
+
+
+def parse_cursor(before: list[str], before_id: list[str]) -> tuple[str, int] | None:
+    """The keyset cursor, or None for the first page.
+
+    Both halves or neither: a half cursor has no defensible interpretation.
+    """
+    if not before and not before_id:
+        return None
+    if not before or not before_id:
+        raise BadRequest("cursor")
+    key, identifier = before[-1], before_id[-1]
+    if not CURSOR_KEY.match(key) or not CURSOR_ID.match(identifier):
+        raise BadRequest("cursor")
+    return key, int(identifier)
+
+
+def page_sql(kinds: tuple[str, ...], cursor: tuple[str, int] | None) -> tuple[str, list]:
+    """The page query and its parameters, minus the LIMIT value.
+
+    The placeholders are generated from the *count* of already-validated kinds;
+    no token from the query string reaches the SQL text. The first page omits
+    the cursor predicate entirely rather than binding a magic high-water key.
+    """
+    where = ["f.kind IN ({})".format(", ".join("?" * len(kinds)))]
+    params: list = list(kinds)
+    if cursor is not None:
+        where.append("(p.sort_key, p.id) < (?, ?)")
+        params += [cursor[0], cursor[1]]
+    sql = (
+        "SELECT p.id, f.sha256, f.width, f.height, f.thumbhash, p.sort_key\n"
+        "FROM photo AS p\n"
+        "JOIN file AS f ON f.sha256 = p.rep_sha256\n"
+        f"WHERE {' AND '.join(where)}\n"
+        "ORDER BY p.sort_key DESC, p.id DESC\n"
+        "LIMIT ?"
+    )
+    return sql, params
+
+
+def page(conn: sqlite3.Connection, kinds: tuple[str, ...], cursor, limit: int) -> dict:
+    """One keyset page, with an honest end-of-stream marker.
+
+    Reads `limit + 1` rows and returns `limit`. Whether the extra row existed is
+    what sets `next`, so exhaustion is a fact rather than an inference — a page
+    that happens to hold exactly `limit` rows is not the end, and deriving it
+    that way is a bug that only reproduces at particular corpus sizes.
+    """
+    sql, params = page_sql(kinds, cursor)
+    rows = conn.execute(sql, [*params, limit + 1]).fetchall()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    photos = [
+        {
+            "id": row[0],
+            "s": row[1],
+            "w": row[2],
+            "h": row[3],
+            # Always present, null until step 9 computes ThumbHash. A key that
+            # gains a value is not a contract change; a key that appears is.
+            "th": base64.b64encode(row[4]).decode("ascii") if row[4] is not None else None,
+        }
+        for row in rows
+    ]
+    following = None
+    if has_more and rows:
+        following = {"before": rows[-1][5], "before_id": rows[-1][0]}
+    return {"photos": photos, "next": following, "kind": list(kinds), "limit": limit}
+
+
+def reveal_relpath(conn: sqlite3.Connection, photo_id: int) -> tuple | None:
+    """The stored object path for one photo, as a row, or None if there is none.
+
+    A row rather than the value, because "no such photo" and "a photo whose
+    path was never recorded" are different answers and a bare None conflates
+    them into one.
+    """
+    return conn.execute(
+        "SELECT f.vault_relpath FROM photo AS p "
+        "JOIN file AS f ON f.sha256 = p.rep_sha256 WHERE p.id = ?",
+        (photo_id,),
+    ).fetchone()
+
+
+# --------------------------------------------------------------------------
+# server
+
+
+class GridServer(ThreadingHTTPServer):
+    """Threaded because keep-alive plus one thread is a hang, not a slowdown.
+
+    A single-threaded HTTPServer serves one connection until the *client* closes
+    it, and the handler timeout defaults to None — so the browser's first socket
+    would hold the server while the other five sat in the backlog. Turning
+    keep-alive off instead means a TCP handshake per thumbnail, which is the
+    opposite of what this step is for.
+    """
+
+    daemon_threads = True
+
+    # http.server sets this to 1. On Windows SO_REUSEADDR does not mean what it
+    # means on POSIX: it lets a second process bind the same address and take
+    # over connections. Silently.
+    allow_reuse_address = False
+
+    def __init__(self, address, handler, roots: Roots, spawn) -> None:
+        self.roots = roots
+        self.spawn = spawn
+        self._local = threading.local()
+        super().__init__(address, handler)
+        port = self.server_address[1]
+        # Literal, built after binding. The Origin check compares against this
+        # too and never derives an expected origin from the Host header, which
+        # is what v1 did and what only worked because a host check ran first.
+        self.allowed_hosts = frozenset({f"127.0.0.1:{port}", f"localhost:{port}"})
+        self.allowed_origins = frozenset({f"http://127.0.0.1:{port}", f"http://localhost:{port}"})
+
+    def connection(self) -> sqlite3.Connection:
+        """This thread's read-only connection, opened on first use.
+
+        Per-thread rather than pooled or shared: a connection never crosses a
+        thread, which settles the sqlite thread-safety question instead of
+        arguing about it. The /t/ route never calls this, so the handful of
+        threads that exist because of thumbnails never open the database.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = db.connect(self.roots.catalog_db, self.roots.state_db, read_only=True)
+            conn.execute("PRAGMA query_only = ON")
+            self._local.conn = conn
+        return conn
+
+
+class GridHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 30
+    server_version = "photolib-grid"
+    sys_version = ""
+
+    server: GridServer
+
+    # -- plumbing ---------------------------------------------------------
+
+    def log_request(self, code="-", size="-") -> None:
+        """Quiet on success. 500 thumbnails per paint is not a log."""
+        if isinstance(code, int) and code >= 400:
+            self.log_message('"%s" %s', self.requestline, code)
+
+    def _respond(self, status: int, body: bytes = b"", headers: tuple = ()) -> None:
+        self.send_response(status)
+        for name, value in SECURITY_HEADERS:
+            self.send_header(name, value)
+        for name, value in headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD" and body:
+            self.wfile.write(body)
+
+    def _json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self._respond(status, body, (("Content-Type", "application/json"),))
+
+    def _fail(self, status: int, field: str | None = None) -> None:
+        """A refusal that says which field, and never what was in it.
+
+        Echoing a rejected value hands back the one thing the check withheld,
+        and turns a JSON body into a reflection sink if a client ever mistakes
+        the content type.
+        """
+        if field is None:
+            self._respond(status)
+            return
+        self._json(status, {"error": field})
+
+    def _host_ok(self) -> bool:
+        host = (self.headers.get("Host") or "").strip().lower()
+        return host in self.server.allowed_hosts
+
+    def _refuse_body(self) -> None:
+        """Refuse without reading the body, so close rather than desynchronise."""
+        self.close_connection = True
+
+    # -- routing ----------------------------------------------------------
+
+    def do_GET(self) -> None:
+        # Host first, before anything looks at the path. F48 is this missing:
+        # a name an attacker controls that resolves to 127.0.0.1 is same-origin
+        # as far as the browser is concerned, so CSP does not help.
+        if not self._host_ok():
+            self._fail(403, "host")
+            return
+
+        path, _, query = self.path.partition("?")
+
+        thumbnail = THUMB_ROUTE.match(path)
+        if path in STATIC_ROUTES:
+            self._static(path)
+        elif path == "/api/photos":
+            self._photos(query)
+        elif thumbnail:
+            self._thumbnail(thumbnail.group(1))
+        elif path == "/api/reveal":
+            self._respond(405, b"", (("Allow", "POST"),))
+        else:
+            self._fail(404)
+
+    do_HEAD = do_GET
+
+    def do_POST(self) -> None:
+        if not self._host_ok():
+            self._refuse_body()
+            self._fail(403, "host")
+            return
+        path = self.path.partition("?")[0]
+        if path == "/api/reveal":
+            self._reveal()
+        else:
+            self._refuse_body()
+            self._fail(404)
+
+    def _method_not_allowed(self) -> None:
+        if not self._host_ok():
+            self._refuse_body()
+            self._fail(403, "host")
+            return
+        self._refuse_body()
+        self._respond(405, b"", (("Allow", "GET, HEAD, POST"),))
+
+    do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _method_not_allowed
+
+    # -- handlers ---------------------------------------------------------
+
+    def _static(self, route: str) -> None:
+        name, content_type = STATIC_ROUTES[route]
+        try:
+            body = (STATIC_DIR / name).read_bytes()
+        except OSError:
+            self._fail(404)
+            return
+        self._respond(
+            200,
+            body,
+            (("Content-Type", content_type), ("Cache-Control", "no-cache")),
+        )
+
+    def _photos(self, query: str) -> None:
+        params = parse_qs(query, keep_blank_values=True)
+        try:
+            kinds = parse_kinds(params.get("kind", []))
+            limit = parse_limit(params.get("limit", []))
+            cursor = parse_cursor(params.get("before", []), params.get("before_id", []))
+        except BadRequest as exc:
+            self._fail(400, exc.field)
+            return
+        payload = page(self.server.connection(), kinds, cursor, limit)
+        self._json(200, payload)
+
+    def _thumbnail(self, sha256: str) -> None:
+        etag = f'"{sha256}"'
+        if self.headers.get("If-None-Match") == etag:
+            self._respond(304, b"", (("ETag", etag),))
+            return
+        try:
+            body = thumb_path(self.server.roots.thumb_root, sha256).read_bytes()
+        except OSError:
+            # Expected: 22,531 stills have no derivative. Step 12's problem.
+            self._fail(404)
+            return
+        self._respond(
+            200,
+            body,
+            (
+                ("Content-Type", "image/webp"),
+                # Safe only because the name is the content hash. F47 is this
+                # header on a URL that means "whatever is current".
+                ("Cache-Control", "private, max-age=31536000, immutable"),
+                ("ETag", etag),
+            ),
+        )
+
+    def _reveal(self) -> None:
+        origin = self.headers.get("Origin")
+        if origin is None or origin not in self.server.allowed_origins:
+            self._refuse_body()
+            self._fail(403, "origin")
+            return
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            # Forces a preflight for any cross-origin attempt, and there is no
+            # OPTIONS handler to satisfy one.
+            self._refuse_body()
+            self._fail(415, "content-type")
+            return
+        if self.headers.get("Transfer-Encoding"):
+            self._refuse_body()
+            self._fail(400, "body")
+            return
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None or not raw_length.strip().isdigit():
+            self._refuse_body()
+            self._fail(411, "body")
+            return
+        length = int(raw_length)
+        if length > MAX_REVEAL_BODY:
+            # Checked before a byte is read. F45 is the budget arriving late.
+            self._refuse_body()
+            self._fail(413, "body")
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self._fail(400, "body")
+            return
+        if not isinstance(payload, dict):
+            self._fail(400, "body")
+            return
+        photo_id = payload.get("id")
+        # isinstance(True, int) is True, so bool has to be excluded by type.
+        if type(photo_id) is not int or photo_id <= 0:
+            self._fail(400, "id")
+            return
+
+        row = reveal_relpath(self.server.connection(), photo_id)
+        if row is None:
+            self._fail(404, "id")
+            return
+        relpath = row[0]
+        if not relpath:
+            self._fail(409, "path")
+            return
+
+        roots = self.server.roots
+        try:
+            target = reveal_module.resolve(relpath, roots.mediavault_root, roots.reveal_root)
+        except reveal_module.RevealRefused:
+            # The reason is in the server log. The client gets a field name.
+            self._fail(403, "path")
+            return
+        try:
+            reveal_module.reveal(target, spawn=self.server.spawn)
+        except (reveal_module.RevealRefused, OSError):
+            self._fail(500, "spawn")
+            return
+        self._respond(204)
+
+
+def serve(
+    roots: Roots,
+    port: int = DEFAULT_PORT,
+    *,
+    spawn=reveal_module._popen,
+) -> GridServer:
+    """Bind and return the server. The caller runs it."""
+    return GridServer(("127.0.0.1", port), GridHandler, roots, spawn)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m photolib.grid", description=__doc__)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--open", action="store_true", help="open a browser once bound")
+    for name in ("catalog", "state", "thumb-root", "mediavault-root", "reveal-root"):
+        parser.add_argument(f"--{name}", type=Path, default=None)
+    args = parser.parse_args(argv)
+
+    roots = Roots.from_config()
+    roots = Roots(
+        catalog_db=args.catalog or roots.catalog_db,
+        state_db=args.state or roots.state_db,
+        thumb_root=args.thumb_root or roots.thumb_root,
+        mediavault_root=args.mediavault_root or roots.mediavault_root,
+        reveal_root=args.reveal_root or roots.reveal_root,
+    )
+
+    server = serve(roots, args.port)
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    counts = server.connection().execute(
+        "SELECT kind, count(*) FROM file GROUP BY kind ORDER BY kind"
+    ).fetchall()
+    print(f"grid on {url}")
+    print(f"  host allowlist  {sorted(server.allowed_hosts)}")
+    print(f"  catalog         {roots.catalog_db}")
+    print(f"  thumbnails      {roots.thumb_root}")
+    print(f"  reveal root     {roots.reveal_root}")
+    print("  kinds           " + ", ".join(f"{kind} {count:,}" for kind, count in counts))
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
