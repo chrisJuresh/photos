@@ -599,6 +599,47 @@ anything uncommitted on purpose, say which and why.
 **Gate:** ~103,207 thumbnails on `E:`, zero checksum mismatches. Note the MB/s — step 9's
 estimate depends on it.
 
+**Done 2026-08-01.** **103,207** thumbnails on `E:`, **zero** checksum mismatches, zero ready
+rows whose file was absent. 1,006,445,644 bytes on disk, which equals the manifest's summed
+`byte_size` for those rows to the byte. 19m of wall clock at 32 reader threads: 90–102 files/s,
+sustained ~0.9 MB/s. `.arw` **2,346** copied — step 9 reconciles against that, and it is 860
+more than the 1,486 the prompt expected to replace. 42,827 rows not ready, exactly the error
+population, and nothing was generated for them. The extension split of what was copied is
+`.png` 54,889 · `.jpg` 27,951 · `.rw2` 13,893 · `.arw` 2,346 · none 2,344 · `.gif` 817 · a tail
+of 15 more.
+
+**Step 9's 5–6 h re-estimate is too pessimistic, and 0.9 MB/s is not the reason.** The
+thumbnail figure is an IOPS measurement wearing a bandwidth unit — 9.8 KB mean file size, so
+it reports seek latency and says nothing about sequential throughput. Measured step 9's actual
+shape directly instead: SHA-256 over a seeded random sample of 1,200 objects drawn from the
+real size distribution, read-only.
+
+| Readers | MB/s | files/s | 420 GB projects to |
+|---|---|---|---|
+| 1 | **62.0** | 22.6 | **1.9 h** |
+| 2 | 56.7 | 17.5 | 2.1 h |
+
+So: **2–3 h, not 5–6.** Three things this settles.
+
+- **Two readers is slower than one**, by 9%. The "one reader for bandwidth-bound work" half of
+  the standing rule is now measured on this volume rather than assumed. Step 9 should use one.
+- **A random sample is the pessimistic case** — step 9 walks the shard tree in path order, and
+  the head follows it. 62 MB/s is a floor, not a midpoint.
+- **The corpus is 451.2 GB across 146,034 objects, not 420 GB**, and its **median object is
+  20 KB against a 3.09 MB mean**. That skew is why one number cannot serve both passes. A
+  large-file-only probe on the same disk read 117.9 MB/s; the same disk does 0.9 MB/s on 9.8 KB
+  files. Neither is wrong and neither is step 9's number.
+
+Two notes for later steps:
+
+- **Presence on `E:` is the record of which files have a thumbnail — there is no catalog
+  column and no migration here.** Step 12's gate and the grid's `/t/<sha256>.webp` both answer
+  from the filesystem, and enumerating 103,207 files on NVMe takes 0.5 s. A column would be a
+  second copy of a fact the disk already holds, free to drift from it.
+- **The 384px tier is 1:1 with assets** — 103,207 ready rows, 103,207 distinct `asset_id`,
+  103,207 distinct `relative_path_text`, and every one of those sha256s is already in `file`.
+  No dedupe was needed and none is hidden in the counts.
+
 ---
 
 # Step 6 — The grid

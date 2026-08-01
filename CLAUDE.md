@@ -77,6 +77,15 @@ agreement that decided which filename patterns are adopted.
 python -m photolib.capture_time
 ```
 
+To copy MediaVault's existing 384px WebP derivatives onto the NVMe as grid thumbnails,
+checksum-verified. ~17 min at 32 reader threads. It generates nothing: assets whose
+derivative errored in v1 stay without one. Re-running copies only what is absent, so an
+interrupted pass resumes. `--limit N` stops after N for a throughput measurement.
+
+```bash
+python -m photolib.thumbnails
+```
+
 To run the archived test suite as a reference oracle:
 
 ```bash
