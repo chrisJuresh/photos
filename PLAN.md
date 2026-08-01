@@ -267,6 +267,11 @@ re-ingest, and widened triage rule for free.
 A migration runner and `schema_version` from the first commit — about 40 lines. Every
 future feature then arrives as a migration file.
 
+The two files are **one logical schema joined by `ATTACH`**, so every migration stamps
+`schema_version` in *both* of them and a migration file may create tables in either. SQLite
+does not commit atomically across two attached databases in WAL mode, so the runner refuses a
+pair whose recorded versions disagree rather than migrating onto a split schema.
+
 ## Pipeline
 
 ### Phase 0 — Fresh snapshot, then inventory from restic
@@ -488,7 +493,9 @@ whose derivative is regenerated must have its `phash_hex`, `dhash_hex`, `phash_b
 **The regression check cannot be a DB-only assertion.** `derivatives.source_width/height`
 equals the *post*-transpose size in 103,207 / 103,207 rows, and no column holds the true
 stored raster. Either re-read `EXIF:Orientation` and `File:ImageWidth/Height` from the object,
-or persist pre-rotation raster dimensions as a distinct column in the new schema. Assert that
+or persist pre-rotation raster dimensions as a distinct column in the new schema. **Step 3
+built neither** — the Schema section above lists no such column, so this branch is a migration
+`003` written at the point of use rather than a decision already taken. Assert that
 the rotation actually applied equals the container orientation for all eight EXIF values, and
 that `stack_feature_inputs.aspect_ratio` agrees with the shape `orientation_text` implies —
 that one check would have caught this at population scale.
@@ -909,7 +916,7 @@ later.**
 | ~~1~~ | ~~restic blob-list spike~~ | **Done 2026-08-01 — killed Phase 0's premise. Rewritten above.** |
 | ~~2~~ | ~~Hardlink spike~~ | **Done 2026-08-01 — mechanism confirmed, ordering and resume path rewritten above.** |
 | ~~2b~~ | ~~Orientation spike~~ | **Done 2026-08-01 — `.arw` inconsistent. 1,486-asset repair added above.** |
-| 3 | Schema + migration runner | Must persist pre-rotation raster dims and `st_nlink`/file ID |
+| ~~3~~ | ~~Schema + migration runner~~ | **Done 2026-08-01.** `schema_version` 2 in both files. `origin` carries `nlink` and `file_id`. Pre-rotation raster dims are **not** in the schema — step 8 chooses that branch or the re-read one, and pays a migration `003` if it wants the column |
 | 4 | Phase 2a import: `records` → `origin`, extended metadata | Cheap, no large I/O, unblocks the UI |
 | 5 | Grid UI against adopted 384px thumbnails | Proves paging, thumbnails, reveal — on real data, early |
 | 6 | Phase 0 inventory | `origin` reconciled, content-level cross-check against `scandir` |
