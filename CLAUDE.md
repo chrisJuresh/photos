@@ -59,6 +59,15 @@ To apply pending migrations to the configured databases:
 python -m photolib.migrate
 ```
 
+To import MediaVault's path history and extended metadata into the catalog. Re-running is
+safe: it inserts nothing twice, but it does re-read the 146,034 sidecars, so allow ~40 min.
+`--meta` additionally lays the exiftool readings out under `meta_root`, which is hours of
+USB-HDD head time and is off by default.
+
+```bash
+python -m photolib.adopt_mediavault
+```
+
 To run the archived test suite as a reference oracle:
 
 ```bash

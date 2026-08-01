@@ -917,7 +917,7 @@ later.**
 | ~~2~~ | ~~Hardlink spike~~ | **Done 2026-08-01 — mechanism confirmed, ordering and resume path rewritten above.** |
 | ~~2b~~ | ~~Orientation spike~~ | **Done 2026-08-01 — `.arw` inconsistent. 1,486-asset repair added above.** |
 | ~~3~~ | ~~Schema + migration runner~~ | **Done 2026-08-01.** `schema_version` 2 in both files. `origin` carries `nlink` and `file_id`. Pre-rotation raster dims are **not** in the schema — step 8 chooses that branch or the re-read one, and pays a migration `003` if it wants the column |
-| 4 | Phase 2a import: `records` → `origin`, extended metadata | Cheap, no large I/O, unblocks the UI |
+| ~~4~~ | ~~Phase 2a import: `records` → `origin`, extended metadata~~ | **Done 2026-08-01.** 146,034 `file` rows, 251,087 `origin` rows from 251,824 observations, 0 objects missing, 0 paths claimed by two assets. Capture time 38,200 (26.2%), not 38,767: the 567 shortfall is 560 `0000:00:00 00:00:00` EXIF nulls plus 7 odd formats, and rejecting a null sentinel as a date is correct. **The exiftool sidecars under `meta_root` were not written** — see below |
 | 5 | Grid UI against adopted 384px thumbnails | Proves paging, thumbnails, reveal — on real data, early |
 | 6 | Phase 0 inventory | `origin` reconciled, content-level cross-check against `scandir` |
 | 7 | Phase 1 prefilter | — |
@@ -927,6 +927,24 @@ later.**
 | 11 | **`origins.jsonl` export + server upload** | **Moved ahead of Phase 4. `G:\photos` deletable; Phase 4 unblocked** |
 | 12 | Phase 4 promote + Phase 5 group | Gated on step 11 completing and verifying |
 | 13 | Post-Phase-4 re-hash sweep | Phase 4 is not complete without it |
+
+**Step 4 measured three things that change later steps.** All on `G:`, 2026-08-01.
+
+- **Creating many small files is the expensive direction, and the cheap benchmark lies.**
+  1,500 gzip sidecars measured 880/s at 16 threads — entirely absorbed by the OS write cache.
+  The sustained rate once the cache has to flush is **4–8/s**, so the 146,034 `meta_root`
+  sidecars are 5–10 h, not 3 min. They are behind `--meta` and left to a step already paying
+  for a `G:` pass; the readings themselves are 74.8 MB of `raw_metadata_json` in the manifest,
+  and are a curated ~32-tag subset rather than full `exiftool -a -G` output, so that step has
+  to regenerate them anyway. Phase 4's 146,034 hardlinks are the same shape of cost.
+- **Never let SQLite join two tables of the manifest.** `assets JOIN asset_extended_metadata`
+  probes an index inside a 6.97 GB file once per row — one random seek at ~70 IOPS, measured
+  at **4–11 rows/s**, most of a day for the corpus. Two separate table scans joined in a dict
+  read the same 146,034 rows in **seconds**.
+- **Listing a sharded tree parallelises; the cost is per-directory latency, not bandwidth.**
+  101 entries/s serial against **394/s at 32 threads**. Reading the 146,034 sidecars sustained
+  ~65/s for 37 min — slower than a manifest scan would have been, and worth knowing before
+  step 7 walks 1.38M files.
 
 **Steps 11 and 12 were the other way round.** Phase 4 unlinks the last same-disk redundancy;
 the plan performed that irreversible delete one full step *before* the first off-device byte
