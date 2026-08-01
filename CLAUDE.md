@@ -45,7 +45,19 @@ Match written deliverables to the task. A bug fix does not need a summary docume
 
 ## Verifying work
 
-There is no build at the repository root yet. When you add one, put its commands here.
+The root build is a plain Python package, no venv and no dependencies beyond `pytest`. From
+the repository root:
+
+```bash
+python -m pytest tests -q
+```
+
+Tests run against temporary databases only; none of them opens a path from `config.toml`.
+To apply pending migrations to the configured databases:
+
+```bash
+python -m photolib.migrate
+```
 
 To run the archived test suite as a reference oracle:
 
