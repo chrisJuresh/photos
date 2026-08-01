@@ -774,8 +774,12 @@ assertions. And **the ThumbHash decoder is unverified**: `th` is null in all 146
 branch has never run. Step 9 is what proves it.
 
 Also measured: **22,531 stills have no thumbnail** (22,059 `.svg`, then `.msg` 198, `.dng` 146,
-`.jpg` 25) and render as neutral tiles — step 8's prefilter is what removes them, not the read
-path. Every still that *does* have a thumbnail has non-null `width`/`height`, zero exceptions, so
+`.jpg` 25) and render as neutral tiles. **Step 8 does not make them go away** — it writes
+`triage_rule` rows to `state.sqlite3`, and `/api/photos` joins `photo` to `file` on `kind` alone,
+so an excluded file keeps its `photo` row and its tile. Applying triage to the grid is a decision
+for step 11, and it is a real one: either the grid filters on the rule engine's verdict, or
+something rebuilds `photo`. Neither happens for free.
+Every still that *does* have a thumbnail has non-null `width`/`height`, zero exceptions, so
 the fallback aspect never applies to a tile showing an image. The row-value cursor
 `(sort_key, id) < (?, ?)` gives `SEARCH p USING INDEX photo_sort (sort_key<?)`, a seek rather than
 the ordered scan the expanded `OR` form produces, and a test pins the plan because there is no
@@ -913,6 +917,13 @@ anything uncommitted on purpose, say which and why.
 
 **Gate:** ~41,700 excluded, and `.png`, `.gif`, `.webp`, `.bmp` all still present.
 
+**Expect the grid to look identical afterwards, and do not treat that as a failure.** Step 6
+measured 22,059 `.svg` tiles rendering as empty placeholders, and it is tempting to read this
+step as the fix for them. It is not. This step writes `triage_rule` rows to `state.sqlite3`;
+`/api/photos` selects from `photo` joined to `file` on `kind`, and knows nothing about the rule
+engine. Every excluded file keeps its `photo` row and its tile until step 11 decides how a
+verdict reaches the read path.
+
 ---
 
 # Step 9 — Phase 2a verification read
@@ -1025,6 +1036,23 @@ anything uncommitted on purpose, say which and why.
 Then reload the grid — every tile should now paint a ThumbHash placeholder instantly, and the
 NEX-5N photos from 2019-12-31 to 2021-09-24 should be the right way up.
 
+**Two things step 6 left for this step, both of which will make the gate lie if ignored.**
+
+- **A plain reload will NOT show the repaired ARW thumbnails.** `/t/<sha256>.webp` is keyed on
+  the *asset* hash and served `immutable, max-age=31536000`, so a browser that has already loaded
+  those 1,486 tiles will not ask again for a year. Rewriting the file on `E:` changes nothing it
+  can see. **Hard-reload or clear the cache before judging the gate**, or the repair looks like it
+  failed. This is a mild echo of `F47` inside the new design and worth naming rather than
+  excusing: the URL is stable per asset, not per derivative, so it is honestly immutable only
+  because this step is the one and only time a derivative's bytes change. If a second such
+  mutation ever becomes likely, key the URL on the derivative's own checksum instead.
+- **The shipped ThumbHash decoder has never executed.** `th` is null in all 146,034 rows today,
+  so `thumbHashToDataURL` in `photolib/static/app.js` is unverified code. This step writes the
+  encoder, so it is the step that can prove them consistent: encode a known synthetic image,
+  decode it with the *shipped* function, and compare — do not assume the client half works
+  because tiles look plausible. A wrong decoder produces a wrong-coloured blur, which is exactly
+  the failure nobody notices.
+
 ---
 
 # Step 10 — Triage engine and survey
@@ -1115,6 +1143,25 @@ anything uncommitted on purpose, say which and why.
 
 **Gate:** you can work screens 0 through 7 end to end and land on a kept-file count you believe.
 That count is what step 12 and step 14 operate on.
+
+**This is where the framework decision lands — not step 6, and not step 10, which is backend
+only.** Step 6 was built vanilla on purpose: the grid's hot path is a scroll event mutating
+transforms on ~150 recycled tiles, which framework diffing only adds to, and a 125,738-item array
+would be opted out of reactivity anyway. Eight screens with a rule sidebar, live recomputing
+counts and per-file override toggles is the opposite case, and it is the first place a component
+layer earns its cost. Decide here, deliberately.
+
+If the answer is Svelte, the port is bounded and known: `packRows`, `visibleRows` and `fetchPage`
+in `photolib/static/app.js` are pure functions over plain arrays and move untouched; all DOM
+ownership is already scoped to a single `#canvas` element, so it is a wrapper rather than
+surgery; and the API contract does not move at all. Note that SvelteKit specifically buys little
+here — SSR is meaningless for a localhost client-side virtual scroll, and routing across the
+screens is trivial. Svelte without Kit keeps the Python server serving static files exactly as it
+does today.
+
+The paging contract to reuse, as built: `{photos: [{id, s, w, h, th}], next: {before, before_id}
+| null, kind, limit}`, cursor in the envelope rather than per row, and `next` derived from a
+`limit + 1` probe so exhaustion is a fact rather than `len < limit`.
 
 ---
 
@@ -1388,9 +1435,22 @@ promotions ran clean. What follows is everything around it.
 - Append-only log of every unlink with sha256, path, and the rule that excluded it. Never
   truncated, never rotated by this program.
 
-After promotion, change reveal_root in config.toml from the MediaVault objects root to the vault
-root, and confirm that clicking a photo in the grid still opens Explorer on the right file.
-Then run step 16 — this step destroys names and verifies nothing on its own.
+After promotion, repoint reveal. This is THREE changes, not one, and doing only the first
+breaks every reveal:
+  - file.vault_relpath currently holds a MediaVault-relative path
+    (objects\sha256\<aa>\<bb>\<sha>_..._<n>.blob). Rewrite it to the promoted vault path.
+  - photolib/reveal.resolve() joins the relpath to a BASE and proves containment under a ROOT,
+    and they are different directories: today base = mediavault_root, root = reveal_root
+    (G:\MediaVault\objects). Change the base at the one call site in photolib/grid.py from
+    mediavault_root to vault_root.
+  - config.toml reveal_root: G:\MediaVault\objects -> G:\vault.
+Changing only reveal_root leaves the base at G:\MediaVault while the root is G:\vault, so
+containment fails for every photo and /api/reveal returns 403 across the board. That is the
+designed failure — it refuses rather than revealing the wrong file — but it looks like the
+promotion broke, so make all three changes together.
+
+Then confirm that clicking a photo in the grid still opens Explorer on the right file, and run
+step 16 — this step destroys names and verifies nothing on its own.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
 build/rebuild â€” create it off main if it does not exist yet, otherwise stay on it.
@@ -1450,6 +1510,14 @@ anything uncommitted on purpose, say which and why.
 ```
 
 **Gate:** ~30,000 tiles. Non-zero RAW/JPEG groups. The incremental-cost test passes.
+
+**Close the grid before this runs, and reload it after.** Collapsing ~14,000 tiles rewrites the
+`photo` table, and `photo.id` is regenerable output that re-grouping reassigns —
+`photolib/capture_time.resolve()` already does `DELETE FROM photo` then re-inserts. A browser
+holding a page of ids from before the regroup will POST a stale id to `/api/reveal` and get
+Explorer opened on **a different photo**, with no error anywhere. Read-only and harmless, but
+baffling. Everything durable already keys on `sha256`, so this is the only surface that carries a
+regenerable id, and a reload is the whole fix.
 
 ---
 
