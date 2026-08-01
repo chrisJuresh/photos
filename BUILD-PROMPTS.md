@@ -30,7 +30,7 @@ Set the effort level in your client before sending. The ladder used here:
 | Level | When | Steps |
 |---|---|---|
 | `low` | Mechanical, fully specified, nothing to decide | 0 ✅, 8 |
-| `medium` | Normal implementation against a clear spec | 1 ✅, 2, 3, 5, 11, 13b |
+| `medium` | Normal implementation against a clear spec | 1 ✅, 2 ✅, 3 ✅, 5, 11, 13b |
 | `high` | Correctness-critical, or a design decision inside it | 4, 6, 7, 9, 10, 12, 13, 15, 16 |
 | `xhigh` | Irreversible, operating on data with no second copy | 14 |
 
@@ -89,6 +89,17 @@ better served by a targeted security review after it builds than by a fan-out wh
   in this repo is precisely how hard rule 5 gets broken. The `pre-commit` hook described below
   refuses newly added media, `*.sqlite3`, `*.jsonl` and `*.log`, but it is a backstop, not a
   licence to stage blindly.
+
+- **Threads on `G:` — split by what is actually the bottleneck.** "G: is a USB HDD, so one
+  reader" is right for *bandwidth*-bound work (step 9's 420 GB sequential hash) and wrong for
+  *latency*-bound work. Step 3 measured, on this volume: listing a sharded tree 101 entries/s
+  serial against 394/s at 32 threads; reading small JSON files 41/s serial against 86/s at 32.
+  Anything that touches many small files or many directories wants 16–32 threads in **one**
+  process. This is about threads, not about the agent fan-out ruled out above.
+- **Creating many small files on `G:` is the expensive direction, and a small benchmark of it
+  lies.** 1,500 gzip files measured 880/s at 16 threads because the OS write cache swallowed
+  them whole; the sustained rate once it must flush is 4–8/s. Benchmark writes at a scale that
+  exceeds the cache, or do not quote the number.
 
 If a session proposes a job ledger, a worker runtime, a materialized projection table, an ORM,
 or a plugin seam — that is v1 reappearing. Say no; `PLAN.md` § "Explicitly not building" lists
@@ -406,6 +417,25 @@ anything uncommitted on purpose, say which and why.
 near 38,767 (26.6%) — if it reads 6,451, the ambiguous-flag column is being honoured and step 4
 has to override it.
 
+**Done 2026-08-01.** Exactly 146,034 `file` rows and 251,087 `origin` rows over 251,824
+observations; 0 objects missing from disk, 0 paths claimed by two assets, 0 malformed sidecars.
+Capture time is **38,200 (26.2%), not 38,767** — the 567 shortfall is 560 `0000:00:00 00:00:00`
+EXIF null sentinels plus 7 odd formats, and a null sentinel is not a date. The ambiguous flag is
+ignored, so the failure the gate was written to catch did not happen. ~45 min, 37 of them the
+sidecar read.
+
+Two things the prompt got wrong, both now measured and recorded in `PLAN.md` § build order:
+
+- **The `records` sidecars are the *slow* path, not the cheap one.** Reading 146,034 of them
+  sustained ~65/s for 37 min. The manifest scan the prompt was avoiding reads the same rows in
+  seconds — provided nothing asks SQLite to *join* two of its tables, which costs a random seek
+  per row and measured 4–11 rows/s.
+- **The exiftool readings were NOT laid out under `meta_root`.** They exist — 74.8 MB of
+  `raw_metadata_json`, one per asset — but writing them as 146,034 gzip files measured 4–8/s
+  sustained, i.e. 5–10 h. They are behind `python -m photolib.adopt_mediavault --meta`, which is
+  resumable. They are also a curated ~32-tag subset, not full `exiftool -a -G` output, so **step
+  12 must generate the real sidecars regardless** — do not treat a populated `meta_root` as done.
+
 ---
 
 # Step 4 — Capture time, and the first `photo` rows
@@ -439,7 +469,7 @@ The chain, in order, with the winner recorded in taken_src:
          Mask the RELATIVE PATH, not just the basename: some dates live in the directory
          (2019-07-04\IMG_1234.jpg) and basename-only masking loses them silently.
        - Group by the masked shape, count, order by count descending. One pass over the
-         ~251,087 origin rows step 3 imported — NOT 1.38M, which is what step 7's restic
+         251,087 origin rows step 3 imported (confirmed exact) — NOT 1.38M, which is step 7's restic
          inventory adds later and does not exist yet. Seconds, not minutes.
        - The counts MUST sum to the total row count. That sum is the coverage proof — every path
          is in exactly one bucket, so no pattern can hide from this the way one can hide from a
@@ -508,7 +538,10 @@ Copy the existing 384px WebP derivatives out of the MediaVault derivative tree t
 - Verify each file against its recorded checksum_sha256 before accepting it. Count mismatches
   separately from missing files; a mismatch is a real problem, a missing file is expected for
   the 42,827 error rows.
-- One or two reader threads. G: is a USB HDD — more readers is slower, not faster.
+- ~16–32 reader threads. **This reverses the original advice** — see "Threads on G:" in the
+  standing rules. 103,207 small files is latency-bound, not bandwidth-bound, and step 3 measured
+  2–3.9x from concurrency on exactly this shape of work. One or two readers is right for step 9's
+  420 GB sequential hash, not for this.
 - Idempotent: re-running copies only what is absent.
 - Generate NOTHING. Files with no 384px derivative stay recorded as missing and are step 12's
   problem.
@@ -795,7 +828,10 @@ E. Regression check, and it cannot be a DB-only assertion: derivatives.source_wi
    assets.width/height — it fires on 50 real, correct assets.
 
 Constraints:
-- One or two reader threads against G:, about twelve decode workers. 16 CPUs, one disk head.
+- Reader threads differ by pass, and the difference is measured: **one or two** for A's 420 GB
+  object re-hash, which is bandwidth-bound and where a second stream only makes the head seek;
+  **16–32** for C's derivative tree, which is 434,673 small files and latency-bound. See "Threads
+  on G:" in the standing rules. About twelve decode workers either way — 16 CPUs, one disk head.
 - EVERY decode gets a wall-clock timeout, an output size cap, and a memory cap. F55 is a HANG,
   not a crash — a timeout is the only thing that saves the run.
 - Progress commits at row granularity via file.state. Killing the process loses at most one
