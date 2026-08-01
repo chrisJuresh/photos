@@ -14,9 +14,9 @@ Measured 2026-07-31 / 08-01, not assumed.
 
 | | |
 |---|---|
-| `G:\photos` | 1,382,380 files, 1,073.53 GB |
-| `G:\ResticPhotos` | 406.22 GB, 2 snapshots, newest **2026-07-18**. Coverage of the current 1,382,380 files is **unverified** — the repo has never been opened |
-| v1 catalogued | 1,374,328 files — **8,052 fewer than the disk has** |
+| `G:\photos` | **1,374,328 regular files**, 1,073.53 GiB, plus 8,052 WSL symlinks that are not files at all (see below) |
+| `G:\ResticPhotos` | 406.22 GiB, 2 snapshots, newest **2026-07-18**. Enumerated and fully reconciled 2026-08-01: 1,374,298 file nodes, 353,949 dirs, **zero** symlink nodes, **zero** U+FFFD paths. Uploaded off-site 2026-08-01 |
+| v1 catalogued | 1,374,328 files — **exactly the regular-file count. There was no v1 shortfall; the earlier census over-counted** |
 | v1 called "media" | 251,087 instances / 966.1 GB → 146,034 distinct / 420.17 GB |
 | Exact duplicates | **546 GB of logical bytes** — not a reclaimable-space figure (see below) |
 | With EXIF camera | 37,822 |
@@ -39,13 +39,34 @@ Hardware, which drives most decisions:
 **One USB HDD head is the bottleneck for everything.** Every phase below is designed around
 reading it as few times as possible.
 
-**Measured G: throughput, 2026-08-01 — 110 MB/s was wrong by 3–5×.** Streaming SHA-256 over
-randomly sampled MediaVault objects measured **22.5 / 28.4 / 34.5 MB/s** in three independent
-runs; cold random reads over the sha256-sharded store measured 2.7–23.6 MB/s; the drive does
-~70 read IOPS at 53 ms average latency under load. Cold `stat` on the object store is 31.3 ms
-mean / 297 ms p95 against 0.010 ms warm — a 3,000× cold/warm ratio. **Every hour estimate in
-this plan was computed from 110 MB/s and every one of them is 3–5× optimistic.** They have
-been revised below; do not reintroduce the old figure.
+**Measured G: throughput — the number depends entirely on access pattern, and both earlier
+figures were measured on unrepresentative workloads.**
+
+Random access, measured over MediaVault's sha256-sharded object store: streaming SHA-256 at
+**22.5 / 28.4 / 34.5 MB/s**; cold random reads 2.7–23.6 MB/s; ~70 read IOPS at 53 ms average
+latency; cold `stat` 31.3 ms mean / 297 ms p95 against 0.010 ms warm, a 3,000× ratio. That store
+is hash-sharded, so consecutive objects are deliberately scattered — it is the worst case, not
+the typical one.
+
+Directory-order access over `G:\photos`, measured 2026-08-01, which is what a walk actually does:
+
+| workload | rate | concurrency |
+|---|---|---|
+| big files (>1 MiB), directory order | 79.4 MB/s | 1 thread |
+| big files, directory order | **94.4 MB/s** | 4 threads |
+| big files, directory order | 67.9 MB/s | 16 threads — head thrashes |
+| big files, random order | 59.6 MB/s | 1 thread |
+| small files (≤1 MiB), directory order | 105.8 / 146.1 / 286.2 / **400.8** files/s | 1 / 6 / 16 / 40 threads |
+| small files, random order | 26–33 files/s | any thread count |
+| metadata-only `scandir` walk | 1,450 entries/s | 1 thread |
+
+Three things follow and all three are load-bearing. **Concurrency helps the two regimes in
+opposite directions** — small files want ~40 workers (3.8× over serial), big files want ~4 and
+degrade past that; one pool for both is wrong. **Random order destroys the small-file regime** —
+26–33 files/s versus 401, a 13× penalty, because it defeats readahead; never hash in hash order
+or shuffled order. **110 MB/s was optimistic for random access and roughly right for sequential
+big-file reads**; the 3–5× correction applies to random-access estimates only. Do not apply one
+figure to both.
 
 **Volume facts, measured.** `G:\photos`, `G:\MediaVault`, `G:\ResticPhotos` and `G:\backup`
 are one NTFS volume (serial `0xb42554ea`) on partition 2 of disk 3 — one enclosure, one
@@ -57,9 +78,55 @@ short-name pathology. Long paths work unprefixed (369 chars verified). **There i
 affordance**: `DeleteFileW` bypasses the Recycle Bin and VSS cannot be queried from a
 non-elevated token.
 
-**`G:\photos` pathological-input census** (own read-only walk, 2026-08-01): 1,382,380 files,
-1,152,691,239,120 bytes, 123,710 distinct sizes, 19,660 zero-byte files, 896 non-ASCII
-filenames, 55 paths over 255 chars, 1 file over 2 GiB, 0 stat errors.
+**`G:\photos` pathological-input census** (own read-only walk, 2026-08-01, 953 s at 1,450
+entries/s): 1,382,380 directory entries, 353,980 directories, 1,152,691,239,120 bytes, 123,710
+distinct sizes, 896 non-ASCII filenames, 55 paths over 255 chars, 1 file over 2 GiB, 0 stat
+errors.
+
+**Of those 1,382,380 entries only 1,374,328 are files.** 8,052 are WSL symlinks — NTFS reparse
+points carrying tag `0xa000001d` (`IO_REPARSE_TAG_LX_SYMLINK`). They report `st_size == 0`,
+`DirEntry.is_symlink()` returns **False** for them because that call only recognises
+`IO_REPARSE_TAG_SYMLINK`, and **none of them can be opened** (200/200 sampled failed with
+`OSError`). Both restic and v1 correctly declined them. A walk that classifies with `is_file()`
+mis-counts them as 8,052 zero-byte files and then produces 8,052 open errors, which under the
+"never treat could-not-open as no-duplicate-found" rule becomes 8,052 spurious hard stops. Test
+`st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`) instead. Genuine zero-byte files:
+**11,608**, all present in the snapshot.
+
+**Size distribution, and it governs every I/O estimate here.** 87.4% of files hold 0.64% of the
+bytes; 104,745 files (7.6%) hold 1,130.35 GB (98.1%). These are two different workloads that
+want different concurrency, and a single MB/s figure describes neither.
+
+| bucket | files | %files | GB | %bytes |
+|---|---|---|---|---|
+| 0 B | 19,660 | 1.42% | 0.00 | 0.00% |
+| 1 B – 4 K | 782,428 | 56.60% | 0.75 | 0.06% |
+| 4 K – 64 K | 406,635 | 29.42% | 6.67 | 0.58% |
+| 64 K – 1 M | 68,885 | 4.98% | 14.91 | 1.29% |
+| 1 M – 4 M | 34,504 | 2.50% | 103.92 | 9.02% |
+| 4 M – 16 M | 38,414 | 2.78% | 264.12 | 22.91% |
+| 16 M – 64 M | 31,280 | 2.26% | 612.14 | 53.11% |
+| 64 M – 1 G | 550 | 0.04% | 109.01 | 9.46% |
+| > 1 G | 24 | 0.00% | 41.16 | 3.57% |
+
+Byte split by top-level subtree. `home-chris arch backup` is 78.5% of the entries and 20% of the
+bytes; the two SD-card trees are 1.2% of the entries and 18% of the bytes:
+
+| subtree | entries | GB | big files (>1 MiB) |
+|---|---|---|---|
+| `10tb arch backup` | 256,833 | 458.66 | 47,880 |
+| `home-chris arch backup` | 1,085,547 | 230.06 | 17,377 |
+| `10tb win 11-04-24 backup` | 12,368 | 171.02 | 12,302 |
+| `lumix f 7-15-26 sd` | 10,284 | 126.96 | 10,284 |
+| `usb f 7-15-26 sd` | 6,204 | 76.29 | 6,089 |
+| `arch laptop backup` | 5,579 | 51.90 | 5,338 |
+| `a52s 5g backup` | 5,492 | 37.44 | 5,412 |
+| `win pc 7-15-26` | 72 | 0.34 | 63 |
+
+**Units.** The "GB" labels inherited from earlier drafts of this document are GiB: 1,073.53 "GB"
+is 1,152,691,239,120 bytes = 1,073.53 GiB = 1,152.69 decimal GB, and MediaVault's 420.17 "GB" is
+451,152,506,927 bytes. The tables in this section and all Phase 0 timings use decimal GB derived
+from raw byte counts. Do not mix the two when comparing figures across sections.
 
 **On "546 GB of exact duplicates".** That is a v1-derived logical-bytes figure and it is not
 reclaimable space. NTFS hardlinked names are one physical extent with several names, and
@@ -274,31 +341,100 @@ pair whose recorded versions disagree rather than migrating onto a split schema.
 
 ## Pipeline
 
-### Phase 0 — Fresh snapshot, then inventory from restic
+### Phase 0 — Inventory, reconciled against restic
 
-> **Spike resolved, 2026-08-01. The original mechanism is dead.** `restic cat tree` does
-> expose the ordered blob list, exactly as assumed — and it is unusable twice over. This
-> section is the rewrite.
+> **Spike resolved 2026-08-01, then the phase was re-costed against the actual repo on the same
+> day.** SPIKE A's finding stands: `restic cat tree` does expose the ordered blob list, and it is
+> unusable for identity twice over. What changed is everything downstream of that. The repo was
+> opened, enumerated and fully reconciled, and the mechanism the rewrite specified — a mandatory
+> `--force` re-read of 1.07 TB — turned out to defend against a failure that **cannot occur in
+> this repository**. The section below is the second rewrite and it is the one to build from.
+
+**There is no `restic backup --force` in this phase any more.** The reasoning that made it
+mandatory was sound in general and inapplicable here:
+
+- SPIKE A's failure needs a file to be read by backup *N*, modified in place at identical size
+  and mtime, then skipped by backup *N+1*, which carries the stale blob list forward. It
+  requires **two reads of the same file.**
+- `G:\ResticPhotos` contains exactly two snapshots and only **one read**. `e7d60189` ran
+  2026-07-18 01:42:47 → 10:28:35 and read all 1,374,298 files. `ce88f697` ran 16:40:32 →
+  16:47:59 with `e7d60189` as parent and reported `files_new:0, files_changed:0,
+  files_unmodified:1374298, dirs_changed:1, data_blobs:0, data_added:293` — one directory's
+  metadata, nothing else. Every content list in the repo comes from that single read.
+- So there is no earlier read for a stale list to be carried forward *from*. The defect is
+  structurally impossible here, and `--force` would buy an 8h46m re-read of 1.07 TB — restic's
+  own measured time for that tree — in exchange for nothing.
+
+`--force` remains mandatory the moment this repo receives a **second** backup pass. Keep the
+reasoning; the trigger condition is what changed. `--ignore-inode` and `--ignore-ctime` do not
+substitute for it. The control case held in the spike: mtime bumped with content untouched does
+trigger a re-read, so the failure is one-directional and silent in the dangerous direction.
+
+**The reconciliation is already done, and it closes completely.** Measured 2026-08-01 against
+snapshot `ce88f697`, `restic --no-lock ls --json --long --recursive` at 14,571 nodes/s (119 s for
+1,728,247 nodes — PLAN's earlier 6,750 nodes/s was 2× pessimistic):
+
+| | |
+|---|---|
+| snapshot file nodes | 1,374,298 — sums to 1,152,680,261,990 bytes, matching its own summary exactly |
+| snapshot dir nodes | 353,949 |
+| snapshot symlink nodes | **0** |
+| snapshot paths containing U+FFFD | **0** |
+| in snapshot, absent from disk | **0** |
+| on disk, absent from snapshot | 8,082 |
+
+The 8,082 resolve into two named sets with nothing left over:
+
+- **8,052 are the WSL symlinks** described in Ground facts — reparse tag `0xa000001d`, zero
+  bytes, unopenable. restic correctly declined them and so did v1. They are not a gap; the
+  earlier "8,052-file gap" was a census artefact and **there was never anything missing.**
+- **30 are git loose objects** under `home-chris arch backup\work\archive\2ux\.git\objects\`,
+  10,975,971 bytes, created after the snapshot.
+
+Plus 6 files whose on-disk size disagrees with the snapshot — `COMMIT_EDITMSG`, `config`,
+`index`, and three reflogs in that same `2ux` repo, all grown, total delta 1,159 bytes. The byte
+arithmetic closes to the byte:
 
 ```
-restic backup G:\photos --force
+1,152,691,239,120 (disk) − 1,152,680,261,990 (snapshot) = 10,977,130
+                                = 10,975,971  (30 new git objects)
+                                +      1,159  (6 grown git files)
 ```
 
-`--force` is **mandatory, not defensive**. Incremental mode skips any file whose size *and*
-mtime match the parent snapshot and carries the stale blob list forward. Reproduced: a JPEG
-rewritten by `exiftool -P -overwrite_original -Artist=…` at the same tag length keeps its
-size and its mtime to the nanosecond, restic reports `files_changed:0, data_blobs:0`, and
-`restic restore` of the *newest* snapshot then returns the **old bytes**. `--ignore-inode`
-and `--ignore-ctime` do not fix this; only `--force` re-reads. The control case holds —
-mtime bumped with content untouched does trigger a re-read — so the failure is
-one-directional and silent in the dangerous direction.
+**Only 39 files in 1,382,380 have an mtime after the backup ended, and zero were modified
+during it.** 30 are those new git objects; the remaining 9 are in the snapshot and total 8,711
+bytes, all inside `work\archive\{1ux,2ux}\.git\`. Six changed size. The other three —
+`1ux\.git\index` and both `refs\...\main` at exactly 41 bytes — match the snapshot's size while
+their mtime does not. A git ref is 40 hex characters and a newline, so a different commit is
+*the same size with different bytes*: SPIKE A's failure shape, occurring for real, at a scale of
+three files and 123 bytes, none of them photographs.
 
-This closes the 8,052-file gap. The snapshot is then **current but not authoritative**.
-Restic's Windows node JSON carries no inode, nlink or device field; it drops alternate data
-streams; and it replaces unpaired UTF-16 surrogates in filenames with U+FFFD, so two
-distinct files can be reported at one byte-identical path that does not exist on disk and
-`json.loads` never raises. Treat the snapshot as a second opinion to be reconciled against a
-direct `os.scandir` walk, never as the sole inventory.
+That is the whole extent of drift in this corpus. One `git commit` in one archived repository on
+2026-07-19 at 03:09.
+
+**What the snapshot still is not.** Restic's Windows node JSON carries no inode, `nlink` or
+device field, and it drops alternate data streams. `nlink` and the NTFS file ID must come from
+the filesystem side. The U+FFFD surrogate hazard is real in general but **measured at zero
+occurrences here**, so it needs a guard, not a reconciliation path.
+
+**Do not derive any identity from restic-stored blob lists.** Unchanged from the first rewrite;
+the premise this plan was built on is false in the direction dedup depends on:
+
+- A node's `content` list is the chunk list from the last time restic actually *read* the
+  file. Equal lists therefore do **not** imply equal bytes — same path, three snapshots, the
+  stored key unchanged while the on-disk SHA-256 had changed.
+- The chunker polynomial is not repo-fixed, it is write-path-fixed. `restic copy` imports
+  foreign-chunked blobs with **no warning**, so one repo can hold byte-identical content
+  under two different blob lists (verified: 12 blobs vs 13 for the same 20 MB file, in one
+  repo). Checked 2026-08-01: this repo is format version 2, single `chunker_polynomial`
+  `3ecd3d7919bbcf`, and **neither snapshot carries an `original` field** — no `restic copy` has
+  ever touched it. The hazard is absent here; the prohibition stands anyway.
+- `sha256(json(content))` false-merges every symlink and junction onto one key, because
+  those nodes carry `content: null` — and a `(size, content)` composite does not rescue it,
+  since symlink nodes have no `size` key either.
+- The formula is under-specified: `json.dumps(c)` and `json.dumps(c, separators=(',',':'))`
+  differ for every list with ≥2 elements, i.e. every real photo, and agree on the empty list,
+  i.e. the only case anyone would put in a test fixture.
 
 **Do not derive any identity from restic-stored blob lists.** The premise this plan was
 built on is false in the direction dedup depends on:
@@ -317,78 +453,149 @@ built on is false in the direction dedup depends on:
   differ for every list with ≥2 elements, i.e. every real photo, and agree on the empty list,
   i.e. the only case anyone would put in a test fixture.
 
-**The route that actually works — and it is faster than the one it replaces.** Per snapshot
-root entry, in a single invocation:
+**Half of this phase's output already exists.** `adopt_mediavault` has run. As of 2026-08-01
+`E:\photolib\catalog.sqlite3` holds:
 
-```
-restic --no-lock dump --archive tar <snapshot> <root-entry-name>
-```
+| | |
+|---|---|
+| `origin` rows | 251,087 — **every one carrying a `sha256`** |
+| bytes covered | 1,037,335,826,898 — **90.0% of the disk** |
+| distinct `sha256` | 146,034 — the duplicate groups already exist |
+| `file` rows | 146,034, all `state='adopted'` |
+| `photo` rows | 146,034 |
+| `origin.nlink`, `origin.file_id` | `NULL` for all 251,087 |
 
-piped into a streaming tar reader computing SHA-256 per member. `content_key = sha256(full
-file bytes)`, stored alongside `size_bytes`. Measured: 30,000 files fully hashed in 7.5 s in
-one invocation; decrypt runs above 500 MB/s so the G: read is the bound. It round-trips CJK,
-Cyrillic, emoji, accented and 125-char paths correctly. Two gotchas to encode: `--no-lock` is
-mandatory on every read command (the default writes a lock file *into the repo*), and the
-path argument must be a **bare root-entry name with no leading slash** — `/`, `.` and
-`/data4` all fail with the misleading `path "\\C:" not found in snapshot`, while `data4`
-works. Discover root entry names from `restic --no-lock ls --json` first.
+Cross-checked against the fresh walk: all 251,087 recorded paths exist on disk and **zero** have
+a size disagreement. v1's `source_versions.hash_status` explains the shape of what is left —
+`verified` 251,824, `not_media` 1,123,246, `error` 356. v1 hashed the media set and deliberately
+never hashed the rest, which is correct for building a photo vault and insufficient for a
+deletion gate.
+
+**Those 251,087 hashes are re-derived from the bytes, not trusted.** Decided 2026-08-01. The path
+and size cross-checks above are corroboration, not verification: a file rewritten in place at
+identical size passes both. Re-reading them costs ~3.05 h and turns v1's work into a **free
+per-file cross-check across 90% of the bytes** — v1's recorded value against an independent one.
+Disagreement there is a finding in its own right.
+
+**Never overwrite an adopted `sha256` with a freshly computed one.** Compare, and on
+disagreement record both and abort. Silently replacing the adopted value destroys the only
+evidence that v1 and this pass disagreed.
+
+**Disk side — one pass, two regimes, different concurrency.** A direct `os.scandir` walk with
+streaming SHA-256, capturing `st_nlink` and the NTFS file ID from `os.fstat` **on the already-open
+handle** so identity metadata costs no extra I/O. Partition by size and run the regimes
+separately; measured rates and the reasoning are in Ground facts.
+
+| regime | population | rate | workers | hours |
+|---|---|---|---|---|
+| big (>1 MiB) | 104,745 files / 1,130.35 GB | 94.4 MB/s | 4 | 3.3 |
+| small (1 B–1 MiB) | 1,257,975 files | 400.8 files/s | 40 | 0.9 |
+| genuine zero-byte | 11,608 files | — | — | 0 (constant hash) |
+| WSL symlinks | 8,052 | — | — | 0 (excluded by reparse tag) |
+| | | | | **≈ 4.2 h** (4.1–5.7) |
+
+Walk in **directory order**, never hash order or shuffled order: random order costs 13× on the
+small-file regime. The zero-byte files all share `e3b0c442…`; that is one key, and collapsing
+them destroys distinct paths without losing bytes, so keep the rows.
+
+**Repo side — structural verification plus a targeted sample, not a full second pass.** Chosen
+2026-08-01 over the full per-file dump comparison. `restic --no-lock check --read-data` reads the
+406 GB of packs and proves every blob decrypts and matches its stored hash — **≈1.1 h, and this
+figure is estimated, not measured. Benchmark it with `--read-data-subset=1/20` first.** What it
+cannot prove is that the trees point at the right blobs, so add:
+
+- the 9 files with post-backup mtimes, dumped and compared individually — 8,711 bytes;
+- a directory-order cluster sample spanning both regimes, ~20 GB, ~5 min.
+
+The full per-file comparison — `restic --no-lock dump --archive tar <snapshot> G` piped into a
+streaming tar reader hashing each member — costs **≈5.1 h more** and is the only thing that rules
+out an in-place edit that preserved its mtime. Measured dump rates: 105.6 MB/s in a low-dedup
+subtree, 81.3 MB/s and 883 files/s in the small-file subtree, 52.9 MB/s and falling in the
+high-dedup `10tb arch backup` region. **Dedup makes restore slower, not faster** — unique content
+was written in read order so its blobs are pack-adjacent and stream sequentially, while
+deduplicated content pulls blobs scattered across packs written at earlier moments. That inverts
+the naive expectation and it is why the whole-tree projection carries a wide band.
+
+Two gotchas to encode: `--no-lock` on **every** read command, because the default writes a lock
+file *into the repo*; and `dump`'s path argument must be a **bare root-entry name with no
+leading slash**. Confirmed here — this snapshot's single root entry is **`G`**, with `photos`
+one level below it. `/`, `.` and `/photos` all fail with the misleading
+`path "\\C:" not found in snapshot`. Restic's index loads in 1.6–2.2 s, so invocation startup is
+negligible; per-file invocation is not, which is why the sample is a cluster sample.
 
 Use `restic --no-lock ls --json --long --recursive` for the path/size/mtime inventory only —
-never for identity. It scales: ~6,750 nodes/s through a 100× directory-count increase, ~4
-minutes projected for 1.38 M nodes.
+never for identity.
 
 Preconditions, each an abort rather than a skip:
 
-- `type == "file"` as an explicit allowlist, never `not dir`. There are three node types:
-  junctions appear as `type: "symlink"` with a `linktarget`, and `content` is
-  present-with-null on both dir and symlink nodes.
+- `type == "file"` as an explicit allowlist, never `not dir`. Three node types exist in general;
+  junctions appear as `type: "symlink"` with a `linktarget`, and `content` is present-with-null
+  on both dir and symlink nodes. This snapshot contains zero symlink nodes, so the allowlist is a
+  guard rather than a filter that fires.
 - `size_bytes = node.get("size", 0)` — the key is absent for zero-byte *and* symlink nodes.
+- On the filesystem side, classify with `st_file_attributes & 0x400`
+  (`FILE_ATTRIBUTE_REPARSE_POINT`), **not** `is_file()` / `is_symlink()`. The 8,052 WSL symlinks
+  defeat both.
 - Decode all subprocess output with an explicit `encoding="utf-8"`. Python's Windows default
   is the ANSI codepage, which silently rewrites non-ASCII into different, valid-looking paths
   with no exception raised. 896 non-ASCII names and 55 over-255-char paths are exposed to it.
-- `restic --no-lock cat config` first: record `chunker_polynomial`, and check whether any
-  snapshot carries an `original` field (evidence of a past `restic copy`).
-- Named decisions, not defaults, for: symlinks and junctions (excluded — `content` is null),
-  alternate data streams (not represented; lost on restore), the 19,660 zero-byte files (all
-  one key — collapsing them destroys distinct paths without losing bytes), the 55 paths over
-  255 chars, and the one file over 2 GiB.
-- Duplicate means *distinct filesystem object with identical content*. Capture `st_nlink` and
-  the NTFS file ID during the disk walk and group by file ID first; hardlinked names are one
-  object and must never be counted as reclaimable space or offered as reject candidates.
+- Named decisions, not defaults, for: the 8,052 WSL symlinks (excluded, unopenable, zero bytes —
+  record the paths, never attempt a hash), alternate data streams (not represented by restic;
+  lost on restore), the 11,608 genuine zero-byte files (one shared key, rows kept), the 55 paths
+  over 255 chars, and the one file over 2 GiB.
+- Duplicate means *distinct filesystem object with identical content*. Group by NTFS file ID
+  first; hardlinked names are one object and must never be counted as reclaimable space or
+  offered as reject candidates. `nlink > 1` is also an opportunity — hash once per file ID and
+  reuse — and `home-chris arch backup` is the tree where hardlinked backup generations would
+  show up if they exist.
 
-Writes `origin` (~1.38 M rows) and `file` (`state='pending'`). Assert before proceeding:
-`count(distinct path) == count(file rows)`, and
-`files_seen_on_disk == files_seen_in_snapshot == files_hashed_from_repo == files_hashed_from_disk`.
-Any inequality aborts loudly. Count U+FFFD in restic-reported paths and route those rows to
-filesystem-side reconciliation. **Never treat "could not open" or "could not hash" as "no
-duplicate found".**
+Writes `origin` (1,374,328 rows) and `file` (`state='pending'`). Assert before proceeding:
+`count(distinct path) == count(origin rows)`, and
+
+```
+files_seen_on_disk == files_hashed_from_disk == 1,374,328
+files_seen_in_snapshot                       == 1,374,298
+```
+
+**Those two numbers are expected to differ by exactly 30, and the 30 are enumerated.** The
+earlier form of this assert demanded all four counters be equal; that was written before the
+reconciliation existed and it would abort on a correct run.
+
+**The gate must distinguish two kinds of hash disagreement, and the earlier text did not.**
+
+- **Size differs, or mtime is after the backup** → the file changed since 2026-07-18. Expected,
+  benign, already enumerated at 6 and 9 files respectively. Log it and re-back-up. Not a stop.
+- **Size and mtime both match but the hash differs** → either an in-place edit that preserved
+  mtime, or the repo holds bytes it should not. **This is the hard stop** and it is the only one.
+
+**Never treat "could not open" or "could not hash" as "no duplicate found".** With the reparse
+guard in place the expected count of unopenable files is zero; without it, it is 8,052.
 
 **The rejected fallback was costed on a number that is 20× wrong.** "`scandir` walk, group by
 size, hash only inside size-collision groups" saves 4%, not most: measured on `G:\photos`,
 **95.99% of files (1,326,992) and 90.9% of bytes (1.05 TB)** sit in multi-member size groups,
 because there are only 123,710 distinct sizes and the distribution is quantized into groups
-of 675–1,047 members. Size grouping is lossless and near-useless here. If a cheap pre-filter
-is wanted, use first-64 KiB + last-64 KiB + size — but the cross-check below needs the full
-read regardless.
+of 675–1,047 members. Size grouping is lossless and near-useless here.
 
-**What the dump route actually saves:** not hashing — SHA-256 runs at ~1.5 GB/s against a
-disk measured at 22–35 MB/s, so hashing during the read is free by a factor of ~50. It saves
-knowing which files are duplicates before reading them, so Phase 2 reads 420 GB instead of
-966 GB. At the measured rate those ~546 GB of avoided reads are **~5–7 hours**, not 1.5 — the
-saving is larger in wall-clock than the plan claimed, while every absolute figure was ~4×
-short. It costs one sequential pass over the 406 GB repo, on the same disk head. **Measure
-sequential pack-read throughput before committing to this estimate** — it is the one input
-nobody has measured.
+**What the hashing buys, and it is not verification.** SHA-256 runs at ~1.5 GB/s against a disk
+doing 94 MB/s, so hashing during a read the phase performs anyway is free by a factor of ~16.
+The output is the duplicate map, and that is what lets Phase 2 read 420 GB instead of 966 GB —
+~5–7 hours of avoided reads. The disk-side pass is this phase's **product**, not its overhead.
+Only the repo-side verification is overhead.
 
-**Note this reorders your request.** You asked for triage *before* dedupe. Dedupe is now
-**cheap** rather than free — one repo pass instead of 1.07 TiB of scattered reads across
-353,981 directories — so triage still runs on deduped content, which is strictly better for
-review: ~146k tiles instead of ~251k, each showing "appears at 5 paths" rather than appearing
-five times.
+**Note this reorders your request.** You asked for triage *before* dedupe. Dedupe is cheap rather
+than free, so triage still runs on deduped content, which is strictly better for review: ~146k
+tiles instead of ~251k, each showing "appears at 5 paths" rather than appearing five times.
 
-**Policy question this raises.** Phase 0's first action *writes* to `G:\ResticPhotos`, which
-the project's read-only posture toward that tree does not currently carve out. Decide that
-explicitly before running it.
+**The write to `G:\ResticPhotos` is authorised** (2026-08-01), and it is now a top-up of the 30
+git objects plus the 6 changed files — megabytes, not 1.07 TB. Two consequences to carry
+forward: a second backup pass means **`--force` becomes mandatory for every pass after this
+one**, per the reasoning at the top of this section; and `G:\ResticPhotos` has already been
+uploaded off-site, so the top-up leaves the remote copy stale by those 36 files. Either re-sync
+after it or record the divergence explicitly — an off-site copy that silently differs from local
+is worse than one known to be 36 files behind. Note also that the upload does **not** by itself
+satisfy Phase 13b's gate: `origins.jsonl` does not exist yet, and without it the repo is not
+navigable from a content hash back to an original path.
 
 ### Phase 1 — Categorical prefilter
 
@@ -540,9 +747,13 @@ Two populations, ~1,800 files plus whatever the inventory diff turns up:
 1. **Preprocessing failures worth recovering** — ~1,464 real videos, 146 `.dng`, 25 `.jpg`.
    Read from the *MediaVault object*, not from `G:\photos` — already local and verified.
    Video gets an ffmpeg poster frame; DNG and JPEG get a normal decode.
-2. **Anything in the restic inventory with no MediaVault asset** — the 8,052-file gap and
-   any real photo v1's classifier called `non_media`. These read from `G:\photos` into
-   `G:\vault\.staging\`, decode once, and produce the full output set.
+2. **Anything in the Phase 0 inventory with no MediaVault asset** — that is 1,123,241 files,
+   essentially v1's `not_media` classification, of which triage keeps some unknown small
+   fraction. These read from `G:\photos` into `G:\vault\.staging\`, decode once, and produce the
+   full output set. **This population is not "the 8,052-file gap"** — that gap was a census
+   artefact and does not exist (see Phase 0). Size this step from what triage actually keeps,
+   not from a gap figure. v1's 356 `error`-status files belong here too and need an explicit
+   outcome rather than a silent absence.
 
 For population 2, decode exactly once and from that one pixel array produce the 1536px
 substrate, thumbnail, ThumbHash, pHash/dHash, and quality scalars; exiftool via `-stay_open`
@@ -615,11 +826,17 @@ Interactive, offline from the source, no deadline. Details below.
 ### Phase 4 — Promote
 
 > **Gated.** Before any MediaVault directory entry is unlinked: (a) the off-device upload of
-> the restic repo plus `origins.jsonl` must have completed and been verified; (b) a fresh
-> `restic backup --force G:\photos` must have run; (c) `origins.jsonl` must already be on
-> disk. **Phase 4 must not run until at least one full copy of the content exists on a device
-> that is not disk 3.** The Gate section already states this principle for `G:\photos`; Phase
-> 4 was exempting itself from it.
+> the restic repo plus `origins.jsonl` must have completed and been verified — the repo went up
+> on 2026-08-01, `origins.jsonl` has not; (b) Phase 0's top-up backup of the 36 drifted files
+> must have run **and been re-synced off-site**, since the uploaded copy predates it; (c)
+> `origins.jsonl` must already be on disk. **Phase 4 must not run until at least one full copy
+> of the content exists on a device that is not disk 3.** The Gate section already states this
+> principle for `G:\photos`; Phase 4 was exempting itself from it.
+>
+> Condition (b) formerly read "a fresh `restic backup --force G:\photos` must have run". That
+> demanded 8h46m of re-reading to defend against a defect Phase 0 showed cannot occur in a repo
+> with only one read. It is now a top-up of 36 enumerated files. `--force` becomes mandatory
+> again for any pass *after* that one, because a second read is what creates the hazard.
 
 The mechanism is sound and was verified hard. `CreateHardLinkW` (kernel32) needs **no special
 privilege** — confirmed from a non-elevated token — and creates no reparse point, so
@@ -738,7 +955,9 @@ snapshot form (`G:\photos\x.jpg` → `/G/photos/x.jpg`; the Windows form is reje
 then `restic dump <snapshot> <path>`. It is **not addressable by content hash** — restic chunks
 anything over 512 KiB, so `restic find --blob <sha256>` returns nothing for any real photo or
 video (verified: 20 MiB no match, 97 KiB match). And it only works for files the repo actually
-contains, which is why the fresh `--force` backup is a precondition above.
+contains — which as of 2026-08-01 is all 1,374,328 of them except 30 git loose objects, none of
+them media. That is why the top-up backup is a precondition above; the earlier text demanded a
+full `--force` pass for the same reason, before the coverage was known to be complete.
 
 ### Phase 5 — Group
 
