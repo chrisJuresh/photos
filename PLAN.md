@@ -809,12 +809,20 @@ one `style.css`.
 | Route | Does |
 |---|---|
 | `GET /` | the page |
-| `GET /api/photos?before=<sort_key>&limit=500&kind=image` | keyset page: `[{id, w, h, th}]` |
+| `GET /api/photos?before=<sort_key>&before_id=<id>&limit=500&kind=image` | keyset page: `[{id, w, h, th}]` |
 | `GET /t/<sha256>.webp` | thumbnail from NVMe, `immutable` |
 | `POST /api/reveal {id}` | `explorer.exe /select,<vault path>` |
 
 Filters as query params from the start, even with one filter, so adding facets later extends
 the contract instead of renegotiating it.
+
+**The cursor is the pair `(sort_key, id)`, never `sort_key` alone.** Step 4 resolved 146,034
+photos onto only 27,076 distinct sort keys: 90.5% of rows share theirs and the largest single
+tie is 9,143, because most of the library is dated by `min(mtime)` and a bulk copy puts
+thousands of files on one second. A one-column cursor cannot page through a tie wider than the
+page — it repeats a page forever or skips the rest of the tie. `photo_sort` is already
+`(sort_key DESC, id DESC)` and `photo.id` is a primary key, so `WHERE (sort_key, id) < (?, ?)`
+is both correct and indexed; the route just has to carry the second half.
 
 **Minimising perceived load delay** — the stated requirement, in order of effect:
 
