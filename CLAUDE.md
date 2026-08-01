@@ -86,6 +86,15 @@ interrupted pass resumes. `--limit N` stops after N for a throughput measurement
 python -m photolib.thumbnails
 ```
 
+To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
+regenerated — onto `C:`, a different physical disk from `E:`. Instant, ~20 KB before triage. Uses
+`VACUUM INTO`, so it is safe against a live WAL, and it refuses to write onto the source's own
+volume. Run it after every triage session.
+
+```bash
+python -m photolib.backup_state
+```
+
 To run the archived test suite as a reference oracle:
 
 ```bash

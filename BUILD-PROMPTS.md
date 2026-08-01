@@ -1006,6 +1006,15 @@ Read-only against the photos root throughout — the single write is to G:\Resti
 to the photos root. Report counts and stop — do not act on the non-media population, that is
 step 12.
 
+Two things in this step are pure logic and belong under test before ten hours of I/O runs on top
+of them, because both fail silently and both fail at scale:
+  - reparse classification. Feed the classifier a stubbed st_file_attributes with and without
+    0x400 set and assert an LX symlink is excluded rather than counted as a zero-byte file. You
+    cannot easily create tag 0xa000001d in a test, so test the predicate, not the filesystem.
+  - the two-bucket disagreement classifier. A size change, an mtime change, and a same-size
+    same-mtime hash difference must land in benign, benign, and HARD STOP respectively. Getting
+    this backwards either aborts a correct run or waves through the one case the gate exists for.
+
 Print elapsed and throughput every 60 seconds.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
