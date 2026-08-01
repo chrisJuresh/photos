@@ -1,12 +1,25 @@
 # Build prompts
 
-Seventeen prompts, run one at a time, in order. Each is self-contained: start a **fresh
+Eighteen prompts, run one at a time, in order. Each is self-contained: start a **fresh
 session** for each, because `CLAUDE.md` loads automatically and the prompt names the only
 other files that session should read.
 
 Every prompt ends at a **gate** — a fact you can check before spending the next hour. If a
 gate fails, stop and fix the plan rather than continuing; several later steps read earlier
 verdicts.
+
+> **Revised 2026-08-01 after step 1's spikes.** Steps 0 and 1 are done. Three structural
+> changes came out of them:
+>
+> - **The upload moved ahead of the promote.** It is now step 13b and it is a *precondition*
+>   of step 14, not a follow-up. Step 14 unlinks the last same-disk copy; running it before an
+>   off-device copy exists is the plan's own single-USB-HDD rule broken by its own build order.
+> - **Step 16 is new** — a post-promotion verification sweep. Step 14 destroys names and
+>   verified nothing.
+> - **Step 7 roughly quadruples**, from 2–4 h to 9–13 h, because `restic backup` needs
+>   `--force`. That is not optional; see the step.
+>
+> Numbering is otherwise unchanged, so every "step N" reference elsewhere still resolves.
 
 ---
 
@@ -16,9 +29,9 @@ Set the effort level in your client before sending. The ladder used here:
 
 | Level | When | Steps |
 |---|---|---|
-| `low` | Mechanical, fully specified, nothing to decide | 0, 8 |
-| `medium` | Normal implementation against a clear spec | 1, 2, 3, 5, 11, 16 |
-| `high` | Correctness-critical, or a design decision inside it | 4, 6, 7, 9, 10, 12, 13, 15 |
+| `low` | Mechanical, fully specified, nothing to decide | 0 ✅, 8 |
+| `medium` | Normal implementation against a clear spec | 1 ✅, 2, 3, 5, 11, 13b |
+| `high` | Correctness-critical, or a design decision inside it | 4, 6, 7, 9, 10, 12, 13, 15, 16 |
 | `xhigh` | Irreversible, operating on data with no second copy | 14 |
 
 Effort is how hard one pass thinks. Plan mode, background and **ultracode** are execution
@@ -27,17 +40,18 @@ modes, orthogonal to it — any of them composes with any level.
 Run steps **6, 10, 11 and 14 in plan mode first** — approve the approach, then let it build.
 Step 14 is the only one that deletes anything; it is written to be dry-run by default.
 
-Steps **7, 9 and 12** are long (tens of minutes to hours). Have them run in the background
-and print a throughput line, so you can leave them.
+Steps **7, 9, 12 and 16** are long (hours; step 7 is now overnight). Have them run in the
+background and print a throughput line, so you can leave them.
 
-**Ultracode** earns its cost in two places, which share one shape: a claim whose failure would be
-expensive and invisible, checked by readers that cost only tokens.
+**Ultracode** earns its cost where a claim's failure would be expensive and invisible, and the
+check costs only tokens.
 
-- **Step 1** — three independent spikes that can run concurrently, producing three verdicts the
-  rest of the build assumes. Spike B's verdict is what authorises step 14 to unlink 420 GB, and
-  one passing hardlink test is thin evidence for a filesystem behaviour.
+- ~~**Step 1**~~ — **done 2026-08-01.** All three verdicts changed the plan; two of the three
+  premises were refuted outright. See the step for what they were.
 - **Step 13** — the last checkpoint before anything irreversible, and it writes nothing, so a
-  fan-out costs only tokens. A check that *looks* clean is the entire failure mode.
+  fan-out costs only tokens. A check that *looks* clean is the entire failure mode. Step 1
+  demonstrated the value: every one of its three spikes produced a verdict that survived its
+  own author and died to an independent reader.
 
 **Step 4 was on this list and came off it.** Its filename-pattern space reads as an unknown-size
 search, which is ultracode's best case — but masking digit runs and grouping enumerates that
@@ -65,6 +79,9 @@ better served by a targeted security review after it builds than by a fan-out wh
 - **No `v1/` code ever executes.** Reading v1's *data* with new code is fine and is most of
   the plan; importing a v1 *module* is not.
 - **`G:\photos` is opened read-only** in every step except step 7's `restic backup`.
+- **Every restic *read* command takes `--no-lock`.** The default writes a lock file into the
+  repository, which silently breaks the read-only posture toward `G:\ResticPhotos` on every
+  invocation. `cat`, `ls`, `dump`, `find` — all of them.
 - **Nothing under `G:\` gets deleted or renamed** until step 14, and step 14 requires an
   explicit flag.
 - **Every step ends committed and pushed** to the one `build/rebuild` branch — the instruction
@@ -120,11 +137,13 @@ process listings.
 Six corrections found while sequencing this. `PLAN.md` has been updated to match; they are
 listed here so you know why the prompts read the way they do.
 
-1. **`origin.content_key` → `restic_key` + `origin.sha256`; `file` is keyed on `sha256`.**
-   MediaVault is imported (step 3) before the restic inventory runs (step 7), so adopted
-   assets know their SHA-256 and not their blob list. Keying `file` on the restic key would
-   have forced a merge of two identity spaces later. `restic_key` now exists only to group
-   duplicates before reading them.
+1. ~~**`origin.content_key` → `restic_key` + `origin.sha256`.**~~ **SUPERSEDED by step 1's
+   SPIKE A, 2026-08-01. Do not implement it.** There is no pre-read dedup key at all: a stored
+   restic blob list is the chunk list from the last time restic *read* the file, so equal lists
+   do not imply equal bytes. `restic_key` and its index are gone from the schema. `origin`
+   gains `nlink` and `file_id` instead, because the thing that actually needs distinguishing is
+   *two names for one physical file* from *two copies*. `file` is keyed on `sha256`, which was
+   right for the right reason.
 2. **The Phase 1 prefilter is `triage_rule` rows, not code.** The one step described as
    irreversible now reverses by the same mechanism as every other decision.
 3. **Grid thumbnails are the adopted 384px WebP**, not a generated 512px AVIF — so the route
@@ -189,14 +208,34 @@ code has no drive letter outside it.
 
 ---
 
-# Step 1 — Three premise spikes
+# Step 1 — Three premise spikes — ✅ **DONE 2026-08-01**
 
-**Effort:** `medium` · run under ultracode · ~30 min
+**Do not re-run this.** The verdicts are folded into `PLAN.md`; the prompt is kept for the
+record. Summary of what they found, because steps 7, 9 and 14 all read them:
 
-These kill or confirm three assumptions the plan rests on. Nothing is built. The three spikes
-share nothing, so they run concurrently — and each verdict then gets attacked before you act on
-it, because two of the three are only contradicted much later and one of those is at the moment
-of deletion.
+- **SPIKE A — restic blob lists: REFUTED, fatally.** The node shape is exactly as assumed and
+  it does not matter. A stored `content` list is the chunk list from the last time restic *read*
+  the file, so `exiftool -P` at constant tag length leaves size and mtime bit-identical, restic
+  reports `files_unmodified`, and `restic restore` returns **stale bytes**. The chunker
+  polynomial is also write-path-scoped, not repo-scoped. Phase 0 now uses
+  `restic --no-lock dump --archive tar` for full-file SHA-256, cross-checked against a disk
+  walk. The *documented fallback* (size-grouping) was mis-costed by 20× and is also gone.
+- **SPIKE B — hardlink then unlink: mechanism CONFIRMED, plan step REFUTED.**
+  `CreateHardLinkW` needs no privilege and cross-volume fails loudly with no copy fallback. But
+  read-only lives in the shared MFT record, so the plan's stated ordering deadlocks itself with
+  `ERROR_ACCESS_DENIED (5)`; and `ERROR_ALREADY_EXISTS (183)` is returned identically for
+  "already my own hardlink" and "an unrelated file" — the only resumable reading of it destroyed
+  the only copy of a test file. Step 14 is rewritten around a state classifier.
+- **SPIKE C — derivative orientation: INCONSISTENT.** v1 transposes the extracted embedded
+  preview only. `.rw2` and `.jpg` are correct at population scale (29,450/29,450,
+  direction-verified). Every `.arw` is wrong. **1,486-asset targeted repair, not a
+  103,207-asset regeneration** — three of them are published upside down and are invisible to
+  aspect-based detection.
+
+Also measured: the plan's 110 MB/s was a sequential nominal. Real throughput over the object
+store is **22–35 MB/s**, so every hour estimate in the original build was 3–5× optimistic.
+
+<details><summary>Original prompt, for the record</summary>
 
 ```text
 Run this step under ultracode.
@@ -256,10 +295,14 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** three verdicts in writing, each having survived its refutation pass, and any that
-survived only weakly named as such. A fails → Phase 0 falls back to size-grouping. B fails →
-Phase 4 becomes a copy, and you need 420 GB more free space. C fails → step 9 grows by a full
-regeneration pass.
+</details>
+
+**Gate: passed.** Three verdicts in writing, each attacked by independent readers, all three
+contradicting `PLAN.md` and all three folded back into it. Worth recording that the gate's own
+predicted failure branches were all wrong: "A fails → fall back to size-grouping" (that fallback
+is 20× mis-costed), "B fails → Phase 4 becomes a copy" (B's mechanism passed; its *ordering*
+failed), "C fails → step 9 grows by a full regeneration" (the evidence says targeted repair).
+Anticipating the failure is not the same as anticipating its shape.
 
 ---
 
@@ -278,7 +321,9 @@ Build both databases and the migration runner.
   writer holds the lock (invariant 6) and refuses to run against a database whose recorded
   version is ahead of the files it can see.
 - Migration 001 creates catalog.sqlite3 exactly as PLAN.md specifies: origin, file, photo, and
-  their indexes. Nothing more.
+  their indexes. Nothing more. Note `origin` has NO restic_key column — step 1's SPIKE A killed
+  that key and PLAN.md's Schema section is already corrected. It carries `nlink` and `file_id`
+  instead. If you find a draft anywhere that still mentions restic_key, it is stale.
 - Migration 002 creates state.sqlite3: triage_rule, triage_override. Nothing more.
 - A db module that opens catalog and ATTACHes state as `state`, with WAL, foreign_keys ON, and
   a busy_timeout. Read-only callers open with a read-only URI.
@@ -321,7 +366,8 @@ Import everything that costs no large I/O.
 
 2. Read the 146,034 JSON sidecars under the MediaVault records directory and insert `origin`
    rows: path, root (the first path segment under G:\photos), ext, size, mtime_ns, sha256 of
-   the asset the path resolved to, seen_at. Leave restic_key null — step 7 fills it.
+   the asset the path resolved to, seen_at. Leave nlink and file_id null — step 7's disk walk
+   fills them; MediaVault's sidecars do not carry them.
    `origin.path` is UNIQUE and 737 paths were observed more than once, so a path can arrive
    twice. Verified against the manifest: no path resolves to two different assets, so this is
    never a sha256 conflict — it is the same file re-observed with changed mtime or size. Keep
@@ -466,9 +512,15 @@ Copy the existing 384px WebP derivatives out of the MediaVault derivative tree t
 - Idempotent: re-running copies only what is absent.
 - Generate NOTHING. Files with no 384px derivative stay recorded as missing and are step 12's
   problem.
+- Copy the .arw thumbnails too, even though step 1's SPIKE C proved they are rotated wrong.
+  Step 9 replaces them for 1,486 assets. Copying now and fixing later beats special-casing here
+  — but record the count you copied for .arw so step 9 can reconcile against it.
 
 Report: copied, skipped-missing, checksum mismatches, total bytes, wall time, and the
-throughput you achieved so I can calibrate the 420 GB pass in step 9.
+throughput you achieved so I can calibrate the 420 GB pass in step 9. That calibration matters
+more than it used to: PLAN.md's original 110 MB/s was a sequential nominal and the real figure
+measured 22-35 MB/s, so step 9 was re-estimated from 1.5-2 h to 5-6 h. Your number here is the
+check on that.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
 build/rebuild â€” create it off main if it does not exist yet, otherwise stay on it.
@@ -546,41 +598,87 @@ and Explorer selects the right file; the comma/space reveal tests pass.
 
 # Step 7 — Phase 0 inventory from restic
 
-**Effort:** `high` · run in the background · ~2–4 h including the backup
+**Effort:** `high` · run in the background · **9–13 h**, overnight
+
+The backup is now a full re-read of 1.07 TB, not an incremental. That is the price of step 1's
+SPIKE A and it is not negotiable — without it the repo silently holds stale bytes for anything
+ever rewritten in place at constant size.
 
 ```text
-Read PLAN.md "Phase 0" and the "Gate" section, and read step 1's SPIKE A verdict before you
-write a line. If SPIKE A failed, implement its documented fallback instead: scandir walk, group
-by size, hash only inside size-collision groups.
+Read PLAN.md "Phase 0" (it was rewritten on 2026-08-01 — read the current text, not a summary)
+and the "Gate" section. Step 1's SPIKE A refuted this phase's original mechanism outright; the
+rewritten section IS the verdict, so there is nothing to branch on.
 
 The restic password is already set up and verified as a DPAPI blob, and is reached by passing
 config.toml's restic_password_command to restic's --password-command. Do not re-create it, do
 not prompt for it, do not read .restic-key yourself. Never echo it, never write it to a file,
 never put it on a command line.
 
-1. `restic backup` the photos root. Incremental — it only reads what changed since 2026-07-18.
-   This closes the 8,052-file gap and makes the snapshot authoritative. It is the only write to
-   G: in this step.
+Pass --no-lock on EVERY read command. The default writes a lock file into the repository.
 
-2. Walk the new snapshot's trees and write, for every file node: path, size, mtime, and
-   restic_key = sha256 of the ordered blob id list. About 1.38M origin rows. Batch inside
-   transactions — minutes, not hours. Rows already present from step 3 get restic_key filled in
-   rather than duplicated.
+1. `restic backup <photos_root> --force`.
+   --force is mandatory, not defensive. Incremental mode skips any file whose size AND mtime
+   match the parent snapshot and carries the stale blob list forward; `exiftool -P` on a
+   same-length tag value produces exactly that state, and `restic restore` of the newest
+   snapshot then returns the OLD bytes. --ignore-inode and --ignore-ctime do NOT fix this.
+   This re-reads all 1.07 TB and is the long pole in the step. It is the only write to G: here.
+   Before it runs: `restic --no-lock cat config` and record chunker_polynomial, and check
+   whether any existing snapshot carries an `original` field (evidence of a past `restic copy`).
+   Report both.
 
-3. Reconcile against step 3's import by joining on path, and report four numbers:
-   - origin rows in the snapshot with no MediaVault asset (the gap, expected around 8,052 plus
-     whatever v1 misclassified as non_media)
-   - MediaVault assets whose recorded paths are absent from the snapshot (moved or deleted)
-   - restic_key groups whose members disagree on sha256 where both are known. This MUST be
-     zero. If it is not, SPIKE A's premise is wrong and dedup falls back to size-grouping.
-   - files whose sha256 is known and whose restic_key groups match — the confirmation that the
-     two identity spaces agree.
+2. Get a full-file SHA-256 for every file, TWO independent ways, and require them to agree.
+   a. Repo side, one invocation per snapshot root entry:
+        restic --no-lock dump --archive tar <snapshot> <root-entry-name>
+      piped into a streaming tar reader computing sha256 per member. The path argument must be
+      a BARE root-entry name with no leading slash — "/", "." and "/photos" all fail with the
+      misleading `path "\\C:" not found in snapshot`. Discover the names from
+      `restic --no-lock ls --json <snap>` first.
+   b. Disk side, a direct os.scandir walk of the photos root with streaming sha256, also
+      capturing st_nlink and the NTFS file ID per path.
+   Measured basis: 30,000 files hashed in 7.5 s single-invocation on the repo side; decrypt
+   runs >500 MB/s so the G: read is the bound both ways.
 
-4. Diff restic's path list against a fresh scandir of the photos root. Report every discrepancy
-   with its cause: permissions, reparse point, path longer than 260 characters, file in use.
+3. Write origin rows: path, size, mtime_ns, sha256, nlink, file_id. About 1.38M rows. Batch
+   inside transactions. Rows already present from step 3 get sha256 confirmed and nlink/file_id
+   filled in, never duplicated.
+   Use `restic --no-lock ls --json --long --recursive` for the path/size/mtime inventory if you
+   want it separately — it runs at ~6,750 nodes/s, ~4 min for 1.38M — but NEVER for identity.
+
+Hard preconditions, each an abort rather than a skip:
+  - filter on `type == "file"` as an explicit allowlist, never `not dir`. There are THREE node
+    types: junctions appear as type "symlink" with a linktarget, and `content` is
+    present-with-null on both dir and symlink nodes.
+  - `size_bytes = node.get("size", 0)` — the key is absent for zero-byte AND symlink nodes.
+  - decode all subprocess output with an explicit encoding="utf-8". Python's Windows default is
+    the ANSI codepage and it silently rewrites non-ASCII into different, valid-looking paths
+    with no exception raised. 896 non-ASCII names and 55 paths over 255 chars are exposed.
+  - restic replaces unpaired UTF-16 surrogates in filenames with U+FFFD, so its reported path
+    is NOT injective and may not exist on disk. Count rows containing U+FFFD and reconcile them
+    from the filesystem side. Never key on them.
+  - a duplicate is a distinct FILESYSTEM OBJECT with identical content. Group by file_id first:
+    hardlinked names are one object with several names and must never be counted as reclaimable
+    space or offered as reject candidates.
+  - name explicit decisions for: symlinks and junctions (excluded — content is null), alternate
+    data streams (not represented by restic; lost on restore), the 19,660 zero-byte files (all
+    one key), the 55 over-255-char paths, and the one file over 2 GiB.
+
+4. Reconcile and report, all fatal on inequality:
+     files_seen_on_disk == files_seen_in_snapshot == files_hashed_from_repo == files_hashed_from_disk
+   Baseline measured 2026-08-01: 1,382,380 files, 1,152,691,239,120 bytes, 123,710 distinct
+   sizes, 0 stat errors. Plus:
+   - per-file sha256 agreement between the repo side and the disk side. Any mismatch, and any
+     file present on one side only, is a hard stop — that is the stale-bytes case and it is the
+     whole reason this step reads twice.
+   - origin rows with no MediaVault asset (the gap, expected ~8,052 plus non_media misfiles)
+   - MediaVault assets whose recorded paths are absent from the snapshot
+   - count(distinct path) vs count(origin rows). Must be equal.
+   NEVER treat "could not open" or "could not hash" as "no duplicate found".
 
 Read-only against the photos root apart from restic's own read. Report the counts and stop —
 do not act on the gap; that is step 12.
+
+Print elapsed and throughput every 60 seconds. Benchmark the dump-tar rate on one root entry
+and give me a projected wall time BEFORE committing to the full run.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
 build/rebuild â€” create it off main if it does not exist yet, otherwise stay on it.
@@ -589,8 +687,10 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** the sha256-disagreement count is **zero**. Any non-zero value invalidates the dedup
-premise and everything downstream of it.
+**Gate:** the repo-side and disk-side SHA-256 agree for **every** file, and the four
+reconciliation counters are equal. A disagreement is not a bug in your code — it is a file whose
+bytes changed under restic's nose, and it means the backup does not contain what you think it
+contains. That is the finding this step exists to surface, and it blocks the deletion gate.
 
 ---
 
@@ -630,13 +730,13 @@ anything uncommitted on purpose, say which and why.
 
 # Step 9 — Phase 2a verification read
 
-**Effort:** `high` · run in the background · **1.5–2 h**, the largest I/O in the project
+**Effort:** `high` · run in the background · **5–6 h**, the largest single I/O in the project
 
 ```text
-Read PLAN.md "Phase 2a" in full, including the adopt-objective/recompute-subjective paragraph
-and the orientation gate. Read step 1's SPIKE C verdict. Read docs/preprocessing.md ONLY for
-its list of quality scalars — as a SPECIFICATION of what to compute, never as code to import
-and never as values to adopt.
+Read PLAN.md "Phase 2a" in full (it was rewritten on 2026-08-01 — read the current text),
+including the adopt-objective/recompute-subjective paragraph and the resolved orientation
+section. Read docs/preprocessing.md ONLY for its list of quality scalars — as a SPECIFICATION
+of what to compute, never as code to import and never as values to adopt.
 
 One long pass. It will be killed and restarted; design for that from the first line.
 
@@ -644,15 +744,55 @@ A. Re-hash every MediaVault object and compare against its filename, which IS it
    About 420 GB and the only large read in the project. Record pass or fail per asset. Any
    mismatch is a hard error, listed by name — never silently skipped, never repaired.
 
-B. Read the derivative tree (21.65 GB) and, from the 1536px derivative, compute in ONE decode
-   per asset: pHash, dHash, ThumbHash, and every quality scalar in v1's 18-scalar list. Do not
-   adopt v1's asset_features values — they are relative judgements that only mean anything when
-   every value comes from one implementation, and cover ranking compares members within a
-   stack. Objective readings (GPS, ISO, lens, capture time) were already adopted in step 3;
-   these are the subjective ones and they get recomputed.
+B. REPAIR THE ARW ORIENTATION FIRST, before computing anything from the substrate.
+   Step 1's SPIKE C proved v1 transposes the extracted embedded preview only, so orientation
+   survives for .rw2 and .jpg (correct at population scale, 29,450/29,450, direction-verified)
+   and is silently dropped for every .arw, because the Sony preview carries no EXIF.
 
-C. If SPIKE C found orientation baked in inconsistently, regenerate the 1536px substrate from
-   the objects during pass A instead of adopting it, and say so explicitly in your report.
+   Repair set: preferred_extension='.arw' AND orientation_text <> '1' = 1,486 assets
+   (orientation 8: 1,459; 6: 24; 3: 3) x 4 tiers = 5,944 files. About 15 minutes.
+   Transform, measured at r=1.000: orientation 8 -> rotate 90 CCW; 6 -> 90 CW; 3 -> 180.
+
+   Do NOT select by aspect transposition. Orientations 2, 3 and 4 are invisible to it by
+   construction, and the three orientation-3 ARW are published UPSIDE DOWN — not sideways —
+   so neither an aspect predicate nor a visual spot-check can find them.
+
+   Do NOT regenerate all 103,207. That is a 6-9 h full decode of 418 GB for a defect affecting
+   1.4%, and the RAW-demosaic variant needs a LibRaw dependency that is not installed.
+
+   Fix the root cause in the new code before regenerating anything: drive rotation from the
+   CONTAINER's orientation, never from whatever EXIF survives into the extracted preview.
+
+C. Read the derivative tree (21.65 GB) and, from the REPAIRED 1536px derivative, compute in ONE
+   decode per asset: pHash, dHash, ThumbHash, and every quality scalar in v1's 18-scalar list.
+   Do not adopt v1's asset_features values — they are relative judgements that only mean
+   anything when every value comes from one implementation, and cover ranking compares members
+   within a stack. Objective readings (GPS, ISO, lens, capture time) were already adopted in
+   step 3; these are the subjective ones and they get recomputed.
+
+   The substrate is FIVE tiers, not four: 192/384/768/1536 thumbnail (103,207 assets each) plus
+   long_edge 2560 detail (21,845 rows, image only). There is NO detail tier for any RAW asset —
+   for .rw2 and .arw the 1536 IS the vendor embedded preview at ~95% scale, and no
+   higher-resolution derivative exists at any tier. If anything downstream assumes a detail
+   view, that is a gap of 81,362 assets and you should tell me rather than paper over it.
+
+   If step 5 already copied .arw thumbnails to E:, replace them here and reconcile against the
+   count step 5 reported.
+
+D. Do NOT adopt assets.width/height as an objective reading. It holds at least five different
+   quantities across the corpus — the true raster, an EXIF camera-original size, an embedded
+   EXIF THUMBNAIL size (504x376 on 2,046 Samsung JPEGs), the .rw2 preview size and the .arw
+   sensor size — differs from the orientation-corrected metadata for 4,415 of 103,207 assets,
+   and for ~52 its landscape/portrait polarity is the OPPOSITE of the real file. Use
+   asset_extended_metadata or re-measure the object.
+
+E. Regression check, and it cannot be a DB-only assertion: derivatives.source_width/height
+   equals the POST-transpose size in 103,207/103,207 rows, so no column holds the true stored
+   raster. Either re-read EXIF:Orientation and File:ImageWidth/Height from the object, or
+   persist pre-rotation raster dimensions as a new column. Assert that the rotation actually
+   applied equals the container orientation for all eight EXIF values. Do NOT add the companion
+   assertion "non-transposing orientation => derivative not transposed" against
+   assets.width/height — it fires on 50 real, correct assets.
 
 Constraints:
 - One or two reader threads against G:, about twelve decode workers. 16 CPUs, one disk head.
@@ -668,6 +808,11 @@ Constraints:
 - Print elapsed, throughput and ETA every 60 seconds so I can leave it running.
 
 Benchmark on 500 assets and give me the projected wall time BEFORE starting the full run.
+Compare it against step 5's measured throughput. The 5-6 h estimate comes from 420 GB at the
+measured 22-35 MB/s; if your benchmark says otherwise, say so before spending the night on it.
+
+Nothing else may touch G: while this runs. Contention on this volume measured a ~1,700x spread
+on identical operations — 1.4 ms idle versus one call at 3,081 ms after a write burst.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
 build/rebuild â€” create it off main if it does not exist yet, otherwise stay on it.
@@ -676,8 +821,9 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** zero hash mismatches across 146,034 objects. Then reload the grid — every tile should
-now paint a ThumbHash placeholder instantly.
+**Gate:** zero hash mismatches across 146,034 objects, and 5,944 ARW derivative files rewritten.
+Then reload the grid — every tile should now paint a ThumbHash placeholder instantly, and the
+NEX-5N photos from 2019-12-31 to 2021-09-24 should be the right way up.
 
 ---
 
@@ -832,32 +978,43 @@ Run this step under ultracode.
 
 Read PLAN.md "Gate: G:\photos becomes deletable".
 
-Run all three checks and give me a report I can sign off on. This step changes no files, and
-neither does anything you spawn: every agent in this step is a reader. Do not parallelise the
-scandir in check 3 — it is one walk of 1.38M files on a USB HDD and splitting it thrashes the
-head. The fan-out is for attacking the results, not for producing them.
+Run all FOUR checks and give me a report I can sign off on. This step changes no files, and
+neither does anything you spawn: every agent in this step is a reader. Do not parallelise any
+walk of the photos root — it is 1.38M files on a USB HDD and splitting it thrashes the head. The
+fan-out is for attacking the results, not for producing them.
 
 1. Every MediaVault object re-hashed and matching its filename — that is step 9's result, so
    re-read it rather than repeating 420 GB — AND every gap-filled object from step 12 matching
    its recorded sha256.
 
 2. Every origin row that survived the Phase 1 prefilter has a file row in state 'read' or
-   'adopted'. List any that do not, with their paths.
+   'adopted'. List any that do not, with their paths. AND count(distinct origin.path) ==
+   count(origin rows) — restic's reported paths are not injective, so a trivially-passing
+   check 2 can be an artifact of two files having collapsed into one row upstream.
 
-3. restic's path list diffed against a fresh scandir of the photos root, with every discrepancy
-   named and explained: permissions, reparse point, long path, in use.
+3. CONTENT-level reconciliation, not a path diff. Step 7 computed sha256 twice — once from the
+   repo via dump --archive tar, once from a direct scandir. Re-assert per-file agreement here,
+   and assert every one of step 7's four counters is still equal. A path diff CANNOT catch the
+   failure this gate exists to prevent: a file rewritten in place at constant size with mtime
+   preserved appears in both lists, at the same path, with restic holding the old bytes. If you
+   find yourself comparing two lists of strings, you are running the old check.
 
-Then attack each of the three results before reporting. Send independent readers to REFUTE the
-claim that the check passed, each with a different lens — does the query measure what the
-sentence claims, does the number survive a differently written query, does a clean result here
-depend on an earlier step's number that was itself never re-verified — and have them default to
-"refuted" when uncertain. Attack check 1 hardest: it re-reads step 9's recorded result rather
-than repeating 420 GB, so a stale, partial or mis-joined read of that result would look exactly
-like a pass.
+4. NEW, and nothing before this step establishes it: does G:\ResticPhotos actually cover the
+   current 1,382,380 files? The repo had never been opened as of 2026-08-01 and its newest
+   snapshot then was 2026-07-18. Step 7's --force backup should have fixed this — verify that
+   it did, by name and count, rather than assuming. This is the single largest unverified
+   assumption standing between the plan and an irreversible deletion.
 
-State plainly, in one sentence, whether all three passed. Any check that is not clean BLOCKS
-step 14 — say so rather than qualifying it. A check that passed only weakly under refutation is
-not clean.
+Then attack each result before reporting. Send independent readers to REFUTE the claim that the
+check passed, each with a different lens — does the query measure what the sentence claims, does
+the number survive a differently written query, does a clean result here depend on an earlier
+step's number that was itself never re-verified — and have them default to "refuted" when
+uncertain. Attack check 1 hardest: it re-reads step 9's recorded result rather than repeating
+420 GB, so a stale, partial or mis-joined read of that result would look exactly like a pass.
+
+State plainly, in one sentence, whether all four passed. Any check that is not clean BLOCKS
+steps 13b and 14 — say so rather than qualifying it. A check that passed only weakly under
+refutation is not clean.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
 build/rebuild â€” create it off main if it does not exist yet, otherwise stay on it.
@@ -866,8 +1023,61 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** an unambiguous pass on all three, with the refutation verdicts attached. This is the
+**Gate:** an unambiguous pass on all four, with the refutation verdicts attached. This is the
 last checkpoint before anything becomes irreversible.
+
+---
+
+# Step 13b — Export the origin map, then upload
+
+**Effort:** `medium` · ~20 min plus your upload time
+
+**This moved ahead of step 14 and it is now a precondition of it.** Step 14 unlinks the last
+same-disk copy of 420 GB. `G:\photos`, `G:\MediaVault` and `G:\ResticPhotos` are all one
+partition on one USB enclosure, so until this step lands there is no copy anywhere else — and
+`origins.jsonl` is the only content-hash → original-path map, without which step 14's reversal
+story does not function at all.
+
+```text
+Read PLAN.md's Gate section and the origins.jsonl row of the storage table.
+
+Export <vault_root>\origins.jsonl: one line per distinct file —
+  {sha256, ext, size, taken_at, taken_src, paths: [every original path under G:\photos]}
+
+This is the one-to-many store that has to survive the source being deleted, so it must be
+readable with nothing but a text editor. No database required, no schema knowledge required, no
+compression.
+
+Verify it: reconstruct the origin table from the JSONL into a scratch database and diff it
+against the live one. The path sets must match exactly. Report the diff, even if empty.
+
+Then tell me exactly what to upload, in what order, and precisely what I must confirm has landed
+before I run step 14 or delete anything locally.
+
+Two things to state explicitly in that instruction, because both were wrong in an earlier draft
+of the plan:
+  - The restic repo and the photos root are on the SAME physical disk — partition 2 of disk 3,
+    one WD Elements USB enclosure. Two copies there is one hardware failure from zero. The
+    upload is the ONLY thing that changes that.
+  - Reversal of a wrong exclusion is NOT "one restic dump". It is: look the content key up in
+    origins.jsonl to get the original G:\photos path, translate that to restic's snapshot form
+    (G:\photos\x.jpg -> /G/photos/x.jpg; the Windows form is rejected outright), then
+    `restic --no-lock dump <snapshot> <path>`. It is not addressable by content hash at all —
+    restic chunks anything over 512 KiB, so `restic find --blob <sha256>` returns nothing for
+    any real photo or video.
+
+Do not upload anything yourself. Do not delete anything. Do not run step 14.
+
+Finally, commit and push before you stop. The whole build lives on one branch,
+build/rebuild — create it off main if it does not exist yet, otherwise stay on it.
+Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.jsonl,
+*.log and no media files. Then `git push -u origin build/rebuild`. If you left
+anything uncommitted on purpose, say which and why.
+```
+
+**Gate:** the reconstruction diff is empty, **and you have confirmed the upload landed**. Only
+then is `G:\photos` deletable and only then may step 14 run. `origins.jsonl` itself is excluded
+from git by the `*.jsonl` rule — it lives in the vault, not the repo.
 
 ---
 
@@ -878,38 +1088,109 @@ last checkpoint before anything becomes irreversible.
 The only step in the project that deletes. It operates on 420 GB with one other copy.
 
 ```text
-Read PLAN.md "Phase 4", step 1's SPIKE B verdict, and step 13's report. If step 13 did not pass
-all three checks, stop and tell me — do not proceed.
+Read PLAN.md "Phase 4" in full — it was rewritten on 2026-08-01 and the current text is the
+spec. Read step 13's report and step 13b's upload confirmation.
+
+STOP AND TELL ME, do not proceed, if any of these is untrue:
+  - step 13 passed all four checks
+  - step 13b's upload has completed and been confirmed landed
+  - <vault_root>\origins.jsonl exists on disk
+Phase 4 unlinks the last same-disk copy. Without an off-device copy this step is the plan's own
+single-USB-HDD rule broken by its own build order.
 
 Write the promotion, then show me a DRY RUN before anything executes.
 
-- Accepted adopted assets: create an NTFS hardlink from <vault_root>\<aa>\<bb>\<sha256><.ext> to
-  the existing MediaVault .blob. Same volume, so zero bytes move — seconds, not hours, for
-  420 GB. Set the read-only attribute on the new name. VERIFY the new name is readable and
-  hashes correctly BEFORE unlinking the MediaVault directory entry. Then unlink it: link count
-  falls to 1 and the data persists under the extension-bearing name, which is how the
-  .blob-breaks-Explorer problem is solved without a copy.
+THE MECHANISM IS PROVEN; THE ORDERING IS THE PART THAT KILLS. From step 1's SPIKE B:
+CreateHardLinkW needs no privilege, creates no reparse point, and cross-volume fails loudly
+with winerror 17 creating nothing. First-name unlink is O(1) in file size. 6,000 full
+promotions ran clean. What follows is everything around it.
+
+- Budget ~1.3 HOURS, not "seconds". The NTFS work is ~2 ms per object, but cold metadata on the
+  real object store measured 31.3 ms mean / 297 ms p95 / 811 ms max, and one os.remove took
+  3,081 ms under contention. Make it resumable and checkpointed. Nothing else may touch G:.
+
+- st_nlink == 2 is ONE extent with TWO NAMES, not two copies. It reads like redundancy and is
+  its opposite. Any progress accounting that sums logical file sizes double-counts every
+  promoted object.
+
+- Promotion is PER OBJECT, state-classified before every action, NEVER link-all-then-unlink-all.
+  The batch shape was implemented against a poisoned batch and produced silent data loss: one
+  row failed to link because its vault name already existed from an interrupted earlier run, the
+  unlink pass deleted its object anyway, and the survivor has the right name, nlink 1, a normal
+  directory listing and the WRONG BYTES.
+
+  Classify first, every time — this IS the resume path:
+    object present, target absent                          -> S0: link
+    object present, target present, (st_dev, file index) EQUAL   -> S1: resume at the unlink
+    object present, target present, file index DIFFERS      -> COLLISION: abort this object,
+                                                               leave it untouched, log. Never unlink.
+    object absent,  target present  -> AMBIGUOUS: sha256 the target. Matches -> already promoted,
+                                       fix the DB row. Does not match -> abort loudly.
+    object absent,  target absent   -> abort loudly, do not mark done.
+
+- NEVER branch on ERROR_ALREADY_EXISTS(183). It is returned identically for "target is already
+  my own hardlink" (the normal crash-resume state), "target is an unrelated file", and a
+  CASE-ONLY collision on NTFS. Reading 183 as "already linked, proceed to unlink" — the only
+  reading that makes a 146k-object run resumable — was tested and PERMANENTLY DESTROYED the only
+  copy of a file. On 183, re-enter the classifier.
+
+- Then, for S0/S1, in exactly this order:
+   1. Assert object has nlink == 1 and no read-only attribute. Baseline confirmed across 12,036
+      objects and 2,500 nlink samples, so any violation means something else changed the store.
+      Assert st_dev(object) == st_dev(target parent).
+   2. CreateHardLinkW new <- existing.
+   3. GetFileInformationByHandle on BOTH names. Assert equal volume serial, equal file index,
+      index != 0, nlink == 2 on both, equal size, reparse bit clear on both. Any failure aborts
+      THIS object with its MediaVault name intact.
+   4. Clear FILE_ATTRIBUTE_READONLY if set.
+   5. DeleteFileW the MediaVault name, bounded backoff on ERROR_SHARING_VIOLATION(32). CPython's
+      open() does not pass FILE_SHARE_DELETE, so every Python reader in this project blocks it.
+   6. Re-stat the survivor: nlink == 1, index unchanged, size unchanged. ONLY THEN set read-only.
+   7. Record the promotion. The DB row, not the directory listing, is the record.
+
+  The order matters and the obvious order is wrong: FILE_ATTRIBUTE_READONLY lives in the shared
+  MFT record, so setting it on the new name sets it on the old one, and NTFS then refuses to
+  unlink EITHER with ERROR_ACCESS_DENIED(5). An earlier draft of this prompt said "set read-only
+  on the new name, then unlink" — that deadlocks on every object.
+
+- NEVER set read-only when the unlink did not succeed. Doing so makes the surviving object name
+  undeletable and mutates the repair error from 32 to 5, so a repair pass written to retry on 32
+  never recovers it. Leave it half-linked, record it, move on. The repair pass clears read-only
+  on either link first and retries on BOTH 32 and 5, and is idempotent. It cannot use the USN
+  journal — that is not active on G: — so it needs its own persisted intent record.
+
+- Identity, never name existence, decides "already promoted". A completed promotion is
+  metadata-identical to an ordinary unrelated file. os.path.exists is not a valid predicate.
+
+- PER-BATCH FREE-SPACE ASSERTION. Capture disk_usage("G:").free before and after; abort if the
+  drop exceeds 256 KiB * promoted_count + 1 MiB. A hardlink costs ~410 B/file; a 25 MiB copy
+  costs 26,775,552 B. This is the ONLY thing that would catch a silent degradation to copy —
+  G: has 1.92 TB free, so a full 420 GB copy completes with 1.50 TB spare and raises nothing.
 
 - Accepted gap-filled assets: rename out of staging with NO-REPLACE semantics. If the target
-  exists, the bytes are already published — drop the staging copy. Never overwrite a published
-  object.
+  name exists, do NOT infer the bytes are already published — sha256 the target and compare.
+  Match -> drop the staging copy. Mismatch -> abort loudly and keep staging; a different object
+  owns that name. NTFS is case-insensitive, so a case-only variant collides too.
 
-- Excluded assets: unlink the MediaVault object. Before ANY unlink, prove the resolved path is
+- Excluded assets: unlink the MediaVault object, ONE AT A TIME through the same verify-gated
+  sequence, never as a bulk pass over a list. Before ANY unlink, prove the resolved path is
   under the MediaVault objects root or the staging root, and that its sha256 is explicitly
-  marked excluded by the saved rule set. Nothing else may ever be unlinked, under any
-  condition, including an empty or malformed rule set.
+  marked excluded by the saved rule set. Nothing else may ever be unlinked, under any condition,
+  including an empty or malformed rule set.
+
+- Vault target names must be collision-free BY CONSTRUCTION, including case-insensitively. Path
+  lengths are bounded (real object paths max 148 chars) and 369-char paths work unprefixed on
+  this volume, so assert a length bound rather than adding \\?\ ceremony.
 
 - Default mode is --dry-run and prints exactly what it would do. The destructive mode requires
   an explicit flag AND prints a summary I have to confirm interactively.
-
-- Restartable: a crash mid-run must leave every asset either fully promoted or untouched, never
-  half. Say how you guarantee that.
 
 - Append-only log of every unlink with sha256, path, and the rule that excluded it. Never
   truncated, never rotated by this program.
 
 After promotion, change reveal_root in config.toml from the MediaVault objects root to the vault
 root, and confirm that clicking a photo in the grid still opens Explorer on the right file.
+Then run step 16 — this step destroys names and verifies nothing on its own.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
 build/rebuild â€” create it off main if it does not exist yet, otherwise stay on it.
@@ -919,8 +1200,11 @@ anything uncommitted on purpose, say which and why.
 ```
 
 **Gate:** the dry run's counts match your triage numbers exactly. Read them before you pass the
-destructive flag. Reversal of a wrong exclusion is one `restic dump` — but only while the repo
-still holds it, which is why step 16 comes before any deletion.
+destructive flag. Reversal of a wrong exclusion needs `origins.jsonl` **and** a repo that still
+holds the file — which is why step 13b comes before this one, and why it is a hard precondition
+rather than a courtesy.
+
+Then run step 16 before you call this done.
 
 ---
 
@@ -969,39 +1253,52 @@ anything uncommitted on purpose, say which and why.
 
 ---
 
-# Step 16 — Export the origin map, then upload
+# Step 16 — Post-promotion verification sweep
 
-**Effort:** `medium` · ~20 min plus your upload time
+**Effort:** `high` · run in the background · **4–5 h**
+
+Step 14 destroys directory entries and verifies nothing. A wrong-bytes survivor is
+indistinguishable from success by existence, size, `nlink`, file count, or free space. This is
+the step that finds out — and it has to run while the off-device copy from step 13b is still the
+thing you could restore from.
 
 ```text
-Read PLAN.md's Gate section and the origins.jsonl row of the storage table.
+Read PLAN.md "Phase 4" — the mandatory post-Phase-4 re-hash sweep paragraph — and step 14's
+promotion log.
 
-Export <vault_root>\origins.jsonl: one line per distinct file —
-  {sha256, ext, size, taken_at, taken_src, paths: [every original path under G:\photos]}
+Verify what step 14 actually did. This step writes nothing except its own report.
 
-This is the one-to-many store that has to survive the source being deleted, so it must be
-readable with nothing but a text editor. No database required, no schema knowledge required, no
-compression.
+1. Re-hash every promoted vault name against its recorded sha256. Report mismatches and missing
+   names as explicit counts and exit non-zero if either is greater than zero. Do not summarise
+   a mismatch as a warning; it means the vault contains bytes that are not the photo the
+   catalogue thinks is there.
 
-Verify it: reconstruct the origin table from the JSONL into a scratch database and diff it
-against the live one. The path sets must match exactly. Report the diff, even if empty.
+2. Assert per promoted object: nlink == 1, the read-only attribute is set, and the file is
+   under vault_root. Any object still carrying nlink == 2 is a half-promotion step 14's repair
+   pass did not finish — list it, do not fix it here.
 
-Then tell me exactly what to upload, in what order, and precisely what I must confirm has landed
-before deleting anything locally. Remember the restic repo and the photos root are on the SAME
-physical disk — two copies on one USB HDD is one hardware failure away from zero, so deletion is
-gated on the upload completing, not on restic existing.
+3. Assert no file remains under the MediaVault objects root for any sha256 the DB records as
+   promoted, and no file remains in staging for any sha256 recorded as published.
 
-Do not upload anything yourself. Do not delete anything.
+4. Reconcile the append-only unlink log against the excluded set: every unlink has a
+   corresponding excluded sha256, and every excluded sha256 has exactly one unlink. Neither
+   direction may have orphans.
+
+Budget: a full 420 GB re-hash is ~4-5 h at the measured 22-35 MB/s. If that is too long to
+accept, scope check 1 to rows the DB marks in-flight plus a random sample of the rest — and say
+explicitly which you did, because a scoped sweep is a weaker claim than a full one.
+
+Print elapsed and throughput every 60 seconds. Nothing else may touch G: while this runs.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
-build/rebuild â€” create it off main if it does not exist yet, otherwise stay on it.
+build/rebuild — create it off main if it does not exist yet, otherwise stay on it.
 Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.jsonl,
 *.log and no media files. Then `git push -u origin build/rebuild`. If you left
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** the reconstruction diff is empty. Then you upload, you confirm it landed, and only
-then is `G:\photos` deletable.
+**Gate:** zero hash mismatches, zero missing names, zero objects at `nlink == 2`, and the unlink
+log reconciles in both directions. Only now is the promotion complete.
 
 ---
 
@@ -1013,7 +1310,15 @@ and clicking a photo opens Explorer while `origins.jsonl` holds every original p
 Four decisions from `PLAN.md` § "Open decisions" are still open and none of them block the
 above. The one worth doing early is **restic verification** — `restic check --read-data` before
 the repo becomes the backup of record. It is hours of reading and the only way to know the repo
-is sound. Run it yourself with your own password.
+is sound. Run it yourself with your own password. Note what it does *not* answer: `check
+--read-data` proves the repo is internally consistent, not that it matches the disk. Only step
+7's two-sided SHA-256 and step 13's check 4 answer that.
+
+The other thing this build never establishes: **there is no backup of `G:\vault`.** After step
+14 the vault is the sole live representation of the library, as single extents on one USB HDD,
+last verified at step 16 and never again. A single bad sector kills the object under both names
+at once. Whatever you do about that is outside these eighteen prompts, but it should not stay
+outside them for long.
 
 Feature work after that arrives as a migration plus a per-feature version bump, computed from
 the 1536px substrate rather than from 419 GB of RAW. That is what the substrate was for.

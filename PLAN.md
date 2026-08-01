@@ -194,12 +194,13 @@ CREATE TABLE origin (
   ext          TEXT NOT NULL,
   size         INTEGER NOT NULL,
   mtime_ns     INTEGER,
-  restic_key   TEXT,                   -- sha256(ordered blob id list). Pre-read dedup key.
   sha256       TEXT,                   -- filled when the bytes are read or adopted
+  nlink        INTEGER,                -- from os.stat during the walk
+  file_id      INTEGER,                -- NTFS file ID; hardlinked names share one
   seen_at      TEXT NOT NULL
 );
-CREATE INDEX origin_restic ON origin(restic_key);
-CREATE INDEX origin_sha    ON origin(sha256);
+CREATE INDEX origin_sha  ON origin(sha256);
+CREATE INDEX origin_fid  ON origin(file_id);
 
 -- one row per distinct byte sequence
 CREATE TABLE file (
@@ -230,11 +231,17 @@ CREATE TABLE photo (
 CREATE INDEX photo_sort ON photo(sort_key DESC, id DESC);
 ```
 
-**Two identity keys, one primary.** `restic_key` is available *before* the bytes are read and
-exists only to group duplicates cheaply, so Phase 2 reads one member per group. `sha256` is
-the real identity and is what `file` is keyed on. This matters because MediaVault is imported
-before the restic inventory runs: adopted assets know their SHA-256 and not their blob list.
-Keying `file` on `sha256` from the start avoids merging two identity spaces later.
+**One identity key: `sha256`.** An earlier draft carried a second, `restic_key` —
+`sha256(ordered blob id list)` — on the theory that it was available *before* the bytes were
+read and could group duplicates cheaply. Spike A killed it (see Phase 0): a stored blob list
+is the chunk list from the last time restic *read* the file, so equal lists do not imply equal
+bytes. There is no pre-read dedup key. Every duplicate group is established by a full-file
+SHA-256, obtained from the repo and from disk and required to agree.
+
+**`file_id` is not an identity key either — it is the opposite.** Two `origin` rows sharing a
+`file_id` are two *names for one physical file*, not two copies. They must never be counted as
+reclaimable space and never offered as reject-the-duplicate candidates. `sha256` equality
+across *different* `file_id`s is what a real duplicate looks like.
 
 `state.sqlite3` — human decisions, keyed on `sha256`, never on `photo.id`.
 
