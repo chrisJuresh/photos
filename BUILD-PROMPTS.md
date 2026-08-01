@@ -1310,18 +1310,39 @@ fan-out is for attacking the results, not for producing them.
    count(origin rows) — restic's reported paths are not injective, so a trivially-passing
    check 2 can be an artifact of two files having collapsed into one row upstream.
 
-3. CONTENT-level reconciliation, not a path diff. Step 7 computed sha256 twice — once from the
-   repo via dump --archive tar, once from a direct scandir. Re-assert per-file agreement here,
-   and assert every one of step 7's four counters is still equal. A path diff CANNOT catch the
-   failure this gate exists to prevent: a file rewritten in place at constant size with mtime
-   preserved appears in both lists, at the same path, with restic holding the old bytes. If you
-   find yourself comparing two lists of strings, you are running the old check.
+3. CONTENT-level reconciliation, not a path diff. A path diff CANNOT catch the failure this gate
+   exists to prevent: a file rewritten in place at constant size with mtime preserved appears in
+   both lists, at the same path, with restic holding the old bytes. If you find yourself
+   comparing two lists of strings, you are running the old check.
 
-4. NEW, and nothing before this step establishes it: does G:\ResticPhotos actually cover the
-   current 1,382,380 files? The repo had never been opened as of 2026-08-01 and its newest
-   snapshot then was 2026-07-18. Step 7's --force backup should have fixed this — verify that
-   it did, by name and count, rather than assuming. This is the single largest unverified
-   assumption standing between the plan and an irreversible deletion.
+   READ THIS BEFORE RUNNING CHECK 3. An earlier version demanded "re-assert per-file agreement
+   between step 7's repo-side and disk-side sha256, and assert all four of step 7's counters are
+   equal". Step 7 no longer computes a repo-side sha256 for every file and there are no longer
+   four equal counters, so that instruction is UNSATISFIABLE and its absence is not a failure.
+   What step 7 actually establishes, and what you re-assert here:
+     - disk-side sha256 for all 1,374,328 files, of which the 251,087 adopted from MediaVault
+       agreed with an independently computed value. Re-assert that agreement count.
+     - files_seen_on_disk == files_hashed_from_disk == 1,374,328, and
+       files_seen_in_snapshot == 1,374,298, differing by exactly the 30 enumerated git objects.
+     - restic check --read-data passed, so every blob matches its own stored hash.
+     - only 39 files corpus-wide have a post-backup mtime; 9 are in the snapshot; 3 of those
+       match on size but not mtime and were compared individually.
+   The residual risk step 7 deliberately did NOT close is an in-place edit that preserved its
+   mtime, which the mtime argument cannot see and a cluster sample can only spot-check. If you
+   judge that this gate requires closing it, the cost is a full repo-side
+   `dump --archive tar <snap> G` pass at ~5.1 h. SAY SO AND STOP — do not run it unasked, and do
+   not report the gate as passed while treating the residual as closed.
+
+4. Does G:\ResticPhotos cover the current corpus? Step 7 established that it does, to the byte:
+   1,374,298 file nodes against 1,374,328 files on disk, missing exactly 30 git loose objects,
+   plus 6 files that grew — total 10,977,130 bytes, arithmetic closing exactly. Step 7's top-up
+   backup should have closed those 36. Verify by name and count that it did.
+   Then verify the thing step 7 could NOT: that the OFF-SITE copy matches the local repo,
+   including the top-up. The local repo was uploaded before the top-up ran, so the remote is
+   expected to be behind by those 36 files unless a re-sync happened. The off-site copy — not the
+   same-disk repo — is what stands behind step 14, so an unverified remote is now the single
+   largest assumption between this plan and an irreversible deletion. Do not accept "the upload
+   completed" as evidence that the remote holds the right bytes.
 
 Then attack each result before reporting. Send independent readers to REFUTE the claim that the
 check passed, each with a different lens — does the query measure what the sentence claims, does
@@ -1648,17 +1669,30 @@ The three things you asked for exist: triage happened, the grid is one infinite 
 and clicking a photo opens Explorer while `origins.jsonl` holds every original path.
 
 Four decisions from `PLAN.md` § "Open decisions" are still open and none of them block the
-above. The one worth doing early is **restic verification** — `restic check --read-data` before
-the repo becomes the backup of record. It is hours of reading and the only way to know the repo
-is sound. Run it yourself with your own password. Note what it does *not* answer: `check
---read-data` proves the repo is internally consistent, not that it matches the disk. Only step
-7's two-sided SHA-256 and step 13's check 4 answer that.
+above. **`restic check --read-data` is no longer one of them — it moved into step 7**, which is
+where the repo first gets opened. Note what it does not answer: it proves the repo is internally
+consistent, not that it matches the disk. Step 7's disk-side hashes plus its mtime analysis and
+sampled comparison answer that, with one stated residual — an in-place edit that preserved its
+mtime — which only a full repo-side dump pass would close.
 
-The other thing this build never establishes: **there is no backup of `G:\vault`.** After step
-14 the vault is the sole live representation of the library, as single extents on one USB HDD,
-last verified at step 16 and never again. A single bad sector kills the object under both names
-at once. Whatever you do about that is outside these eighteen prompts, but it should not stay
-outside them for long.
+**Two things this build never establishes, and the second is worse than the first.**
+
+**There is no backup of `G:\vault`.** After step 14 the vault is the sole live representation of
+the library, as single extents on one USB HDD, last verified at step 16 and never again. A single
+bad sector kills the object under both names at once. The content is at least *recoverable* —
+`origins.jsonl` maps every content hash to its original `G:\photos` path and the off-site restic
+repo holds those bytes — so this is a restore-from-cold problem, not a data-loss problem.
+
+**`state.sqlite3` has no copy anywhere, and it is the one artefact in this project that cannot be
+regenerated.** `PLAN.md` labels it *Irreplaceable* and it is: `triage_rule` and
+`triage_override` are the output of steps 10–11, which is hours of human judgement over 1.37M
+files, and every future favourite and rating lands there too. Everything else in the system is
+derivable — `catalog.sqlite3` rebuilds from a re-scan, derivatives regenerate from the
+substrate, the vault restores from restic via `origins.jsonl`. This file does not. It sits on one
+SATA SSD, step 13b uploads the restic repo and `origins.jsonl` and nothing else, and no step in
+these eighteen prompts ever copies it. **Losing E: after triage means doing triage again.** It is
+a few MB; it should be copied off-device at the end of step 11 and after any triage session, and
+that belongs in the build order rather than in a footnote.
 
 Feature work after that arrives as a migration plus a per-feature version bump, computed from
 the 1536px substrate rather than from 419 GB of RAW. That is what the substrate was for.
