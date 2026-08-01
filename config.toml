@@ -1,0 +1,44 @@
+# Every absolute path this build uses.
+#
+# This file is the only place a drive letter appears. No module hardcodes a path;
+# they all read it through photolib/config.py. Paths are single-quoted TOML
+# literal strings so Windows backslashes survive unescaped.
+#
+# Nothing here is created by the loader. A path pointing at something that does
+# not exist yet is normal — G:\vault and E:\photolib are made by the step that
+# first needs them.
+
+# Read-only source tree. Only step 7's `restic backup` ever opens it for write.
+photos_root = 'G:\photos'
+
+# restic repository holding G:\photos. Same physical disk as the source, which is
+# why deletion is gated on the off-site upload and not on this existing.
+restic_repo = 'G:\ResticPhotos'
+
+# v1's vault. Read-only: its objects are re-hashed, adopted, and in step 14
+# hardlinked into vault_root. Never written to before then.
+mediavault_root         = 'G:\MediaVault'
+mediavault_manifest_db  = 'G:\MediaVault\state\manifest.sqlite3'
+
+# The new vault. Canonical objects at <aa>\<bb>\<sha256><.ext>.
+vault_root   = 'G:\vault'
+staging_root = 'G:\vault\.staging'
+deriv_root   = 'G:\vault\deriv'
+meta_root    = 'G:\vault\meta'
+
+# NVMe. Read on every scroll, so it does not live on the USB HDD.
+thumb_root = 'E:\photolib\thumb'
+
+# catalog is regenerable and written only by the pipeline; state holds human
+# decisions, is irreplaceable, and is written only by the app.
+catalog_db = 'E:\photolib\catalog.sqlite3'
+state_db   = 'E:\photolib\state.sqlite3'
+
+# The single containment root /api/reveal resolves against. A set of roots is how
+# path-escape bugs happen, so there is exactly one. Step 14 changes this to
+# vault_root once promotion has moved the objects.
+reveal_root = 'G:\MediaVault\objects'
+
+# Not a path. Passed to restic as --password-command; the password itself is a
+# DPAPI blob readable only by this account, and never appears on a command line.
+restic_password_command = 'powershell -NoProfile -File C:/Users/Chris/.restic-pw.ps1'

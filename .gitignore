@@ -59,6 +59,20 @@ derivatives/
 *.db-shm
 *.db-journal
 
+# Working trees the build writes to. These live outside the repository (see
+# config.toml); the patterns are a backstop in case one is ever created here.
+thumb/
+deriv/
+meta/
+staging/
+.staging/
+
+# Line-delimited JSON: origins.jsonl and any other export or run record
+*.jsonl
+
+# UI assets are caught by the media patterns below. If the grid or triage UI ever
+# needs a committed image, icon or font, stage it explicitly with `git add -f`.
+
 # Source media must never enter this repository
 *.jpg
 *.jpeg
