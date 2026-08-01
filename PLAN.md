@@ -471,6 +471,14 @@ a size disagreement. v1's `source_versions.hash_status` explains the shape of wh
 never hashed the rest, which is correct for building a photo vault and insufficient for a
 deletion gate.
 
+**Two unexplained counts to reconcile, not rationalise.** `asset_sources` holds 251,824 rows but
+`origin` holds 251,087 — a **737-row** difference. `source_versions` holds 1,375,426 rows against
+`source_files`' 1,374,328, a 1,098 difference, which is expected because `source_versions` is a
+version history and a path may have several. The 737 is plausibly the same effect surfacing in
+the adoption join, but plausible is not established, and an unexplained gap of any size in the
+inventory that authorises a deletion is the wrong kind of small. Likewise v1's 356 `error` files:
+they need a recorded outcome, not a silent absence.
+
 **Those 251,087 hashes are re-derived from the bytes, not trusted.** Decided 2026-08-01. The path
 and size cross-checks above are corroboration, not verification: a file rewritten in place at
 identical size passes both. Re-reading them costs ~3.05 h and turns v1's work into a **free

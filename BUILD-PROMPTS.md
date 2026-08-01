@@ -905,6 +905,12 @@ Measured I/O rates on G: — use these, do not re-benchmark from scratch:
    prompt demanded all four counters be equal; that predated the reconciliation and would abort
    on a correct run. Also assert count(distinct path) == count(origin rows).
 
+   Reconcile and report two counts that are currently unexplained, rather than rationalising
+   them: asset_sources has 251,824 rows against origin's 251,087, a 737-row difference; and
+   v1's 356 hash-error files need a recorded outcome each. Neither is large. Both are gaps in
+   the inventory that will later authorise deleting 1.07 TB, so "probably the version-history
+   join" is not an answer -- demonstrate it or report it unresolved.
+
    Classify every hash disagreement into exactly one of two buckets:
      - size differs, OR mtime is after 2026-07-18 10:28:35 -> the file changed since the
        backup. Expected, benign, 6 and 9 files respectively. Log and re-back-up. NOT a stop.
