@@ -830,9 +830,13 @@ G:\ResticPhotos, snapshot ce88f697 (newest), enumerated 2026-08-01:
   ZERO paths containing U+FFFD; ZERO paths present in the snapshot but absent from disk.
   Repo format 2, single chunker_polynomial 3ecd3d7919bbcf, NO snapshot carries an `original`
   field, so no restic copy has ever touched it.
+  Repo size on disk 436,175,270,064 bytes = 436.18 decimal GB = 406.22 GiB, in 24,840 pack
+  files. PLAN.md's "406.22 GB" is GiB; reading it as decimal understates by 7.4%.
   The snapshot's single root entry is "G", with "photos" one level below. dump's path argument
-  must be the BARE root-entry name with no leading slash: "G". "/", "." and "/photos" all fail
-  with the misleading `path "\\C:" not found in snapshot`.
+  must have NO LEADING SLASH: "/", "." and "/photos" all fail with the misleading
+  `path "\\C:" not found in snapshot`. Bare "G" works, and so do deeper slash-separated paths
+  from that root -- "G/photos/lumix f 7-15-26 sd" is verified working, which is what makes the
+  per-subtree invocation in D2 possible. Discover the subtree names from ls, not from this list.
 
 The disk-vs-snapshot difference is 30 files and it is fully enumerated:
   - 30 git loose objects under
@@ -977,18 +981,30 @@ D3. Reconcile and report:
    NEVER treat "could not open" or "could not hash" as "no duplicate found". With the reparse
    guard in place the expected unopenable count is ZERO; without it, 8,052.
 
-5. Top-up backup — the only write to G: in this step, and it IS authorised (2026-08-01):
-   back up the 30 missing git objects and the 6 changed files. Megabytes, not terabytes. Derive
-   the list from your own reconciliation, do not hardcode it from this prompt.
-   Two things to state in your report afterwards:
-     - a second backup pass means --force becomes MANDATORY for every pass after this one,
-       because SPIKE A's defect needs two reads of the same file and until now there was one.
-     - G:\ResticPhotos was already uploaded off-site BEFORE this top-up, so the remote copy is
-       now stale by those 36 files. Say so explicitly and say what must be re-synced. An
-       off-site copy that silently differs from local is worse than one known to be behind.
+--- PHASE E: the one write. ~3 min. CONDITIONAL. ---
 
-Read-only against the photos root throughout. Report counts and stop — do not act on the
-non-media population, that is step 12.
+E1. Do this ONLY if Phase D's gate passed for every subtree. If any subtree is unverified, or any
+    same-size same-mtime disagreement was found, STOP AND REPORT INSTEAD. Do not add to a
+    repository you have just discovered may hold bytes it should not, and do not add to one whose
+    verification is incomplete -- fix the finding or finish the verification first.
+
+    Top-up backup: the only write to G: in this step, and it IS authorised (2026-08-01). Back up
+    the 30 missing git objects and the 6 changed files. Megabytes, not terabytes. Derive the list
+    from your own Phase A4 reconciliation; do not hardcode it from this prompt.
+
+    It is deliberately LAST. It creates the repository's second read, which changes the state
+    every fact above was measured against, so everything that reads the repo runs first.
+
+    Two things to state in your report afterwards:
+      - a second backup pass means --force becomes MANDATORY for every pass after this one,
+        because SPIKE A's defect needs two reads of the same file and until now there was one.
+      - G:\ResticPhotos was already uploaded off-site BEFORE this top-up, so the remote copy is
+        now stale by those 36 files. Say so explicitly and say what must be re-synced. An
+        off-site copy that silently differs from local is worse than one known to be behind.
+
+Read-only against the photos root throughout — the single write is to G:\ResticPhotos in E1, not
+to the photos root. Report counts and stop — do not act on the non-media population, that is
+step 12.
 
 Print elapsed and throughput every 60 seconds.
 
@@ -1276,6 +1292,20 @@ anything uncommitted on purpose, say which and why.
 **Gate:** you can work screens 0 through 7 end to end and land on a kept-file count you believe.
 That count is what step 12 and step 14 operate on.
 
+**Then snapshot the decisions, and do it after every triage session, not just this one:**
+
+```bash
+python -m photolib.backup_state
+```
+
+`state.sqlite3` is the only artefact in this project that cannot be regenerated — the catalog
+rebuilds from a re-scan, derivatives regenerate from the substrate, the vault restores from restic
+through `origins.jsonl`. The triage rules and overrides are the output of you looking at 1.37M
+files. `backup_state` writes a `VACUUM INTO` snapshot to `backup_root` on `C:`, a different
+physical disk from `E:`, and refuses to write onto the source's own volume. It is not off-site:
+it survives a dead drive, not a dead building, so the snapshots belong in the step 13b upload
+alongside the restic repo and `origins.jsonl`.
+
 **This is where the framework decision lands — not step 6, and not step 10, which is backend
 only.** Step 6 was built vanilla on purpose: the grid's hot path is a scroll event mutating
 transforms on ~150 recycled tiles, which framework diffing only adds to, and a 125,738-item array
@@ -1457,6 +1487,12 @@ compression.
 
 Verify it: reconstruct the origin table from the JSONL into a scratch database and diff it
 against the live one. The path sets must match exactly. Report the diff, even if empty.
+
+The upload set is THREE things, not two: the restic repo, `origins.jsonl`, and the
+`state.sqlite3` snapshots under `backup_root`. The third is easy to forget because it is a few MB
+next to 436 GB, and it is the only one of the three that cannot be rebuilt from the others — it
+holds every triage decision. Take a fresh snapshot with `python -m photolib.backup_state` as part
+of this step so the uploaded one is current.
 
 Then tell me exactly what to upload, in what order, and precisely what I must confirm has landed
 before I run step 14 or delete anything locally.
@@ -1752,16 +1788,19 @@ bad sector kills the object under both names at once. The content is at least *r
 `origins.jsonl` maps every content hash to its original `G:\photos` path and the off-site restic
 repo holds those bytes — so this is a restore-from-cold problem, not a data-loss problem.
 
-**`state.sqlite3` has no copy anywhere, and it is the one artefact in this project that cannot be
-regenerated.** `PLAN.md` labels it *Irreplaceable* and it is: `triage_rule` and
-`triage_override` are the output of steps 10–11, which is hours of human judgement over 1.37M
-files, and every future favourite and rating lands there too. Everything else in the system is
-derivable — `catalog.sqlite3` rebuilds from a re-scan, derivatives regenerate from the
-substrate, the vault restores from restic via `origins.jsonl`. This file does not. It sits on one
-SATA SSD, step 13b uploads the restic repo and `origins.jsonl` and nothing else, and no step in
-these eighteen prompts ever copies it. **Losing E: after triage means doing triage again.** It is
-a few MB; it should be copied off-device at the end of step 11 and after any triage session, and
-that belongs in the build order rather than in a footnote.
+**`state.sqlite3` is only half-covered, and it is the one artefact in this project that cannot be
+regenerated.** `PLAN.md` labels it *Irreplaceable* and it is: `triage_rule` and `triage_override`
+are the output of steps 10–11, which is hours of human judgement over 1.37M files, and every
+future favourite and rating lands there too. Everything else is derivable — `catalog.sqlite3`
+rebuilds from a re-scan, derivatives regenerate from the substrate, the vault restores from restic
+via `origins.jsonl`. This file does not.
+
+`python -m photolib.backup_state` now snapshots it to `C:\photolib-backups`, a different physical
+disk from `E:`, and step 11's gate calls for a snapshot after every triage session. **That covers
+a dead drive and not a dead building.** The snapshots are ~20 KB before triage and a few MB after,
+so add them to step 13b's upload set — the plan currently uploads the restic repo and
+`origins.jsonl` and nothing else, and an off-site copy of the library that omits the decisions
+about the library is a strange thing to have.
 
 Feature work after that arrives as a migration plus a per-feature version bump, computed from
 the 1536px substrate rather than from 419 GB of RAW. That is what the substrate was for.

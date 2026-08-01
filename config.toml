@@ -34,6 +34,13 @@ thumb_root = 'E:\photolib\thumb'
 catalog_db = 'E:\photolib\catalog.sqlite3'
 state_db   = 'E:\photolib\state.sqlite3'
 
+# Where `python -m photolib.backup_state` snapshots state.sqlite3. Must be a
+# DIFFERENT physical disk from state_db -- C: is the SATA SSD, E: is the NVMe, so
+# a dead E: does not take the triage decisions with it. The module refuses to
+# write a snapshot onto the source's own volume. This is not an off-site backup:
+# it survives a dead drive, not a dead building.
+backup_root = 'C:\photolib-backups'
+
 # The single containment root /api/reveal resolves against. A set of roots is how
 # path-escape bugs happen, so there is exactly one. Step 14 changes this to
 # vault_root once promotion has moved the objects.

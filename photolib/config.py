@@ -27,6 +27,7 @@ class Config:
     thumb_root: Path
     catalog_db: Path
     state_db: Path
+    backup_root: Path
     reveal_root: Path
     restic_password_command: str
 

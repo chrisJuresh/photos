@@ -240,7 +240,7 @@ this purpose.
 | EXIF sidecar | `G:\vault\meta\<aa>\<bb>\<sha256>.json.gz` | ~200 MB. Full exiftool output, never in the DB. |
 | Grid thumbnail 384px | `E:\photolib\thumb\<aa>\<sha256>.webp` | **NVMe.** Read on every scroll. Adopted from MediaVault, not regenerated. |
 | `catalog.sqlite3` | `E:\photolib\` | Regenerable. Written only by the pipeline. |
-| `state.sqlite3` | `E:\photolib\` | **Irreplaceable.** Written only by the app. |
+| `state.sqlite3` | `E:\photolib\` | **Irreplaceable.** Written only by the app. Snapshotted to `backup_root` on `C:` by `photolib.backup_state`, and part of Phase 13b's upload set. |
 | `origins.jsonl` | `G:\vault\` | Export of the path mapping. Goes in the backup. |
 
 Two databases, joined by `ATTACH`. The split buys two things: the pipeline never contends
