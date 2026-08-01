@@ -96,6 +96,11 @@ better served by a targeted security review after it builds than by a fan-out wh
   serial against 394/s at 32 threads; reading small JSON files 41/s serial against 86/s at 32.
   Anything that touches many small files or many directories wants 16–32 threads in **one**
   process. This is about threads, not about the agent fan-out ruled out above.
+  Step 5 measured both halves on the object store and the derivative tree: 32 threads over
+  103,207 files of 9.8 KB ran 90–102 files/s, while **one** reader over large objects ran
+  62.0 MB/s against **56.7 at two** — a second stream is a 9% loss, not a gain. So the split is
+  real in both directions, and "one reader" for bandwidth-bound work now means one, not "one or
+  two".
 - **Creating many small files on `G:` is the expensive direction, and a small benchmark of it
   lies.** 1,500 gzip files measured 880/s at 16 threads because the OS write cache swallowed
   them whole; the sustained rate once it must flush is 4–8/s. Benchmark writes at a scale that
@@ -245,6 +250,12 @@ record. Summary of what they found, because steps 7, 9 and 14 all read them:
 
 Also measured: the plan's 110 MB/s was a sequential nominal. Real throughput over the object
 store is **22–35 MB/s**, so every hour estimate in the original build was 3–5× optimistic.
+
+> **Superseded by step 5 (2026-08-01): 62.0 MB/s at one reader**, over a seeded random sample of
+> 1,200 objects spanning the real size distribution, hashed as step 9 will hash them. The
+> 22–35 MB/s reading is left standing as what step 1 saw; the two have not been reconciled, and
+> the difference in what was sampled is the first place to look. Estimates elsewhere in this
+> file now use 62.0.
 
 <details><summary>Original prompt, for the record</summary>
 
@@ -602,9 +613,11 @@ estimate depends on it.
 **Done 2026-08-01.** **103,207** thumbnails on `E:`, **zero** checksum mismatches, zero ready
 rows whose file was absent. 1,006,445,644 bytes on disk, which equals the manifest's summed
 `byte_size` for those rows to the byte. 19m of wall clock at 32 reader threads: 90–102 files/s,
-sustained ~0.9 MB/s. `.arw` **2,346** copied — step 9 reconciles against that, and it is 860
-more than the 1,486 the prompt expected to replace. 42,827 rows not ready, exactly the error
-population, and nothing was generated for them. The extension split of what was copied is
+sustained ~0.9 MB/s. `.arw` **2,346** copied — that is every `.arw`, and it is the number step 9
+reconciles against. It is **not** in tension with step 9's 1,486-asset repair set: 1,486 is the
+subset with `orientation_text <> '1'`, and the other 860 are orientation 1, already correct and
+needing no repair. 42,827 rows not ready, exactly the error population, and nothing was
+generated for them. The extension split of what was copied is
 `.png` 54,889 · `.jpg` 27,951 · `.rw2` 13,893 · `.arw` 2,346 · none 2,344 · `.gif` 817 · a tail
 of 15 more.
 
@@ -614,10 +627,10 @@ it reports seek latency and says nothing about sequential throughput. Measured s
 shape directly instead: SHA-256 over a seeded random sample of 1,200 objects drawn from the
 real size distribution, read-only.
 
-| Readers | MB/s | files/s | 420 GB projects to |
+| Readers | MB/s | files/s | the object store projects to |
 |---|---|---|---|
-| 1 | **62.0** | 22.6 | **1.9 h** |
-| 2 | 56.7 | 17.5 | 2.1 h |
+| 1 | **62.0** | 22.6 | **2.0 h** |
+| 2 | 56.7 | 17.5 | 2.2 h |
 
 So: **2–3 h, not 5–6.** Three things this settles.
 
@@ -625,10 +638,14 @@ So: **2–3 h, not 5–6.** Three things this settles.
   the standing rule is now measured on this volume rather than assumed. Step 9 should use one.
 - **A random sample is the pessimistic case** — step 9 walks the shard tree in path order, and
   the head follows it. 62 MB/s is a floor, not a midpoint.
-- **The corpus is 451.2 GB across 146,034 objects, not 420 GB**, and its **median object is
-  20 KB against a 3.09 MB mean**. That skew is why one number cannot serve both passes. A
-  large-file-only probe on the same disk read 117.9 MB/s; the same disk does 0.9 MB/s on 9.8 KB
-  files. Neither is wrong and neither is step 9's number.
+- **The object store's median object is 20 KB against a 3.09 MB mean.** That skew is why one
+  number cannot serve both passes. A large-file-only probe on the same disk read 117.9 MB/s;
+  the same disk does 0.9 MB/s on 9.8 KB files. Neither is wrong and neither is step 9's number.
+
+**`420.17 GB` in `PLAN.md` is binary — 420.17 GiB = 451.2 decimal GB**, and `sum(size_bytes)`
+over `assets` confirms it to three digits. Anything dividing by a MB/s figure must use 451.2e9,
+or it undercuts the projection by 7%; the hours in the table above already do. Flagged because
+the two readings differ by 31 GB and look for all the world like a data gap.
 
 Two notes for later steps:
 
@@ -848,7 +865,8 @@ anything uncommitted on purpose, say which and why.
 
 # Step 9 — Phase 2a verification read
 
-**Effort:** `high` · run in the background · **5–6 h**, the largest single I/O in the project
+**Effort:** `high` · run in the background · **~2–3 h** (step 5 re-measured this; it was 5–6),
+the largest single I/O in the project
 
 ```text
 Read PLAN.md "Phase 2a" in full (it was rewritten on 2026-08-01 — read the current text),
@@ -859,8 +877,10 @@ of what to compute, never as code to import and never as values to adopt.
 One long pass. It will be killed and restarted; design for that from the first line.
 
 A. Re-hash every MediaVault object and compare against its filename, which IS its SHA-256.
-   About 420 GB and the only large read in the project. Record pass or fail per asset. Any
-   mismatch is a hard error, listed by name — never silently skipped, never repaired.
+   146,034 objects, 420.17 GiB = 451.2 decimal GB, and the only large read in the project.
+   Use 451.2e9 in any MB/s projection: PLAN.md's "420.17 GB" is binary, and reading it as
+   decimal undercuts the estimate by 7%. Record pass or fail per asset. Any mismatch is a hard
+   error, listed by name — never silently skipped, never repaired.
 
 B. REPAIR THE ARW ORIENTATION FIRST, before computing anything from the substrate.
    Step 1's SPIKE C proved v1 transposes the extracted embedded preview only, so orientation
@@ -894,8 +914,10 @@ C. Read the derivative tree (21.65 GB) and, from the REPAIRED 1536px derivative,
    higher-resolution derivative exists at any tier. If anything downstream assumes a detail
    view, that is a gap of 81,362 assets and you should tell me rather than paper over it.
 
-   If step 5 already copied .arw thumbnails to E:, replace them here and reconcile against the
-   count step 5 reported.
+   Step 5 copied .arw thumbnails to E:; replace the rotated ones here. It reported **2,346**,
+   which is every .arw, against this repair set of 1,486. The two are consistent, not in
+   conflict — the other 860 are orientation 1 and need nothing. Reconcile 1,486 replaced +
+   860 untouched = 2,346 on disk.
 
 D. Do NOT adopt assets.width/height as an objective reading. It holds at least five different
    quantities across the corpus — the true raster, an EXIF camera-original size, an embedded
@@ -913,8 +935,9 @@ E. Regression check, and it cannot be a DB-only assertion: derivatives.source_wi
    assets.width/height — it fires on 50 real, correct assets.
 
 Constraints:
-- Reader threads differ by pass, and the difference is measured: **one or two** for A's 420 GB
-  object re-hash, which is bandwidth-bound and where a second stream only makes the head seek;
+- Reader threads differ by pass, and the difference is measured: **one** for A's object re-hash,
+  which is bandwidth-bound — step 5 measured two readers 9% SLOWER than one (56.7 vs 62.0 MB/s)
+  on exactly this workload, so the "one or two" this line used to say is settled at one;
   **16–32** for C's derivative tree, which is 434,673 small files and latency-bound. See "Threads
   on G:" in the standing rules. About twelve decode workers either way — 16 CPUs, one disk head.
 - EVERY decode gets a wall-clock timeout, an output size cap, and a memory cap. F55 is a HANG,
@@ -929,8 +952,12 @@ Constraints:
 - Print elapsed, throughput and ETA every 60 seconds so I can leave it running.
 
 Benchmark on 500 assets and give me the projected wall time BEFORE starting the full run.
-Compare it against step 5's measured throughput. The 5-6 h estimate comes from 420 GB at the
-measured 22-35 MB/s; if your benchmark says otherwise, say so before spending the night on it.
+Step 5 already measured this workload — SHA-256 over a seeded random sample of 1,200 objects
+drawn from the real size distribution — at 62.0 MB/s with one reader, which is ~2.0 h for
+451.2e9 bytes, and a tree-ordered walk should beat that. Do NOT use step 5's 0.9 MB/s headline:
+that pass read 9.8 KB files and its figure is seek latency in a bandwidth unit. If your 500-asset
+benchmark lands near 22-35 MB/s instead, something differs from step 5's conditions — say so
+before spending the night on it rather than accepting either number.
 
 Nothing else may touch G: while this runs. Contention on this volume measured a ~1,700x spread
 on identical operations — 1.4 ms idle versus one call at 3,081 ms after a write burst.
@@ -1405,7 +1432,8 @@ Verify what step 14 actually did. This step writes nothing except its own report
    corresponding excluded sha256, and every excluded sha256 has exactly one unlink. Neither
    direction may have orphans.
 
-Budget: a full 420 GB re-hash is ~4-5 h at the measured 22-35 MB/s. If that is too long to
+Budget: a full re-hash of the 451.2e9 bytes is ~2 h at step 5's measured 62.0 MB/s with one
+reader (it was costed at 4-5 h against the earlier 22-35 MB/s). If that is too long to
 accept, scope check 1 to rows the DB marks in-flight plus a random sample of the rest — and say
 explicitly which you did, because a scoped sweep is a weaker claim than a full one.
 
