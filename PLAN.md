@@ -15,7 +15,7 @@ Measured 2026-07-31 / 08-01, not assumed.
 | | |
 |---|---|
 | `G:\photos` | **1,374,328 regular files**, 1,073.53 GiB, plus 8,052 WSL symlinks that are not files at all (see below) |
-| `G:\ResticPhotos` | 406.22 GiB (436.18 decimal GB) in 24,785 packs. **3 snapshots** since 2026-08-02: `e7d60189`, `ce88f697`, and Phase 0's top-up `1e80c50e`. Enumerated and fully reconciled 2026-08-01: 1,374,298 file nodes, 353,949 dirs, **zero** symlink nodes, **zero** U+FFFD paths. `check --read-data` clean over all packs 2026-08-02. Uploaded off-site 2026-08-01, **now 39 files stale** |
+| `G:\ResticPhotos` | 406.22 GiB (436.18 decimal GB) in 24,785 packs. **3 snapshots** since 2026-08-02: `e7d60189`, `ce88f697`, and Phase 0's top-up `1e80c50e`. Enumerated and fully reconciled 2026-08-01: 1,374,298 file nodes, 353,949 dirs, **zero** symlink nodes, **zero** U+FFFD paths. `check --read-data` clean over all packs 2026-08-02. Uploaded off-site 2026-08-01, now 39 files stale — **all git internals, zero media; accepted, not blocking** |
 | v1 catalogued | 1,374,328 files — **exactly the regular-file count. There was no v1 shortfall; the earlier census over-counted.** `source_files` agrees with the 2026-08-02 walk to the row |
 | v1 called "media" | 251,087 instances / 966.1 GB → 146,034 distinct / 420.17 GB |
 | Whole-corpus hashes | **787,798 distinct SHA-256** across 1,374,328 paths (measured 2026-08-02). `nlink > 1`: **zero**, no hardlinks anywhere |
@@ -387,9 +387,35 @@ reasoning; the trigger condition is what changed. `--ignore-inode` and `--ignore
 substitute for it. The control case held in the spike: mtime bumped with content untouched does
 trigger a re-read, so the failure is one-directional and silent in the dangerous direction.
 
-> **Measured 2026-08-02: the trigger condition has now fired.** Phase E added snapshot
-> `1e80c50e` (tag `phase0-topup`). The repository has had a second backup pass, so **`--force`
-> is mandatory for every pass from here on.** The structural immunity described above is spent.
+> **Measured 2026-08-02: the trigger condition has fired, and the rule it triggers is much
+> narrower than "every pass".** Phase E added snapshot `1e80c50e` (tag `phase0-topup`), so the
+> structural immunity above is spent. But `--force` defeats *change detection*, which only ever
+> applies to files already in a parent snapshot:
+>
+> | what changed | restic without `--force` | needs `--force`? |
+> |---|---|---|
+> | **new file** | always read — nothing to skip it against | **no** |
+> | size or mtime changed | detected, re-read | **no** |
+> | edited in place, size **and** mtime identical | **skipped, stale blob list carried forward** | **yes** |
+>
+> Only the third row. **Adding new photos never needs `--force`**, and reading the rule as
+> "every pass" turns an 8h46m scrub into a routine cost — a 20× penalty on the most common
+> operation, defending against a case that cannot arise for the files being added.
+>
+> The right cadence is a **scrub**, not a pass. Hard rule 2 makes source media immutable, and
+> the empirical record agrees: across 1,374,328 files, exactly **three** constant-size
+> constant-mtime edits have ever occurred, all git internals, zero photographs. Costs for the
+> decision:
+>
+> | operation | cost |
+> |---|---|
+> | backup scoped to one new import directory | seconds |
+> | whole-tree incremental of `G:\photos` | ~30–40 min — the 1.38M-entry metadata walk, unrelated to `--force` |
+> | `--force` full pass | **8h46m** (restic's own measured figure for this tree) |
+>
+> Note the middle row: even without `--force`, a whole-tree backup pays a ~30 min walk on this
+> USB HDD. Scope the backup path to what actually changed rather than reaching for `--force`
+> to make a slow pass feel justified.
 
 **The reconciliation is already done, and it closes completely.** Measured 2026-08-01 against
 snapshot `ce88f697`, `restic --no-lock ls --json --long --recursive` at 14,571 nodes/s (119 s for
@@ -733,14 +759,29 @@ git objects plus the 6 changed files — megabytes, not 1.07 TB.
 > dumped back out of the new snapshot and re-verified against their disk hashes — 39 agree,
 > 0 differ.
 
-Two consequences to carry forward: a second backup pass means **`--force` becomes mandatory for
-every pass after this one**, per the reasoning at the top of this section — **this has now
-happened**; and `G:\ResticPhotos` has already been uploaded off-site, so the top-up leaves the
-remote copy stale by those **39** files. Either re-sync after it or record the divergence
-explicitly — an off-site copy that silently differs from local is worse than one known to be 39
-files behind. **As of 2026-08-02 the divergence stands and no re-sync has run.** Note also that
-the upload does **not** by itself satisfy Phase 13b's gate: `origins.jsonl` does not exist yet,
-and without it the repo is not navigable from a content hash back to an original path.
+Two consequences to carry forward. First, a second backup pass means `--force` becomes relevant
+where it was structurally impossible before — **on a scrub cadence, not on every pass**; see the
+table at the top of this section, and do not read this as a tax on adding photos.
+
+Second, `G:\ResticPhotos` was uploaded off-site before the top-up, so the remote copy is stale by
+those **39** files. Either re-sync or record the divergence explicitly — an off-site copy that
+silently differs from local is worse than one known to be 39 files behind.
+
+> **Divergence recorded and accepted, 2026-08-02.** The 39 stale files are **all git internals
+> and contain no photographs**: every one has no file extension, every one sits inside a
+> `.git\` directory, and the catalog classifies **zero** of them as media. All 146,034 media
+> files are in the uploaded snapshot; the only disk files absent from it are the 30 git loose
+> objects.
+>
+> Owner's stated priority: *staleness of the off-site copy does not matter, only that all real
+> photos are included.* By that criterion the off-site copy is **already complete**, and the
+> re-sync is housekeeping rather than a blocker. The divergence is recorded here rather than
+> erased so the decision stays auditable, and so a future pass that touches *media* is not
+> waved through by the same argument.
+
+Note also that the upload does **not** by itself satisfy Phase 13b's gate: `origins.jsonl` does
+not exist yet, and without it the repo is not navigable from a content hash back to an original
+path. **That, not the 39 files, is what currently threatens "all real photos are recoverable".**
 
 ### Phase 1 — Categorical prefilter
 
@@ -976,6 +1017,19 @@ representation of the library, as single extents on one USB HDD, last verified b
 promotion and never again. A single bad sector kills the object under both names at once and
 nothing here detects it. There is no undelete affordance on this machine to fall back on.
 
+**A third gap, named 2026-08-02: there is no procedure for adding photos after the build ends.**
+This plan consumes a fixed 1.07 TB corpus and stops. `G:\photos` is deleted at this gate, so it
+is not where new photos go; the vault is, and the vault has neither an import path nor a backup.
+Every hour estimate here is a one-off migration cost, and none of them describes what next
+month's card dump costs. The two open questions are **where new files enter** and **what backs
+the vault up**; see "Open decisions".
+
+One thing that is *not* a problem, because it looked like one: **content addressing dissolves
+the SPIKE A hazard entirely for the vault.** A canonical object's filename *is* its SHA-256, so
+it cannot be edited in place and still be correct — the name/hash check catches it without
+reading the backup at all. Whatever the vault's backup turns out to be, `--force` is not part of
+it, and scrubbing is a local re-hash rather than a restore.
+
 ### Phase 3 — Triage
 
 Interactive, offline from the source, no deadline. Details below.
@@ -996,11 +1050,22 @@ Interactive, offline from the source, no deadline. Details below.
 > undercount, see Phase 0. `--force` becomes mandatory again for any pass *after* that one,
 > because a second read is what creates the hazard.
 >
-> **Status 2026-08-02.** (b) is **half done**: the top-up ran as snapshot `1e80c50e` and was
-> re-verified locally, but **the off-site re-sync has not happened**, so the remote copy is 39
-> files behind. (a) and (c) are still outstanding — `origins.jsonl` does not exist. Phase 4
-> remains blocked on all three. The top-up also means `--force` is now mandatory for every
-> future pass.
+> **Status 2026-08-02.** (b) is **satisfied for the purpose this gate serves, and downgraded to
+> advisory.** The top-up ran as snapshot `1e80c50e` and was re-verified locally. The off-site
+> re-sync has not happened, so the remote is 39 files behind — but all 39 are git internals
+> with no extension, inside `.git\` directories, and **zero of them are media**. Every one of
+> the 146,034 media files is in the uploaded snapshot. The owner's stated priority is that all
+> real photos are included, not that the copies match byte for byte, so (b) no longer blocks.
+>
+> **(a) and (c) still block, and they are the real ones.** `origins.jsonl` does not exist. It
+> is the only content-hash → original-path map, so without it the off-site repo holds every
+> photo and cannot be navigated back from a vault object to where it came from. Under the
+> owner's own criterion this matters far more than 39 git objects: it is the difference between
+> "the photos are backed up" and "the photos can be got back".
+>
+> `--force` is **not** now mandatory for every future pass — see the corrected rule in Phase 0.
+> It applies to in-place edits at constant size and mtime, which cannot happen to a
+> content-addressed vault object without the name/hash check catching it.
 
 The mechanism is sound and was verified hard. `CreateHardLinkW` (kernel32) needs **no special
 privilege** — confirmed from a non-elevated token — and creates no reparse point, so
@@ -1302,13 +1367,34 @@ later.**
    argument. The password never passed through the assistant: it stays a DPAPI blob reached via
    `--password-command`.
 
-   **What replaces it as the open risk:** the off-site copy is 39 files behind the local repo,
-   and `--force` is now mandatory for every future backup pass. Neither is a verification
-   question; both are step 13b's.
+   **What replaces it as the open risk** is not the off-site copy's 39-file lag — that is
+   accepted (all git internals, zero media) and is step 13b's housekeeping. It is decision 5.
 3. **`.png` policy.** 54,899 files. The whole question is dimensions, which is why it is
    triage screen 3 rather than a prefilter.
 4. **Staging peak.** Phase 2 holds ~420 GB in staging while `G:\vault` fills. 1,790 GB free, so
    comfortable, but it means triage and promotion should not be left indefinitely.
+5. **What happens after the build ends — where new photos enter, and what backs the vault up.**
+   Raised 2026-08-02. This plan migrates a fixed corpus and stops. `G:\photos` is deleted at the
+   Gate, so it is not the answer, and `G:\vault` has **no import path and no backup**. Every
+   hour figure in this document is a one-off migration cost; none of them says what next month's
+   card dump costs. Two halves, and the second is the dangerous one:
+
+   - **Import.** Content-addressed staging already exists for Phase 2b, so the mechanism is
+     mostly there; what is missing is the entry point and the decision about whether new files
+     get a `G:\photos`-style source tree at all, or go straight to staging.
+   - **Vault backup.** After Phase 4 the vault is the sole live representation of the library.
+     This is the larger gap and it is already named in the Gate section. Note that content
+     addressing makes it *cheap* to verify — the filename is the SHA-256, so a scrub is a local
+     re-hash — and makes `--force` irrelevant, because an object cannot be silently edited in
+     place and still match its own name.
+
+   Not designed here on purpose: it is a design decision, not a correction, and this document
+   should not grow a procedure nobody has reviewed.
+6. **`origins.jsonl` does not exist, and it is the binding constraint on recoverability.**
+   Raised as a gate condition already, restated here because it is routinely mistaken for
+   paperwork. The off-site repo holds every photograph; without this map you cannot navigate
+   from a vault object back to the original path, which is the difference between "the photos
+   are backed up" and "the photos can be got back". It must exist on disk before Phase 4.
 
 ## Build order
 

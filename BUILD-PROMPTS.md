@@ -20,8 +20,9 @@ verdicts.
 >   `--force`.~~ **Superseded twice.** The `--force` re-read was removed on 2026-08-01 once the
 >   repo was opened and found to hold only one read. Step 7 then ran on 2026-08-02 and took
 >   **12h50m** anyway — the time went into hashing and per-file verification, not `--force`.
->   `--force` *is* now mandatory for every future pass, because step 7's top-up gave the repo
->   its second read.
+>   Step 7's top-up gave the repo its second read, but **`--force` is a scrub, not a tax on
+>   every pass**: it defeats change detection, which only applies to files already in a parent
+>   snapshot. **Adding new photos never needs it.** See PLAN.md "Phase 0" for the table.
 >
 > Numbering is otherwise unchanged, so every "step N" reference elsewhere still resolves.
 
@@ -850,14 +851,38 @@ computed disk hash — not a sample.
    `source_files(path_text)`. Incidentally, `source_files` holds 1,374,328 rows — v1's
    discovery and this walk agree on the size of the corpus to the row.
 
-**Two consequences that are now live and need action:**
+**Two consequences, both narrower than they first looked. Resolved 2026-08-02.**
 
-1. **`--force` is mandatory for every future backup pass.** The repo has had a second pass
-   (`1e80c50e`, tag `phase0-topup`). SPIKE A's stale-blob-list defect needs two reads of the
-   same file; until now there was one. That structural immunity is gone.
-2. **The off-site copy is stale by 39 files.** `G:\ResticPhotos` went up before the top-up.
-   Step 13b must re-sync, or the divergence must be recorded. `origins.jsonl` still does not
-   exist.
+1. **`--force` is a scrub, not a per-pass tax — and adding photos never needs it.** The repo
+   has had a second pass (`1e80c50e`, tag `phase0-topup`), so SPIKE A's structural immunity is
+   gone. But `--force` defeats *change detection*, which only ever applies to files already in
+   a parent snapshot:
+
+   | what changed | restic without `--force` | needs `--force`? |
+   |---|---|---|
+   | **new file** | always read — nothing to skip it against | **no** |
+   | size or mtime changed | detected, re-read | **no** |
+   | edited in place, size **and** mtime identical | skipped, stale blob list carried forward | **yes** |
+
+   Only the third row, and hard rule 2 makes source media immutable. Across 1,374,328 files
+   exactly three such edits have ever occurred, all git internals. Costs: a backup scoped to one
+   new import directory is **seconds**; a whole-tree incremental of `G:\photos` is **~30–40 min**
+   (the 1.38M-entry metadata walk, unrelated to `--force`); a `--force` pass is **8h46m**.
+   Reading the rule as "every pass" is a 20× penalty on the most common operation.
+
+2. **The off-site copy is stale by 39 files, and this is accepted, not blocking.** All 39 are
+   git internals — no file extension, all inside `.git\` directories, and the catalog classifies
+   **zero** of them as media. Every one of the 146,034 media files is in the uploaded snapshot.
+   Owner's stated priority is that all real photos are included, not that copies match byte for
+   byte, so step 13b treats the re-sync as housekeeping.
+
+   **`origins.jsonl` still does not exist, and that is the one that matters.** Without it the
+   off-site repo holds every photograph and cannot be navigated back from a vault object to its
+   original path.
+
+**One gap this step exposed and did not close.** There is no procedure for adding photos after
+the build ends, and no backup of `G:\vault` at all. Every estimate in this file is a one-off
+migration cost. See PLAN.md "Open decisions" 5 — deliberately not designed yet.
 
 <details><summary>Original prompt, for the record</summary>
 
@@ -1538,12 +1563,19 @@ fan-out is for attacking the results, not for producing them.
    count that all 39 are covered. If you find yourself checking for 36, you are running the old
    derivation and three files' only copy is the source disk.
 
-   Then verify the thing step 7 could NOT: that the OFF-SITE copy matches the local repo,
-   including the top-up. The local repo was uploaded before the top-up ran, so the remote is
-   expected to be behind by those 39 files unless a re-sync happened. The off-site copy — not the
-   same-disk repo — is what stands behind step 14, so an unverified remote is now the single
-   largest assumption between this plan and an irreversible deletion. Do not accept "the upload
-   completed" as evidence that the remote holds the right bytes.
+   Then verify the thing step 7 could NOT: that the OFF-SITE copy holds every MEDIA file. The
+   local repo was uploaded before the top-up ran, so the remote is expected to be behind by those
+   39 files unless a re-sync happened. That lag is ACCEPTED and does not block: all 39 are git
+   internals with no extension, inside .git\ directories, and zero are classified as media —
+   re-confirm that classification rather than taking it on trust, then move on.
+
+   What you are actually checking is that all 146,034 media files are present off-site. The
+   off-site copy — not the same-disk repo — is what stands behind step 14, so an unverified
+   remote is the single largest assumption between this plan and an irreversible deletion. Do
+   not accept "the upload completed" as evidence that the remote holds the right bytes.
+
+   If any file in the stale set turns out to be media, the acceptance above does not cover it
+   and the re-sync becomes blocking again.
 
 Then attack each result before reporting. Send independent readers to REFUTE the claim that the
 check passed, each with a different lens — does the query measure what the sentence claims, does
@@ -1883,13 +1915,23 @@ zero same-size same-mtime disagreements. That is the stronger claim: not merely 
 internally consistent, but that it holds the same bytes the disk holds. It closes the
 mtime-preserving in-place edit, which no sample and no mtime argument can exclude.
 
-**Two things this build never establishes, and the second is worse than the first.**
+**Three things this build never establishes, and the last is the one that will bite first.**
 
 **There is no backup of `G:\vault`.** After step 14 the vault is the sole live representation of
 the library, as single extents on one USB HDD, last verified at step 16 and never again. A single
 bad sector kills the object under both names at once. The content is at least *recoverable* —
 `origins.jsonl` maps every content hash to its original `G:\photos` path and the off-site restic
-repo holds those bytes — so this is a restore-from-cold problem, not a data-loss problem.
+repo holds those bytes — so this is a restore-from-cold problem, not a data-loss problem. That
+recoverability is entirely contingent on `origins.jsonl` existing, which as of 2026-08-02 it does
+not.
+
+**There is no procedure for adding photos once the build ends.** Raised 2026-08-02. Every step
+here is a one-off migration of a fixed 1.07 TB corpus; nothing says what next month's card dump
+costs or where it goes. `G:\photos` is deleted at the Gate, so it is not the answer, and the
+vault has no import path. Two useful facts for whoever designs it: `--force` is **not** part of
+it — new files are always read, and a canonical object cannot be silently edited in place because
+its filename *is* its SHA-256 — and content addressing makes scrubbing a local re-hash rather
+than a restore. See `PLAN.md` "Open decisions" 5.
 
 **`state.sqlite3` is only half-covered, and it is the one artefact in this project that cannot be
 regenerated.** `PLAN.md` labels it *Irreplaceable* and it is: `triage_rule` and `triage_override`

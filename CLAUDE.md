@@ -95,6 +95,34 @@ volume. Run it after every triage session.
 python -m photolib.backup_state
 ```
 
+The Phase 0 inventory: five phases as separate subcommands, all resumable, sharing a work
+database at `E:\photolib\phase0.sqlite3` that is regenerable and never committed. **It ran to
+completion on 2026-08-02 and does not need re-running** — `origin` holds all 1,374,328 rows and
+the deletion gate's evidence is recorded in `PLAN.md` "Phase 0". `a` walks and reconciles against
+restic, `b` is the fail-fast sample, `c` hashes everything and writes `origin`, `d` verifies every
+file against the repo, `e` is the top-up backup and the **only** write to `G:\ResticPhotos`.
+
+```bash
+python -m photolib.inventory a
+```
+
+Every restic read command in `photolib/restic_repo.py` carries `--no-lock`, because the default
+writes a lock file into the repository being verified. The password is never handled here: it is
+a DPAPI blob reached by passing `config.toml`'s `restic_password_command` to restic's
+`--password-command`. Never echo it, never write it to a file, never put it on a command line.
+
+**`restic backup --force` is a scrub, not a routine cost. Adding new files never needs it.**
+`--force` defeats change detection, which only applies to files already in a parent snapshot; a
+new file has nothing to be skipped against and is always read. It is needed only for a file
+edited in place at *identical size and mtime* — impossible for source media under hard rule 2,
+and impossible for a vault object, whose filename is its own SHA-256. A `--force` pass over
+`G:\photos` is **8h46m**; a whole-tree incremental is ~30–40 min (the 1.38M-entry metadata walk,
+unrelated to `--force`); a backup scoped to one new directory is seconds. If you find yourself
+about to reach for `--force`, check which of those three you actually need.
+
+There is **no procedure yet for adding photos after the build**, and **no backup of `G:\vault`
+at all** — `PLAN.md` "Open decisions" 5. Do not invent one in passing; it is a design decision.
+
 To run the archived test suite as a reference oracle:
 
 ```bash
