@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 3
+LATEST = 4
 
 
 def test_applies_from_empty(pair):

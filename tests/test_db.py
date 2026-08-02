@@ -21,7 +21,8 @@ ORIGIN = (
 )
 FILE = ("a" * 64, 24_117_248, ".rw2", "image", 4592, 3448, "2019-07-04T11:22:33", "exif",
         "DC-G9", "LUMIX G 12-60", 51.5, -0.12, 1234567890, 987654321, b"\x01\x02\x03",
-        '{"sharpness": 0.5}', r"aa\bb\aaaa.rw2", "adopted", "phash=1", "+01:00")
+        '{"sharpness": 0.5}', r"aa\bb\aaaa.rw2", "adopted", "phash=1", "+01:00",
+        1536, 1027, 90)
 
 
 def test_pragmas(conn):

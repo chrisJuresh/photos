@@ -97,6 +97,30 @@ overwritten. Deleting a rule row reverses it.
 python -m photolib.prefilter
 ```
 
+Phase 2a's verification read, in three passes that each resume on their own: `a` re-hashes all
+146,034 MediaVault objects against the SHA-256 and the byte count in their own filenames
+(451.2 GB, the only large read in the project, **one** reader because it is bandwidth-bound);
+`b` turns the 1,486 wrongly-rotated `.arw` derivatives upright; `c` computes pHash, dHash,
+ThumbHash and the 18 quality scalars from the repaired 1536px substrate, 24 readers feeding 12
+bounded decode workers. `bench` projects the wall time without writing anything. **`b` must
+precede `c`** or every ARW hash comes off pixels that are 90° out. One lock file at
+`E:\photolib\phase2a.lock`; a lock left by a killed run is detected by its PID and cleared.
+
+**Nothing else may touch `G:` while this runs, and `F:` is the same physical disk** — both are
+partitions of disk 3, the WD Elements USB HDD. A concurrent 15 MB/s write to `F:` measured pass
+`a` at 27.4 MB/s against the 62.0 the volume does when idle.
+
+```bash
+python -m photolib.phase2a
+```
+
+The repaired ARW derivatives are **written to the new build's own trees, never over v1's**:
+the 1536px substrate to `deriv_root`, the 384px tile over step 5's copy on `thumb_root`. That
+is 2,972 files, not the 5,944 the plan anticipated — the 192 and 768 tiers exist only inside
+MediaVault, nothing here reads them, and rewriting a checksummed MediaVault derivative in place
+would turn a verified tree into 1,486 apparent corruptions. So the working 1536 substrate is
+split: 1,486 assets under `G:\vault\deriv`, the rest still under `G:\MediaVault\derivatives`.
+
 To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
 regenerated — onto `C:`, a different physical disk from `E:`. Instant, ~20 KB before triage. Uses
 `VACUUM INTO`, so it is safe against a live WAL, and it refuses to write onto the source's own
