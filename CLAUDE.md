@@ -86,6 +86,17 @@ interrupted pass resumes. `--limit N` stops after N for a throughput measurement
 python -m photolib.thumbnails
 ```
 
+To write the Phase 1 categorical prefilter — nine `exclude` rules on extension at `seq` 0–8 in
+`state.sqlite3` — and report what each removes. Seconds, pure SQL, zero I/O. It writes nothing to
+the catalog: no `file.state` becomes `excluded` and no `photo` row moves, so the grid is
+unchanged and that is not a failure. Re-running with the rules in place is a no-op that keeps
+their `created_at`; a rule set that is not exactly the prefilter is refused rather than
+overwritten. Deleting a rule row reverses it.
+
+```bash
+python -m photolib.prefilter
+```
+
 To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
 regenerated — onto `C:`, a different physical disk from `E:`. Instant, ~20 KB before triage. Uses
 `VACUUM INTO`, so it is safe against a live WAL, and it refuses to write onto the source's own

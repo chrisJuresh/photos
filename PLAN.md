@@ -784,7 +784,39 @@ Note also that the upload does **not** by itself satisfy Phase 13b's gate: `orig
 not exist yet, and without it the repo is not navigable from a content hash back to an original
 path. **That, not the 39 files, is what currently threatens "all real photos are recoverable".**
 
-### Phase 1 — Categorical prefilter
+### Phase 1 — Categorical prefilter — ✅ **RAN 2026-08-02**
+
+> **Ran in 2.7s as `photolib/prefilter.py`. Nine `exclude` rules at `seq` 0–8 in
+> `state.sqlite3`, nothing written to the catalog.** The extension list is exactly as specified
+> below and unchanged. The *counts* below were wrong, and wrong in one specific, correctable
+> way, so they are corrected in place.
+>
+> **The per-extension figures in this section were counted over MediaVault's 146,034 adopted
+> assets, not over the 787,798-row `file` table Phase 0 produced.** Over the adopted subset the
+> same nine rules take **41,658 files / 0.64 GB** — which is where "≈41,700 files, ~0.5 GB"
+> came from, and it reproduces to the file. Over the full inventory they take **101,986 files /
+> 4.77 GB**, leaving **685,812 files / 544.14 GB** surviving to triage.
+>
+> | ext | this section said | actual (`file`) | bytes |
+> |---|---|---|---|
+> | `.pyc` | 7 | **59,516** | 904.9 MB |
+> | `.file` | 498 | **1,148** | 3.24 GB |
+> | `.msg` | 198 | **367** | 254.3 MB |
+> | `.svg` · `.ts` · `.ico` · `.dds` · `.xbm` · `.cur` | as stated | unchanged | 232.4 MB |
+>
+> `.pyc` is the whole story: v1 had misfiled 7 of them as media, and the arch backup tree holds
+> 59,509 more that only Phase 0 ever saw. `.file` at 3.24 GB is the single largest line and is
+> not a rounding difference. **Do not read "0.5 GB" as the size of this step again** — the
+> prefilter is ~10× the file count and ~7× the bytes the estimate implied, and it is still
+> under 1% of the corpus by size.
+>
+> Rules match `file.ext`, the extension of the deduplicated byte sequence. **539 excluded files
+> are also known under some other extension**, every one of them a source or text extension
+> (`.cts`, `.py`, `.js`, `.pem`, `.svelte`). The only one touching an image format is a single
+> 1,279-byte `favicon.ico` that also exists as `favicon-32x32.png`. In the other direction 63
+> survivors carry at least one excluded-extension path and survive, which is the safe way round.
+>
+> Gate met: `.png` (54,899), `.gif` (817), `.webp` (45) and `.bmp` (11) are matched by no rule.
 
 Pure SQL over `origin`/`file`. Zero I/O. Seconds.
 
