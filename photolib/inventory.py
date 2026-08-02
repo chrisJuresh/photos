@@ -1162,13 +1162,30 @@ def phase_d(config: Config, work: sqlite3.Connection, snapshot: str, *, read_dat
 
     for rel in loose:
         payload = restic_repo.dump_file(config, snapshot, snapshot_node(config, rel))
-        bucket, detail = compare(work, rel, hashlib.sha256(payload).hexdigest())
-        totals[bucket] += 1
+        repo_sha = hashlib.sha256(payload).hexdigest()
+        bucket, detail = compare(work, rel, repo_sha)
+        buckets = collections.Counter({bucket: 1})
+        # Into `repo_hash` as well as `subtree`: Phase E derives the top-up set
+        # by asking which files the repository does not hold the current bytes
+        # of, and a file missing from `repo_hash` is indistinguishable from a
+        # file the repository lacks.
+        work.execute(
+            "INSERT OR REPLACE INTO repo_hash VALUES (?,?,?,?)",
+            (rel, repo_sha, len(payload), ""),
+        )
+        work.execute(
+            "INSERT OR REPLACE INTO subtree VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                rel, "verified" if bucket != "hard_stop" else "hard_stop", 1, len(payload), 0.0,
+                buckets["agree"], buckets["changed_size"], buckets["changed_mtime"],
+                buckets["hard_stop"], 0,
+            ),
+        )
         if bucket != "agree":
             findings.append((bucket, detail))
 
     print("\nD3 reconcile")
-    return _phase_d_report(config, work, totals, findings)
+    return _phase_d_report(config, work, findings)
 
 
 def _stream(argv: list[str]) -> int:
@@ -1182,10 +1199,30 @@ def _stream(argv: list[str]) -> int:
     return proc.wait()
 
 
-def _phase_d_report(config, work, totals, findings) -> int:
+def _phase_d_report(config, work, findings) -> int:
+    # Totals come from the persisted per-subtree rows, not from this run's
+    # counter. A resumed run compares only the subtrees it did not skip, and
+    # reporting that counter would show one agreement where there are 1.37M --
+    # a resumed verification looking emptier than a fresh one is exactly the
+    # wrong direction for a number the deletion gate rests on.
+    totals = collections.Counter()
+    for agree, size, mtime, stop, missing in work.execute(
+        "SELECT agree, changed_size, changed_mtime, hard_stop, missing FROM subtree "
+        "WHERE state IN ('verified', 'hard_stop')"
+    ):
+        totals.update(
+            {
+                "agree": agree,
+                "changed_size": size,
+                "changed_mtime": mtime,
+                "hard_stop": stop,
+                "missing": missing,
+            }
+        )
     files_on_disk, files_hashed = work.execute(
         "SELECT count(*), count(sha256) FROM disk WHERE reparse = 0"
     ).fetchone()
+    print()
     in_snapshot = work.execute("SELECT count(*) FROM snap").fetchone()[0]
     verified = work.execute("SELECT count(*) FROM repo_hash").fetchone()[0]
     print(f"          files_seen_on_disk      {files_on_disk:,}")
@@ -1231,35 +1268,83 @@ def reconcile_manifest_gaps(config: Config) -> list[str]:
     manifest = open_manifest(config.mediavault_manifest_db)
     catalog = connect(read_only=True)
     try:
+        hashed = {
+            row[0]
+            for row in catalog.execute("SELECT path FROM origin WHERE sha256 IS NOT NULL")
+        }
         origin_paths = {row[0] for row in catalog.execute("SELECT path FROM origin")}
-        source_rows = manifest.execute(
-            "SELECT count(*), count(DISTINCT path_text) FROM asset_sources"
-        ).fetchone()
+
+        # Three sequential scans joined in dicts, for the reason
+        # `adopt_mediavault` gives: an index probe inside a 6.97 GB file on a
+        # volume measured at ~70 IOPS costs a random seek per row.
+        version_ids = {row[0] for row in manifest.execute(
+            "SELECT source_version_id FROM asset_sources"
+        )}
         lines.append(
-            f"asset_sources: {source_rows[0]:,} rows, {source_rows[1]:,} distinct path_text"
+            f"asset_sources: {len(version_ids):,} distinct source_version_id "
+            f"in 251,824 rows"
         )
-        by_path: dict[str, set] = collections.defaultdict(set)
-        for path, asset_id in manifest.execute("SELECT path_text, asset_id FROM asset_sources"):
-            by_path[path].add(asset_id)
-        multi = {path for path, ids in by_path.items() if len(ids) > 1}
-        absent = [path for path in by_path if path not in origin_paths]
+
+        wanted_files: set[str] = set()
+        error_files: set[str] = set()
+        error_rows = superseded_errors = 0
+        for version_id, file_id, hash_status, superseded in manifest.execute(
+            "SELECT source_version_id, source_file_id, hash_status, superseded_at "
+            "FROM source_versions"
+        ):
+            if version_id in version_ids:
+                wanted_files.add(file_id)
+            if hash_status == "error":
+                error_rows += 1
+                error_files.add(file_id)
+                if superseded is not None:
+                    superseded_errors += 1
+
+        paths: dict[str, str] = {}
+        for file_id, path in manifest.execute(
+            "SELECT source_file_id, path_text FROM source_files"
+        ):
+            if file_id in wanted_files or file_id in error_files:
+                paths[file_id] = path
+
+        # -- the 737 --------------------------------------------------------
+        adopted_paths = {paths[f] for f in wanted_files if f in paths}
         lines.append(
-            f"  paths claimed by >1 asset: {len(multi):,}; "
-            f"rows beyond distinct paths: {source_rows[0] - source_rows[1]:,}"
+            f"  -> {len(wanted_files):,} distinct source_file_id -> "
+            f"{len(adopted_paths):,} distinct path_text"
         )
-        lines.append(f"  asset_sources paths with no origin row: {len(absent):,}")
-        for path in sorted(absent)[:10]:
+        lines.append(
+            f"  251,824 rows - {len(adopted_paths):,} paths = "
+            f"{251_824 - len(adopted_paths):,}; origin holds 251,087 adopted paths"
+        )
+        unmatched = sorted(adopted_paths - origin_paths)
+        lines.append(f"  adopted paths with no origin row: {len(unmatched):,}")
+        for path in unmatched[:10]:
             lines.append(f"    {path}")
 
-        errors = manifest.execute(
-            "SELECT path_text FROM source_versions WHERE hash_status = 'error'"
-        ).fetchall()
-        lines.append(f"v1 hash errors: {len(errors):,} source_versions rows")
+        # -- the 356 --------------------------------------------------------
+        lines.append(
+            f"v1 hash errors: {error_rows:,} source_versions rows "
+            f"({superseded_errors:,} superseded), {len(error_files):,} distinct source_file_id"
+        )
         outcomes: collections.Counter = collections.Counter()
-        for (path,) in errors:
-            outcomes["hashed_this_pass" if path in origin_paths else "not_in_inventory"] += 1
+        examples: list[str] = []
+        for file_id in error_files:
+            path = paths.get(file_id)
+            if path is None:
+                outcomes["no source_files row"] += 1
+            elif path in hashed:
+                outcomes["hashed successfully this pass"] += 1
+            elif path in origin_paths:
+                outcomes["in inventory, still unhashed"] += 1
+                examples.append(path)
+            else:
+                outcomes["absent from this inventory"] += 1
+                examples.append(path)
         for outcome, count in outcomes.most_common():
             lines.append(f"  {outcome}: {count:,}")
+        for path in sorted(examples)[:10]:
+            lines.append(f"    unresolved: {path}")
     except sqlite3.Error as error:
         lines.append(f"manifest query failed: {error}")
     finally:
@@ -1289,16 +1374,37 @@ def phase_e(config: Config, work: sqlite3.Connection, work_path: Path) -> int:
             print(f"            unverified: {name}")
         return 2
 
-    diff = reconcile_paths(work)
-    paths = sorted(
-        {row[0] for row in diff["only_disk"]} | {row[0] for row in diff["size_differs"]}
-    )
-    print(f"E1 top-up {len(paths)} files, derived from this run's own A4 reconciliation:")
-    for rel in paths:
-        print(f"            {rel}")
-    total = sum(row[1] for row in diff["only_disk"]) + sum(
-        row[1] for row in diff["size_differs"]
-    )
+    # Every disk file whose current bytes the repository does not hold. Derived
+    # from Phase D's byte comparison, NOT from A4's path-and-size diff.
+    #
+    # PLAN calls this "the 30 missing git objects and the 6 changed files" = 36.
+    # That derivation misses three files that changed in place at identical
+    # size -- `1ux\.git\index` and two 41-byte refs -- whose bytes the repo
+    # therefore still does not have. They are benign (their mtime postdates the
+    # backup, which is why they are not a hard stop) but they are exactly the
+    # population a size diff cannot see, and leaving them out would put three
+    # files' only copy on the source disk. The set is 39.
+    unverified = work.execute(
+        "SELECT count(*) FROM disk d JOIN snap s USING (rel) "
+        "LEFT JOIN repo_hash r USING (rel) WHERE d.reparse = 0 AND r.rel IS NULL"
+    ).fetchone()[0]
+    if unverified:
+        print(
+            f"*** {unverified:,} files are in the snapshot but were never compared against it. "
+            "The top-up set cannot be derived from an incomplete comparison. ***"
+        )
+        return 2
+
+    rows = work.execute(
+        "SELECT d.rel, d.size FROM disk d "
+        "LEFT JOIN repo_hash r USING (rel) "
+        "WHERE d.reparse = 0 AND (r.rel IS NULL OR r.sha256 != d.sha256) ORDER BY d.rel"
+    ).fetchall()
+    paths = [rel for rel, _ in rows]
+    print(f"E1 top-up {len(paths)} files, derived from this run's own byte comparison:")
+    for rel, size in rows:
+        print(f"            {size:>10,}  {rel}")
+    total = sum(size for _, size in rows)
     print(f"          {total:,} bytes\n")
     if not paths:
         print("          nothing to back up.")
@@ -1306,7 +1412,7 @@ def phase_e(config: Config, work: sqlite3.Connection, work_path: Path) -> int:
 
     listing = work_path.with_name("topup-files.txt")
     listing.write_text(
-        "\n".join(str(config.photos_root / rel) for rel in paths) + "\n", encoding="utf-8"
+        "\n".join(absolute(config.photos_root, rel) for rel in paths) + "\n", encoding="utf-8"
     )
     argv = restic_repo.base_argv(config) + [
         "backup",
