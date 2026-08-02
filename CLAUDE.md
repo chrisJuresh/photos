@@ -120,6 +120,16 @@ and impossible for a vault object, whose filename is its own SHA-256. A `--force
 unrelated to `--force`); a backup scoped to one new directory is seconds. If you find yourself
 about to reach for `--force`, check which of those three you actually need.
 
+The off-site copy lives on `a3server` (`ssh -p 22222 chris@82.14.247.27`):
+`/mnt/bay6/ResticPhotos` for the repo, `/mnt/bay6/photolib-backup/` for the catalogue databases.
+Verified 2026-08-02 by hashing every repo file server-side and comparing each against its own
+filename — restic content-addresses packs, index files and snapshots, so that establishes the
+same property as `check --read-data` without a password, without restic on the server, and
+without pulling 436 GB over a 11.7 MB/s link. Prefer that technique over a remote
+`check --read-data` whenever a verified local copy exists. **Never put a backup anywhere a
+download client or an *arr app manages** — the repo spent ~29 hours seeding to the DHT from
+qBittorrent's completed-downloads directory before it was moved.
+
 There is **no procedure yet for adding photos after the build**, and **no backup of `G:\vault`
 at all** — `PLAN.md` "Open decisions" 5. Both are deferred on purpose: the architecture was
 audited against future import on 2026-08-02 and needs no change, chiefly because import requires

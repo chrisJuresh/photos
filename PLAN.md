@@ -15,7 +15,8 @@ Measured 2026-07-31 / 08-01, not assumed.
 | | |
 |---|---|
 | `G:\photos` | **1,374,328 regular files**, 1,073.53 GiB, plus 8,052 WSL symlinks that are not files at all (see below) |
-| `G:\ResticPhotos` | 406.22 GiB (436.18 decimal GB) in 24,785 packs. **3 snapshots** since 2026-08-02: `e7d60189`, `ce88f697`, and Phase 0's top-up `1e80c50e`. Enumerated and fully reconciled 2026-08-01: 1,374,298 file nodes, 353,949 dirs, **zero** symlink nodes, **zero** U+FFFD paths. `check --read-data` clean over all packs 2026-08-02. Uploaded off-site 2026-08-01, now 39 files stale — **all git internals, zero media; accepted, not blocking** |
+| `G:\ResticPhotos` | 406.22 GiB (436.18 decimal GB) in 24,785 packs. **3 snapshots** since 2026-08-02: `e7d60189`, `ce88f697`, and Phase 0's top-up `1e80c50e`. Enumerated and fully reconciled 2026-08-01: 1,374,298 file nodes, 353,949 dirs, **zero** symlink nodes, **zero** U+FFFD paths. `check --read-data` clean over all packs 2026-08-02. Off-site at `a3server:/mnt/bay6/ResticPhotos`, integrity and completeness verified 2026-08-02; behind by 4 files from the top-up — **all git internals, zero media; accepted, not blocking** |
+| Off-site catalogue copies | `a3server:/mnt/bay6/photolib-backup/` — `catalog.sqlite3`, `phase0.sqlite3`, `manifest.sqlite3`, SHA-256 verified 2026-08-02. `manifest.sqlite3` is **not** in the restic repo and not regenerable, so this is its only second copy |
 | v1 catalogued | 1,374,328 files — **exactly the regular-file count. There was no v1 shortfall; the earlier census over-counted.** `source_files` agrees with the 2026-08-02 walk to the row |
 | v1 called "media" | 251,087 instances / 966.1 GB → 146,034 distinct / 420.17 GB |
 | Whole-corpus hashes | **787,798 distinct SHA-256** across 1,374,328 paths (measured 2026-08-02). `nlink > 1`: **zero**, no hardlinks anywhere |
@@ -1005,6 +1006,54 @@ repo and `G:\photos` are on the *same physical disk* — confirmed to the device
 `0xb42554ea`, partition 2 of disk 3, one USB enclosure. Two copies on one USB HDD is one
 hardware failure from zero. Upload the restic repo (406 GB, encrypted, deduped) plus
 `origins.jsonl`.
+
+> **Off-site copy located and verified 2026-08-02.** `a3server`, reachable at
+> `ssh -p 22222 chris@82.14.247.27`, on an 11 TB volume (`/dev/sdf2`, 9.8 TB free).
+>
+> | | |
+> |---|---|
+> | restic repo | `/mnt/bay6/ResticPhotos` — 436,175,270,064 bytes, 24,785 packs, 51 index, 2 snapshots |
+> | catalogue databases | `/mnt/bay6/photolib-backup/` — `catalog.sqlite3`, `phase0.sqlite3`, `manifest.sqlite3`, each SHA-256 verified end to end |
+> | link | 11.7 MB/s down, **3 MB/s up** — asymmetric, and the slow direction is the restore direction |
+>
+> **Verified without restic and without the password.** restic names packs, index files and
+> snapshots by the SHA-256 of their contents, so hashing every file server-side and comparing
+> each against its own filename establishes the same integrity property `check --read-data`
+> does — **24,839 of 24,840 files self-verify**, the exception being `config`, which is not
+> content-addressed. 45 minutes server-side against ~10.4 h to pull 436 GB over a 11.7 MB/s
+> link for `check --read-data` over SFTP.
+>
+> Completeness: local holds 24,844 files, the server 24,840, and the difference is exactly the
+> four the 2026-08-02 top-up created after the upload — two packs, one index, snapshot
+> `1e80c50e`. **Zero files on the server that are not local.** Every one of the 146,034 media
+> files was already there.
+>
+> Prefer this shape of check over `check --read-data` against a remote whenever a verified
+> local copy exists: it is strictly stronger. `check` on a copy missing an entire snapshot file
+> verifies the remaining ones and passes; a file-set comparison notices.
+
+> **Finding, 2026-08-02: the off-site copy had been seeding to the BitTorrent DHT for ~29
+> hours.** It was at `/mnt/bay6/torrents/completed/ResticPhotos`, alongside the `radarr` and
+> `sonarr` categories of a live qBittorrent instance — a torrent was the transfer mechanism, and
+> it was never stopped afterwards. The torrent (infohash `e371ec1d…`) carries **no trackers and
+> no `private` flag**, and qBittorrent's config sets none of DHT/PeX/LSD, so all three run at
+> their enabled defaults. A trackerless non-private torrent is discoverable through the DHT, and
+> DHT crawlers harvest infohashes continuously.
+>
+> What is and is not exposed: restic encrypts pack contents with AES-256 under a scrypt-derived
+> key, and every filename is a content hash, so **the photographs themselves stay confidential
+> as long as the repo password is strong.** What leaks is the backup's existence, its 436 GB
+> size, its file structure, and the name `ResticPhotos` — plus the encrypted bytes themselves,
+> which is an offline password-cracking target rather than a disclosure.
+>
+> The directory has been moved to `/mnt/bay6/ResticPhotos`, out of the torrent tree, which also
+> removes the files qBittorrent was serving. **The torrent entry still exists in the client and
+> must be removed there** — moving the data errors it, it does not delete it. The repo also
+> remains owned by `mark`, not `chris`, so writing to it needs `sudo`.
+>
+> The rule this earns: **an off-site copy's location is part of the backup, not an
+> implementation detail.** A directory a download client manages, or that an *arr app's cleanup
+> can reach, is not somewhere the only remote copy of the library may live.
 
 `origins.jsonl` is the **only** content-hash → original-path map, and Phase 4's reversal story
 is unusable without it. It must exist on disk **before Phase 4**, not merely be uploaded here.

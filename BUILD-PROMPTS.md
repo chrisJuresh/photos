@@ -1579,6 +1579,26 @@ fan-out is for attacking the results, not for producing them.
    remote is the single largest assumption between this plan and an irreversible deletion. Do
    not accept "the upload completed" as evidence that the remote holds the right bytes.
 
+   MOSTLY DONE ALREADY, 2026-08-02 — re-confirm rather than repeat. The off-site copy is
+   a3server:/mnt/bay6/ResticPhotos (ssh -p 22222 chris@82.14.247.27). Integrity: every one of
+   its 24,839 content-addressed files hashes to its own filename, restic naming packs, index
+   files and snapshots by the SHA-256 of their contents; only `config` is exempt. Completeness:
+   local 24,844 files against the server's 24,840, the difference being exactly the four the
+   top-up created (two packs, one index, snapshot 1e80c50e) and ZERO files present on the server
+   but not locally.
+
+   Use that technique rather than `restic check --read-data` against the remote. It is strictly
+   stronger where a verified local copy exists — `check` on a copy missing a whole snapshot file
+   verifies the remaining ones and passes, whereas a file-set comparison notices — and it needs
+   no password on the remote and no bulk transfer. `check --read-data` over SFTP would pull
+   436 GB at the measured 11.7 MB/s: ~10.4 hours.
+
+   Also verify, because it is NOT yet done: that the three catalogue databases under
+   /mnt/bay6/photolib-backup/ are current. They were copied 2026-08-02 and every later step
+   writes to catalog.sqlite3, so by the time you run this they are stale by definition. Re-copy
+   and re-verify by SHA-256. manifest.sqlite3 does not change and does not need re-copying, but
+   note it is not in the restic repo and is not regenerable, so that copy is its only backup.
+
    If any file in the stale set turns out to be media, the acceptance above does not cover it
    and the re-sync becomes blocking again.
 
@@ -1639,6 +1659,19 @@ The upload set is THREE things, not two: the restic repo, `origins.jsonl`, and t
 next to 436 GB, and it is the only one of the three that cannot be rebuilt from the others — it
 holds every triage decision. Take a fresh snapshot with `python -m photolib.backup_state` as part
 of this step so the uploaded one is current.
+
+Most of the upload already happened. As of 2026-08-02 the server (a3server, ssh -p 22222
+chris@82.14.247.27) holds /mnt/bay6/ResticPhotos, verified, and /mnt/bay6/photolib-backup/ with
+catalog.sqlite3, phase0.sqlite3 and manifest.sqlite3. What is still missing is origins.jsonl,
+which does not exist yet, and the state.sqlite3 snapshots. Put both in
+/mnt/bay6/photolib-backup/ alongside the rest, and re-copy catalog.sqlite3, which every step
+after 7 has changed.
+
+Two facts about that server to build the instruction around. The link is ASYMMETRIC — 11.7 MB/s
+down, 3 MB/s up as measured from this machine — and the slow direction is the restore direction,
+so a full restore from off-site is a multi-day operation, not an afternoon. And the repo is owned
+by `mark`, not `chris`, so writes into it need sudo; the photolib-backup directory is chris-owned
+and does not.
 
 Then tell me exactly what to upload, in what order, and precisely what I must confirm has landed
 before I run step 14 or delete anything locally.
