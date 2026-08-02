@@ -170,6 +170,12 @@ corpus is fully processed. `image` 86,968 ready, its errors overwhelmingly the S
 **After the prefilter, ~98% of the material that matters is already derived.** The real gap
 is ~1,800 files.
 
+**Read that as "of MediaVault", not "of the corpus".** The prefilter leaves 104,376 of these
+146,034 assets, and 103,207 of those carry derivatives — 98.9%. But it leaves **685,812** files
+overall, so measured against everything that reaches triage the derived share is 15%. Nothing is
+wrong with the sentence; it is the difference between the pile v1 already worked and the pile
+Phase 0 found, and triage is what closes the gap between them.
+
 **The v1 preprocessing run finished — do not try to resume it.** Verified: 146,034 distinct
 assets in `asset_features` (exactly the asset count), 0 assets with no row, one analyzer
 version (`quality-features-v1`), zero `pending`. The 42,827 failures all carry
@@ -822,15 +828,17 @@ Pure SQL over `origin`/`file`. Zero I/O. Seconds.
 
 Excludes only formats nobody photographs in, and non-images v1 misfiled as media:
 
-`.svg` (22,060) · `.ts` (18,789) · `.file` (498) · `.msg` (198) · `.ico` (52) · `.dds` (42) ·
-`.xbm` (7) · `.pyc` (7) · `.cur` (5)
+`.svg` (22,060) · `.ts` (18,789) · `.file` (1,148) · `.msg` (367) · `.ico` (52) · `.dds` (42) ·
+`.xbm` (7) · `.pyc` (59,516) · `.cur` (5)
 
-≈ 41,700 files, ~0.5 GB. No judgement calls in that list. Everything genuinely ambiguous —
-notably the whole 54,899-file `.png` pile — survives to triage, where changing your mind is
-free.
+**101,986 files, 4.77 GB** — measured over `file`, corrected 2026-08-02 from the ≈41,700 / ~0.5 GB
+this section carried, which was the MediaVault-adopted subset. No judgement calls in that list.
+Everything genuinely ambiguous — notably the whole 54,899-file `.png` pile — survives to triage,
+where changing your mind is free.
 
-This is the only irreversible step before the source is gone, so it stays narrow. Shown in
-triage as a table, not a contact sheet: you can't look at a `.d.ts`.
+It stays narrow because it is the last filter before the source is deletable, not because it is
+irreversible: as rows it reverses like everything else. Shown in triage as a table, not a contact
+sheet: you can't look at a `.d.ts`.
 
 **Expressed as `triage_rule` rows, not as code.** The prefilter is simply the first rules in
 the same engine triage uses, so the one step that looked irreversible reverses by the same
@@ -1522,7 +1530,7 @@ later.**
 | ~~4~~ | ~~Phase 2a import: `records` → `origin`, extended metadata~~ | **Done 2026-08-01.** 146,034 `file` rows, 251,087 `origin` rows from 251,824 observations, 0 objects missing, 0 paths claimed by two assets. Capture time 38,200 (26.2%), not 38,767: the 567 shortfall is 560 `0000:00:00 00:00:00` EXIF nulls plus 7 odd formats, and rejecting a null sentinel as a date is correct. **The exiftool sidecars under `meta_root` were not written** — see below |
 | 5 | Grid UI against adopted 384px thumbnails | Proves paging, thumbnails, reveal — on real data, early |
 | ~~6~~ | ~~Phase 0 inventory~~ | **Done 2026-08-02 in 12h50m.** `origin` 1,374,328 rows, all hashed, 0 errors; 787,798 distinct SHA-256; all 251,087 adopted hashes agreed. Content-level cross-check complete: every one of the 1,374,298 snapshot file nodes reconstructed from the repo and compared per-file, **zero** same-size same-mtime disagreements. `check --read-data` clean. Top-up snapshot `1e80c50e` covers the 39 drifted files |
-| 7 | Phase 1 prefilter | — |
+| ~~7~~ | ~~Phase 1 prefilter~~ | **Done 2026-08-02 in 2.7s.** Nine `exclude` rules at `seq` 0–8 in `state.sqlite3`, nothing written to the catalog. **101,986 files / 4.77 GB excluded, 685,812 / 544.14 GB surviving** — not the ≈41,700 / 0.5 GB this document predicted, which was the adopted subset. `.png`, `.gif`, `.webp`, `.bmp` matched by no rule |
 | 8 | Phase 2a verification read + ARW repair | Background it; ~4–5 h; nothing else may touch G: |
 | 9 | Triage UI | — |
 | 10 | Phase 2b gap fill | Benchmark on 500 files first |

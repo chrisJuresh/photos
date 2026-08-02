@@ -34,7 +34,7 @@ Set the effort level in your client before sending. The ladder used here:
 
 | Level | When | Steps |
 |---|---|---|
-| `low` | Mechanical, fully specified, nothing to decide | 0 ✅, 8 |
+| `low` | Mechanical, fully specified, nothing to decide | 0 ✅, 8 ✅ |
 | `medium` | Normal implementation against a clear spec | 1 ✅, 2 ✅, 3 ✅, 5, 11, 13b |
 | `high` | Correctness-critical, or a design decision inside it | 4 ✅, 6, 7 ✅, 9, 10, 12, 13, 15, 16 |
 | `xhigh` | Irreversible, operating on data with no second copy | 14 |
@@ -1155,7 +1155,7 @@ Two failure modes this run hit and that a re-run must not reintroduce, both now 
 
 ---
 
-# Step 8 — Categorical prefilter
+# Step 8 — Categorical prefilter — ✅ **DONE 2026-08-02**
 
 **Effort:** `low` · ~10 min
 
@@ -1187,12 +1187,36 @@ anything uncommitted on purpose, say which and why.
 
 **Gate:** ~41,700 excluded, and `.png`, `.gif`, `.webp`, `.bmp` all still present.
 
+**Done 2026-08-02.** `photolib/prefilter.py`, 2.7s. Nine `exclude` rules at `seq` 0–8 in
+`state.sqlite3`, predicates as structured `(column, op, value)` JSON compiled into one CASE so
+first-match-wins costs no second pass. The extension list is exactly the nine and unchanged.
+
+**Half the gate was wrong, and the half that held is the one that matters.** `.png` (54,899),
+`.gif` (817), `.webp` (45) and `.bmp` (11) are matched by no rule — that half held. But **101,986
+files / 4.77 GB** were excluded, not ~41,700 / 0.5 GB. The estimate was counted over MediaVault's
+146,034 adopted assets, where the same nine rules take **41,658 files / 0.64 GB** and reproduce
+the prediction to the file; over Phase 0's full 787,798-row `file` table `.pyc` is 59,516 rather
+than 7, `.file` 1,148 rather than 498, and `.msg` 367 rather than 198. **685,812 files / 544.14 GB
+survive to triage.** See `PLAN.md` "Phase 1" for the per-extension table. A step-8 re-run that
+reports ~41,700 is reading the adopted subset, not the inventory.
+
+Rules match `file.ext`, the extension of the deduplicated byte sequence, so a sha with several
+names is decided once. 539 excluded files are also known under a *different* extension, every one
+of them source or text (`.cts`, `.py`, `.js`, `.pem`, `.svelte`); the only one touching an image
+format is a 1,279-byte `favicon.ico` that also exists as `favicon-32x32.png`. 63 files carry an
+excluded-extension path and survive anyway, which is the safe direction.
+
 **Expect the grid to look identical afterwards, and do not treat that as a failure.** Step 6
 measured 22,059 `.svg` tiles rendering as empty placeholders, and it is tempting to read this
 step as the fix for them. It is not. This step writes `triage_rule` rows to `state.sqlite3`;
 `/api/photos` selects from `photo` joined to `file` on `kind`, and knows nothing about the rule
 engine. Every excluded file keeps its `photo` row and its tile until step 11 decides how a
 verdict reaches the read path.
+
+> **Held, and enforced rather than merely observed.** The step wrote five columns into
+> `state.triage_rule` and read `origin`/`file`; no `file.state` became `excluded`, no `photo` row
+> moved, `triage_override` was not consulted, and `tests/test_prefilter.py` asserts all three.
+> The 22,059 `.svg` placeholders are still on the grid.
 
 ---
 
