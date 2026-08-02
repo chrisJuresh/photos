@@ -16,8 +16,12 @@ verdicts.
 >   off-device copy exists is the plan's own single-USB-HDD rule broken by its own build order.
 > - **Step 16 is new** — a post-promotion verification sweep. Step 14 destroys names and
 >   verified nothing.
-> - **Step 7 roughly quadruples**, from 2–4 h to 9–13 h, because `restic backup` needs
->   `--force`. That is not optional; see the step.
+> - ~~**Step 7 roughly quadruples**, from 2–4 h to 9–13 h, because `restic backup` needs
+>   `--force`.~~ **Superseded twice.** The `--force` re-read was removed on 2026-08-01 once the
+>   repo was opened and found to hold only one read. Step 7 then ran on 2026-08-02 and took
+>   **12h50m** anyway — the time went into hashing and per-file verification, not `--force`.
+>   `--force` *is* now mandatory for every future pass, because step 7's top-up gave the repo
+>   its second read.
 >
 > Numbering is otherwise unchanged, so every "step N" reference elsewhere still resolves.
 
@@ -31,7 +35,7 @@ Set the effort level in your client before sending. The ladder used here:
 |---|---|---|
 | `low` | Mechanical, fully specified, nothing to decide | 0 ✅, 8 |
 | `medium` | Normal implementation against a clear spec | 1 ✅, 2 ✅, 3 ✅, 5, 11, 13b |
-| `high` | Correctness-critical, or a design decision inside it | 4 ✅, 6, 7, 9, 10, 12, 13, 15, 16 |
+| `high` | Correctness-critical, or a design decision inside it | 4 ✅, 6, 7 ✅, 9, 10, 12, 13, 15, 16 |
 | `xhigh` | Irreversible, operating on data with no second copy | 14 |
 
 Effort is how hard one pass thinks. Plan mode, background and **ultracode** are execution
@@ -787,20 +791,75 @@ index on `file.kind` and a planner that drove the join from `file` would scan it
 
 ---
 
-# Step 7 — Phase 0 inventory from restic
+# Step 7 — Phase 0 inventory from restic — ✅ **DONE 2026-08-02**
 
-**Effort:** `high` · run in the background · **~10.2 h** (range 9–13), overnight
+**Do not re-run this.** Ran in 12h50m against a ~10.2 h estimate. `photolib/inventory.py` and
+`photolib/restic_repo.py` implement it as five resumable subcommands (`a`–`e`); the work
+database is `E:\photolib\phase0.sqlite3` and is regenerable. Results are folded into `PLAN.md`
+"Phase 0"; the prompt is kept below for the record.
 
-Budgeted against a 12 h window. The long tail is confined to the LAST phase, which is
-per-subtree checkpointed and resumable, so an overrun costs a second evening rather than the
-run. Phases A–C produce a durable committed inventory in the first ~4.5 h; everything after
-that is verification.
+**The gate passed. Zero same-size same-mtime hash disagreements across all 1,374,328 files.**
+Every file node in the snapshot was dumped, hashed and compared against an independently
+computed disk hash — not a sample.
 
-**There is no `--force` re-read of 1.07 TB in this step any more, and the "8,052-file gap" does
-not exist.** Both were removed on 2026-08-01 after the repo was actually opened and reconciled.
-The disk-side hashing that remains is this step's *product* — the duplicate map Phase 2 depends
-on — not verification overhead. Read PLAN.md "Phase 0" for the reasoning; it was rewritten twice
-and the current text is the one to build from.
+| phase | budget | actual | outcome |
+|---|---|---|---|
+| A establish | 19 min | 33 min | every established fact reproduced; byte arithmetic closes exactly |
+| B fail fast | 15 min | 25 min | 207,366 files compared, 0 hard stops |
+| C inventory | 4.4 h | 4h33m | 1,374,328 hashed, 0 errors, `origin` written |
+| D verify | 5.3 h | 7h18m | full `--read-data` + per-file dump, 0 hard stops |
+| E top-up | 3 min | 2 s | 39 files, snapshot `1e80c50e` |
+
+**Headline results, because steps 8, 9, 12 and 13 all read them:**
+
+- **All 251,087 adopted hashes were re-derived from the bytes and every one matched.** An
+  independent cross-check of v1's hashing across 90% of the corpus, at no extra cost.
+- **`nlink > 1` is zero.** No hardlinks anywhere, so `home-chris arch backup` holds no
+  hardlinked backup generations and the duplicate map counts real distinct objects:
+  **586,530 redundant paths carrying 603.8 GB**.
+- 787,798 distinct SHA-256 across 1,374,328 paths. `file` now holds 146,034 `adopted` +
+  641,764 `pending`.
+- 0 read errors; the 8,052 reparse points were never opened.
+- Both unexplained counts closed. The **737** is 251,824 distinct `source_version_id`
+  resolving onto 251,087 distinct `source_file_id` and 251,087 distinct paths — a version
+  count against a path count — with **0** adopted paths lacking an `origin` row. All **356**
+  of v1's hash-error files hashed successfully this pass.
+- Measured rates, for later steps: disk big 80.3 MB/s at 4 workers; disk small 376 files/s at
+  40; `dump --archive tar` 44.5 MB/s in high-dedup `10tb arch backup` against 110.5 in
+  low-dedup `a52s`; `check --read-data` 1h56m for all 24,785 packs.
+
+**Five things the prompt asserted that turned out otherwise.** Each is corrected in `PLAN.md`:
+
+1. **`dump --archive tar` names members by their full snapshot path** (`G/photos/<rel>`), not
+   relative to the dumped node. Caught with a five-member probe before Phase B. A
+   node-relative mapper would have made every Phase D comparison vacuous while reporting
+   cleanly.
+2. **The top-up is 39 files, not 36.** "30 missing + 6 changed size" is a size-based
+   derivation; three more files changed *in place at identical size* and the repo did not hold
+   their current bytes. Backing up 36 would have left three files whose only copy was the
+   source disk.
+3. **The three same-size drifted files are `1ux\.git\index` (3,149 B) and both `2ux` refs
+   (41 B).** The prompt described them as "1ux\.git\index and both refs\...\main at exactly 41
+   bytes", merging two different files and two different sizes.
+4. **The full `--read-data` was run, not skipped.** The skip rationale requires confirming from
+   restic's own behaviour that blobs are hash-verified on load; that was asserted rather than
+   confirmed, and the prompt's own instruction says an unconfirmed assumption means running it.
+   1h56m, all 24,785 packs, no errors.
+5. **`asset_sources` and `source_versions` have no `path_text` column.** The real chain is
+   `asset_sources(source_version_id)` → `source_versions(source_file_id)` →
+   `source_files(path_text)`. Incidentally, `source_files` holds 1,374,328 rows — v1's
+   discovery and this walk agree on the size of the corpus to the row.
+
+**Two consequences that are now live and need action:**
+
+1. **`--force` is mandatory for every future backup pass.** The repo has had a second pass
+   (`1e80c50e`, tag `phase0-topup`). SPIKE A's stale-blob-list defect needs two reads of the
+   same file; until now there was one. That structural immunity is gone.
+2. **The off-site copy is stale by 39 files.** `G:\ResticPhotos` went up before the top-up.
+   Step 13b must re-sync, or the divergence must be recorded. `origins.jsonl` still does not
+   exist.
+
+<details><summary>Original prompt, for the record</summary>
 
 ```text
 Read PLAN.md "Phase 0" in full (rewritten 2026-08-01 for the SECOND time — read the current
@@ -1024,21 +1083,45 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate, in two parts, because Phase C and Phase D can land on different evenings.**
+</details>
 
-**Phase C gate — the inventory.** `origin` holds 1,374,328 rows each with a `sha256`, `nlink` and
-`file_id`; the 251,087 adopted hashes agree with the independently computed values;
-`count(distinct path) == count(origin rows)`. This is the deliverable and it is committed before
-Phase D starts.
+**Gate, in two parts, because Phase C and Phase D can land on different evenings. Both passed
+2026-08-02.**
 
-**Phase D gate — the deletion gate's evidence.** Every one of the 1,374,298 files in the snapshot
-has a repo-side SHA-256 equal to its disk-side SHA-256, and `restic check` passes. **A same-size,
-same-mtime hash disagreement is the hard stop** — that is a file whose bytes changed under
-restic's nose. A size or mtime change is not that; it is a file that legitimately changed after
-2026-07-18 and needs re-backing-up, and conflating the two would abort a correct run.
+**Phase C gate — the inventory. ✅** `origin` holds 1,374,328 rows each with a `sha256`, `nlink`
+and `file_id`; the 251,087 adopted hashes agree with the independently computed values;
+`count(distinct path) == count(origin rows) == 1,374,328`.
 
-If Phase D is interrupted, say which subtrees completed. A partially verified repo is a real and
-reportable state; it is not a pass, and step 13 must not be told otherwise.
+**Phase D gate — the deletion gate's evidence. ✅** Every one of the 1,374,298 files in the
+snapshot has a repo-side SHA-256 equal to its disk-side SHA-256, and `restic check` passes
+including the full `--read-data`:
+
+```
+agree          1,374,289      hard_stop         0
+changed_size           6      not_on_disk       0
+changed_mtime          3      not_hashed        0
+                              not in repo      30
+```
+
+`1,374,289 + 6 + 3 = 1,374,298` — complete coverage of the snapshot. The nine disagreements are
+the nine known drifted git files and all nine are benign; the 30 are the new loose objects. All
+39 were backed up in Phase E and re-verified out of the new snapshot: 39 agree, 0 differ.
+
+**A same-size, same-mtime hash disagreement is the hard stop** — that is a file whose bytes
+changed under restic's nose. A size or mtime change is not that; it is a file that legitimately
+changed after 2026-07-18 and needs re-backing-up, and conflating the two would abort a correct
+run. None was found.
+
+Two failure modes this run hit and that a re-run must not reintroduce, both now fixed in
+`photolib/inventory.py`:
+
+- **A resumed Phase D must not read emptier than a fresh one.** `_phase_d_report` originally
+  summed an in-memory counter, so the resumed run that skipped its eight already-verified
+  subtrees printed `agree 1` against 1,374,289 real agreements — on the number the deletion gate
+  rests on. Totals now come from the persisted per-subtree rows.
+- **A cluster sample must budget each size regime separately.** One shared byte budget let a
+  single 49.4 GB directory swallow it, leaving 109 small files out of a 20 GB target — no
+  coverage of the regime holding 92% of the file count.
 
 ---
 
@@ -1358,10 +1441,13 @@ Two populations:
 
 2. Everything step 7's inventory found with no MediaVault asset AND that survived triage. These
    read from the photos root into the staging directory. That population is 1,123,241 files
-   before triage — essentially v1's `not_media` classification — and an unknown small fraction
-   after it. It is NOT "the 8,052-file gap": that gap was a census artefact (8,052 WSL symlinks
-   miscounted as files) and does not exist. v1's 356 hash-error files belong to this population
-   too and need an explicit outcome, not a silent absence.
+   before triage — confirmed exactly by step 7, and essentially v1's `not_media` classification
+   — and an unknown small fraction after it. It is NOT "the 8,052-file gap": that gap was a
+   census artefact (8,052 WSL symlinks miscounted as files) and does not exist.
+
+   v1's 356 hash-error files are already resolved and are NOT an open item here: step 7 read and
+   hashed all 356 without error, so each has a `sha256` in `origin` like any other file. Treat
+   them as ordinary members of this population, not as a gap to chase.
 
 Decode exactly once per file. From that single pixel array produce all of: the 1536px
 substrate, the 384px thumbnail on E:, ThumbHash, pHash, dHash, and the quality scalars.
@@ -1430,8 +1516,9 @@ fan-out is for attacking the results, not for producing them.
        files_seen_in_snapshot == 1,374,298, differing by exactly the 30 enumerated git objects.
        Do NOT assert these two are equal — an earlier version of this check demanded four equal
        counters, which predated the reconciliation and would abort on a correct run.
-     - restic check passed, and blobs are hash-verified on load so Phase D's reconstruction
-       covered every referenced data blob.
+     - restic check passed, INCLUDING the full --read-data: all 24,785 packs read, no errors,
+       1h56m on 2026-08-02. The "blobs are hash-verified on load, so the subset suffices"
+       argument is no longer load-bearing anywhere and you do not need to re-establish it.
 
    CHECK WHETHER PHASE D ACTUALLY COMPLETED before crediting it. It is per-subtree checkpointed
    across possibly more than one evening, and a partial run is a legitimate state step 7 is
@@ -1442,11 +1529,18 @@ fan-out is for attacking the results, not for producing them.
 
 4. Does G:\ResticPhotos cover the current corpus? Step 7 established that it does, to the byte:
    1,374,298 file nodes against 1,374,328 files on disk, missing exactly 30 git loose objects,
-   plus 6 files that grew — total 10,977,130 bytes, arithmetic closing exactly. Step 7's top-up
-   backup should have closed those 36. Verify by name and count that it did.
+   plus 6 files that grew — total 10,977,130 bytes, arithmetic closing exactly.
+
+   Step 7's top-up closed 39 files, not 36, in snapshot 1e80c50e tagged phase0-topup, and
+   re-verified all 39 out of that snapshot. The extra three changed IN PLACE AT IDENTICAL SIZE
+   (1ux\.git\index at 3,149 bytes, both 2ux refs\...\main at 41), so the size-based "30 + 6"
+   derivation cannot see them and the repo did not hold their current bytes. Verify by name and
+   count that all 39 are covered. If you find yourself checking for 36, you are running the old
+   derivation and three files' only copy is the source disk.
+
    Then verify the thing step 7 could NOT: that the OFF-SITE copy matches the local repo,
    including the top-up. The local repo was uploaded before the top-up ran, so the remote is
-   expected to be behind by those 36 files unless a re-sync happened. The off-site copy — not the
+   expected to be behind by those 39 files unless a re-sync happened. The off-site copy — not the
    same-disk repo — is what stands behind step 14, so an unverified remote is now the single
    largest assumption between this plan and an irreversible deletion. Do not accept "the upload
    completed" as evidence that the remote holds the right bytes.
@@ -1782,12 +1876,12 @@ The three things you asked for exist: triage happened, the grid is one infinite 
 and clicking a photo opens Explorer while `origins.jsonl` holds every original path.
 
 Four decisions from `PLAN.md` § "Open decisions" are still open and none of them block the
-above. **restic verification is no longer one of them — it moved into step 7**, which is where the
-repo first gets opened. Step 7 runs `restic check` plus a `--read-data-subset`, and its Phase D
-reconstructs every file from the packs and compares per-file against the disk, which is the
-stronger claim: not merely that the repo is internally consistent, but that it holds the same
-bytes the disk holds. That closes the mtime-preserving in-place edit, which no sample and no
-mtime argument can exclude — provided Phase D completed for every subtree.
+above. **restic verification is no longer one of them — it was settled in step 7 on 2026-08-02.**
+Step 7 ran `restic check` including the full `--read-data` (all 24,785 packs, no errors), and its
+Phase D reconstructed all 1,374,298 files from the packs and compared each against the disk, with
+zero same-size same-mtime disagreements. That is the stronger claim: not merely that the repo is
+internally consistent, but that it holds the same bytes the disk holds. It closes the
+mtime-preserving in-place edit, which no sample and no mtime argument can exclude.
 
 **Two things this build never establishes, and the second is worse than the first.**
 
