@@ -880,9 +880,14 @@ computed disk hash — not a sample.
    off-site repo holds every photograph and cannot be navigated back from a vault object to its
    original path.
 
-**One gap this step exposed and did not close.** There is no procedure for adding photos after
-the build ends, and no backup of `G:\vault` at all. Every estimate in this file is a one-off
-migration cost. See PLAN.md "Open decisions" 5 — deliberately not designed yet.
+**One gap this step exposed and did not close — and it does not change the build order.** There
+is no procedure for adding photos after the build ends, and no backup of `G:\vault` at all.
+Every estimate in this file is a one-off migration cost. The architecture was audited against
+future import on 2026-08-02 and **needs no change now**: import requires no schema migration,
+the walk and hash helpers are already root-parameterised, dedup is a primary-key lookup, and
+`state` is content-keyed so re-grouping cannot disturb triage decisions. **Carry on from step 8
+as written.** See PLAN.md "Open decisions" 5 for the audit and the three things worth deciding
+early — deliberately not designed yet.
 
 <details><summary>Original prompt, for the record</summary>
 
@@ -1620,6 +1625,12 @@ This is the one-to-many store that has to survive the source being deleted, so i
 readable with nothing but a text editor. No database required, no schema knowledge required, no
 compression.
 
+Write it APPEND-ONLY, one self-contained JSON object per line, sorted by sha256 on first
+export. Photos imported after this build has ended have to extend this file, and a format that
+can only be regenerated wholesale from a `G:\photos` that no longer exists is a format that goes
+stale the first time anything new arrives. Appending is free; retrofitting append onto a
+one-shot dump is not.
+
 Verify it: reconstruct the origin table from the JSONL into a scratch database and diff it
 against the live one. The path sets must match exactly. Report the diff, even if empty.
 
@@ -1638,11 +1649,17 @@ of the plan:
     one WD Elements USB enclosure. Two copies there is one hardware failure from zero. The
     upload is the ONLY thing that changes that.
   - Reversal of a wrong exclusion is NOT "one restic dump". It is: look the content key up in
-    origins.jsonl to get the original G:\photos path, translate that to restic's snapshot form
-    (G:\photos\x.jpg -> /G/photos/x.jpg; the Windows form is rejected outright), then
-    `restic --no-lock dump <snapshot> <path>`. It is not addressable by content hash at all —
-    restic chunks anything over 512 KiB, so `restic find --blob <sha256>` returns nothing for
-    any real photo or video.
+    origins.jsonl to get the original G:\photos path, translate that to restic's snapshot form,
+    then `restic --no-lock dump <snapshot> <path>`. It is not addressable by content hash at
+    all — restic chunks anything over 512 KiB, so `restic find --blob <sha256>` returns nothing
+    for any real photo or video.
+
+    The snapshot form is `G/photos/x.jpg` — a bare root-entry name with NO LEADING SLASH.
+    Measured 2026-08-02: `/G/photos/x.jpg` FAILS, and so do `/`, `.` and `/photos`, all with the
+    misleading `path "\\C:" not found in snapshot`. An earlier draft of this step specified the
+    leading-slash form; it does not work, and it fails in a way that reads like the file is
+    missing rather than like the path is malformed. Verify one real dump before writing the
+    instruction.
 
 Do not upload anything yourself. Do not delete anything. Do not run step 14.
 
@@ -1928,10 +1945,21 @@ not.
 **There is no procedure for adding photos once the build ends.** Raised 2026-08-02. Every step
 here is a one-off migration of a fixed 1.07 TB corpus; nothing says what next month's card dump
 costs or where it goes. `G:\photos` is deleted at the Gate, so it is not the answer, and the
-vault has no import path. Two useful facts for whoever designs it: `--force` is **not** part of
-it — new files are always read, and a canonical object cannot be silently edited in place because
-its filename *is* its SHA-256 — and content addressing makes scrubbing a local re-hash rather
-than a restore. See `PLAN.md` "Open decisions" 5.
+vault has no import path.
+
+**This does not block anything and was deliberately deferred.** The architecture was audited
+against future import: it needs **no schema migration**, `walk_disk` and `Hasher` are already
+root-parameterised so their cost scales with the new directory rather than the corpus, dedup is
+a primary-key lookup on `file.sha256`, `file.state='pending'` is already the arrival state, and
+`state` is keyed on `sha256` rather than `photo.id` so re-grouping cannot disturb triage
+decisions. By this project's own test — *if adding it later is a migration rather than a
+rewrite, add it later* — it passes.
+
+Two facts for whoever does design it: `--force` is **not** part of it — new files are always
+read, and a canonical object cannot be silently edited in place because its filename *is* its
+SHA-256 — and content addressing makes scrubbing a local re-hash rather than a restore. The
+vault is also ≈211k entries against `G:\photos`' 1.38M, so the metadata-walk cost that makes
+whole-tree backup of the source annoying is ~5× smaller. See `PLAN.md` "Open decisions" 5.
 
 **`state.sqlite3` is only half-covered, and it is the one artefact in this project that cannot be
 regenerated.** `PLAN.md` labels it *Irreplaceable* and it is: `triage_rule` and `triage_override`

@@ -1021,8 +1021,12 @@ nothing here detects it. There is no undelete affordance on this machine to fall
 This plan consumes a fixed 1.07 TB corpus and stops. `G:\photos` is deleted at this gate, so it
 is not where new photos go; the vault is, and the vault has neither an import path nor a backup.
 Every hour estimate here is a one-off migration cost, and none of them describes what next
-month's card dump costs. The two open questions are **where new files enter** and **what backs
-the vault up**; see "Open decisions".
+month's card dump costs.
+
+**Deferring it is safe** — the architecture was audited against future import and needs no
+change now, chiefly because import requires no schema migration. The audit, and the three
+things worth deciding early anyway, are in "Open decisions" 5. What remains genuinely missing is
+the *vault backup*, and that gap is this section's second paragraph, not a new one.
 
 One thing that is *not* a problem, because it looked like one: **content addressing dissolves
 the SPIKE A hazard entirely for the vault.** A canonical object's filename *is* its SHA-256, so
@@ -1377,19 +1381,49 @@ later.**
    Raised 2026-08-02. This plan migrates a fixed corpus and stops. `G:\photos` is deleted at the
    Gate, so it is not the answer, and `G:\vault` has **no import path and no backup**. Every
    hour figure in this document is a one-off migration cost; none of them says what next month's
-   card dump costs. Two halves, and the second is the dangerous one:
+   card dump costs.
 
-   - **Import.** Content-addressed staging already exists for Phase 2b, so the mechanism is
-     mostly there; what is missing is the entry point and the decision about whether new files
-     get a `G:\photos`-style source tree at all, or go straight to staging.
-   - **Vault backup.** After Phase 4 the vault is the sole live representation of the library.
-     This is the larger gap and it is already named in the Gate section. Note that content
-     addressing makes it *cheap* to verify — the filename is the SHA-256, so a scrub is a local
-     re-hash — and makes `--force` irrelevant, because an object cannot be silently edited in
-     place and still match its own name.
+   > **Verdict, 2026-08-02: defer it. The architecture was audited against future import and
+   > nothing needs changing now.** Continue through `BUILD-PROMPTS.md` as written. The audit:
+   >
+   > | what later import needs | what already provides it | verdict |
+   > |---|---|---|
+   > | discover new files | `walk_disk(root)` — root-parameterised; cost is proportional to the new directory, not the corpus | reuse as-is |
+   > | hash them | `Hasher(root)` and `hash_regime(work, root, …)` — also root-parameterised | reuse as-is |
+   > | decide "is this a duplicate" | `file` keyed on `sha256`, `origin` many-to-one → a primary-key lookup, never a corpus scan | O(1) per file |
+   > | derivatives and features | decode once → every tier from one pixel array; the 1536px substrate; per-feature `feature_ver` | designed for it |
+   > | grouping | incremental — a new photo joins a component, merges two, or forms its own | designed for it |
+   > | schema | `origin` / `file` / `photo` need **no new column**; `file.state='pending'` is already the arrival state | **no migration** |
+   > | keep triage decisions across re-grouping | `state` is keyed on `sha256`, never `photo.id`, and `triage_override` is content-keyed — so re-importing known content inherits its existing decision | designed for it |
+   > | back the new object up | **nothing** | the one real gap |
+   >
+   > The decisive line is the schema row. This document's own test is *"if adding it later is a
+   > migration rather than a rewrite, add it later"*, and import needs no migration at all.
+   >
+   > What also holds, measured rather than assumed: the vault is **≈211k entries** against
+   > `G:\photos`' 1.38M, so the ~30 min metadata-walk tax that makes whole-tree backup of the
+   > source annoying is roughly 5× smaller for the vault; and vault objects are immutable and
+   > content-addressed, so an incremental backup is purely additive, `--force` never applies,
+   > and a scrub is a local re-hash (*does this file hash to its own name?*) rather than a
+   > restore.
 
-   Not designed here on purpose: it is a design decision, not a correction, and this document
-   should not grow a procedure nobody has reviewed.
+   **Three things are free to decide now and awkward to retrofit. Decide, do not build:**
+
+   - **The vault's backup is a SECOND repo, and it must be off-device from the start.**
+     `G:\ResticPhotos` is partition 2 of disk 3 — the same disk as the vault — so backing the
+     vault into it reproduces exactly the "two copies on one USB HDD is one hardware failure
+     from zero" problem this plan already forbids. After the Gate, `ResticPhotos` is a *frozen
+     archive of a deleted `G:\photos`*, not an ongoing target. `config.toml` gains a key when
+     the step arrives; nothing changes before then.
+   - **Back up `vault_root` only.** `deriv`, `meta` and `thumb` all regenerate from the
+     canonical objects. Excluding them roughly halves the walk and avoids carrying ~36 GB of
+     substrate that a re-run reproduces exactly.
+   - **`origins.jsonl` must be append-only** — see step 13b. A format that can only be
+     regenerated wholesale from a `G:\photos` that no longer exists goes stale the first time
+     anything new arrives.
+
+   The procedure itself is not designed here on purpose: it is a design decision, not a
+   correction, and this document should not grow a procedure nobody has reviewed.
 6. **`origins.jsonl` does not exist, and it is the binding constraint on recoverability.**
    Raised as a gate condition already, restated here because it is routinely mistaken for
    paperwork. The off-site repo holds every photograph; without this map you cannot navigate

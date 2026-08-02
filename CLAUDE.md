@@ -121,7 +121,10 @@ unrelated to `--force`); a backup scoped to one new directory is seconds. If you
 about to reach for `--force`, check which of those three you actually need.
 
 There is **no procedure yet for adding photos after the build**, and **no backup of `G:\vault`
-at all** — `PLAN.md` "Open decisions" 5. Do not invent one in passing; it is a design decision.
+at all** — `PLAN.md` "Open decisions" 5. Both are deferred on purpose: the architecture was
+audited against future import on 2026-08-02 and needs no change, chiefly because import requires
+**no schema migration** and the walk/hash helpers are already root-parameterised. Do not invent a
+procedure in passing, and do not treat the gap as a reason to redesign anything.
 
 To run the archived test suite as a reference oracle:
 
