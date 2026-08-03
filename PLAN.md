@@ -1641,7 +1641,7 @@ later.**
 | ~~6~~ | ~~Phase 0 inventory~~ | **Done 2026-08-02 in 12h50m.** `origin` 1,374,328 rows, all hashed, 0 errors; 787,798 distinct SHA-256; all 251,087 adopted hashes agreed. Content-level cross-check complete: every one of the 1,374,298 snapshot file nodes reconstructed from the repo and compared per-file, **zero** same-size same-mtime disagreements. `check --read-data` clean. Top-up snapshot `1e80c50e` covers the 39 drifted files |
 | ~~7~~ | ~~Phase 1 prefilter~~ | **Done 2026-08-02 in 2.7s.** Nine `exclude` rules at `seq` 0–8 in `state.sqlite3`, nothing written to the catalog. **101,986 files / 4.77 GB excluded, 685,812 / 544.14 GB surviving** — not the ≈41,700 / 0.5 GB this document predicted, which was the adopted subset. `.png`, `.gif`, `.webp`, `.bmp` matched by no rule |
 | ~~8~~ | ~~Phase 2a verification read + ARW repair~~ | **Done 2026-08-03.** |
-| 9 | Triage UI | **Engine, survey, screens, probe and write API done 2026-08-03** — see "Triage". No UI yet |
+| 9 | Triage UI | **Built 2026-08-03** — engine, survey, eight screens, probe and write API, all verified against the real catalog. See "Triage". **The remaining work is not code: it is looking at the corpus and saving rules.** Nothing downstream can start until that lands a kept set — step 10 gap-fills only what triage keeps, and step 12 unlinks only what it excludes |
 | 10 | Phase 2b gap fill | Benchmark on 500 files first |
 | 11 | **`origins.jsonl` export + server upload** | **Moved ahead of Phase 4. `G:\photos` deletable; Phase 4 unblocked** |
 | 12 | Phase 4 promote + Phase 5 group | Gated on step 11 completing and verifying |
