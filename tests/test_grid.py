@@ -93,9 +93,11 @@ def make_grid(tmp_path: Path):
             thumb_root=tmp_path / "thumb",
             mediavault_root=base,
             reveal_root=base / "objects",
+            photos_root=tmp_path / "photos",
         )
         (roots.reveal_root).mkdir(parents=True, exist_ok=True)
         roots.thumb_root.mkdir(parents=True, exist_ok=True)
+        roots.photos_root.mkdir(parents=True, exist_ok=True)
         rows = synthetic.corpus(roots.catalog_db, roots.state_db, count=count, tie=tie)
         synthetic.write_thumbnails(roots.thumb_root, [row[1] for row in rows[:thumbnails]])
 
@@ -397,12 +399,28 @@ def test_index_is_served_without_inline_script(grid):
     status, headers, body = http_request(grid.port, "GET", "/")
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
-    assert b'src="/app.js"' in body and b'href="/style.css"' in body
+    assert b'src="/bundle.js"' in body and b'href="/bundle.css"' in body
     # The CSP carries no 'unsafe-inline', so an inline block would not execute.
     assert b"<script>" not in body
 
 
-@pytest.mark.parametrize("path", ["/", "/app.js", "/style.css", "/api/photos", "/t/x.webp", "/nope"])
+def test_the_built_bundle_is_committed_and_current(grid):
+    """The two build outputs are checked in, so a clean checkout runs without npm.
+
+    They are also the one place this repository holds generated code, which is
+    only safe while they are actually present — a missing bundle turns the whole
+    client into a 404 that no Python test would otherwise notice.
+    """
+    for path, content_type in (("/bundle.js", "text/javascript"), ("/bundle.css", "text/css")):
+        status, headers, body = http_request(grid.port, "GET", path)
+        assert status == 200, path
+        assert headers["Content-Type"].startswith(content_type)
+        assert body, path
+
+
+@pytest.mark.parametrize(
+    "path", ["/", "/bundle.js", "/bundle.css", "/api/photos", "/t/x.webp", "/nope"]
+)
 def test_security_headers_are_on_every_response(grid, path):
     _, headers, _ = http_request(grid.port, "GET", path)
     assert headers["X-Content-Type-Options"] == "nosniff"
@@ -413,7 +431,7 @@ def test_security_headers_are_on_every_response(grid, path):
 
 
 def test_unknown_routes_are_404(grid):
-    for path in ("/api/nope", "/static/app.js", "//evil", "/index.html"):
+    for path in ("/api/nope", "/static/bundle.js", "//evil", "/index.html"):
         status, _, _ = http_request(grid.port, "GET", path)
         assert status == 404, path
 
@@ -434,7 +452,7 @@ def test_the_host_allowlist_accepts_loopback(grid):
         assert status == 200, host
 
 
-@pytest.mark.parametrize("path", ["/", "/app.js", "/api/photos", "/t/x.webp"])
+@pytest.mark.parametrize("path", ["/", "/bundle.js", "/api/photos", "/t/x.webp"])
 def test_a_foreign_host_header_is_refused(grid, path):
     """F48: a name an attacker controls that resolves to 127.0.0.1 is same-origin
     to the browser, so CSP does not help and only a Host allowlist does."""
@@ -593,6 +611,75 @@ def test_an_escaping_vault_relpath_is_refused_without_leaking_it(make_grid):
     assert status == 403
     assert grid.spawns == []
     assert b"outside" not in body and b"MediaVault" not in body
+
+
+def test_reveal_by_origin_resolves_under_the_photos_root(make_grid):
+    """A triage subject is an `origin` path, not a photo.
+
+    Most of what triage looks at has no `photo` row and 85% of it has no
+    thumbnail, so the path is how you identify it — and revealing it is how you
+    look at the ones the sheet cannot show you.
+    """
+    grid = make_grid(count=2)
+    target = grid.roots.photos_root / "lumix" / "DCIM" / "P1080096.JPG"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"jpg")
+    conn = sqlite3.connect(grid.roots.catalog_db)
+    conn.execute(
+        "INSERT INTO origin (id, path, root, ext, size, sha256, seen_at) "
+        "VALUES (7, ?, 'lumix', '.jpg', 3, ?, '2026-08-03T00:00:00+00:00')",
+        (str(target), "a" * 64),
+    )
+    conn.commit()
+    conn.close()
+
+    status, _, _ = reveal_post(grid, b'{"origin": 7}')
+    assert status == 204
+    command, executable = grid.spawns[0]
+    assert command == f'"{executable}" /select,"{target}"'
+
+
+def test_an_origin_path_outside_the_photos_root_is_refused(make_grid):
+    """The containment root is fixed by the id kind, never searched.
+
+    `F05` and `F13` are a *set* of roots tried until one passes. Here a request
+    carrying `origin` is proven against `photos_root` and against nothing else,
+    so a row naming a vault object does not quietly resolve through the other
+    root.
+    """
+    grid = make_grid(count=2)
+    outside = grid.roots.mediavault_root / "objects" / "elsewhere.jpg"
+    outside.write_bytes(b"jpg")
+    conn = sqlite3.connect(grid.roots.catalog_db)
+    conn.execute(
+        "INSERT INTO origin (id, path, root, ext, size, sha256, seen_at) "
+        "VALUES (7, ?, 'x', '.jpg', 3, ?, '2026-08-03T00:00:00+00:00')",
+        (str(outside), "b" * 64),
+    )
+    conn.commit()
+    conn.close()
+
+    status, _, body = reveal_post(grid, b'{"origin": 7}')
+    assert status == 403
+    assert grid.spawns == []
+    assert b"elsewhere" not in body and b"MediaVault" not in body
+
+
+def test_an_unknown_origin_id_is_404(grid):
+    status, _, _ = reveal_post(grid, b'{"origin": 99999}')
+    assert status == 404
+    assert grid.spawns == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b'{"id": 1, "origin": 1}', b'{"origin": "5"}', b'{"origin": true}', b'{"origin": 0}'],
+)
+def test_reveal_refuses_an_ambiguous_or_malformed_id_kind(grid, payload):
+    """Two ids is not a preference to resolve silently; it is a bad request."""
+    status, _, _ = reveal_post(grid, payload)
+    assert status == 400, payload
+    assert grid.spawns == []
 
 
 def test_an_empty_vault_relpath_is_refused(make_grid):

@@ -20,7 +20,7 @@ import time
 
 import pytest
 
-from photolib import db, triage, triage_screens, triage_survey
+from photolib import db, probe, triage, triage_screens, triage_survey
 
 # (path, ext, size, sha seed, kind, width, height, camera)
 CORPUS = (
@@ -110,6 +110,59 @@ def test_no_predicate_compiles_to_a_like():
 def test_bad_predicates_are_refused(text):
     with pytest.raises(triage.PredicateError):
         triage.compile_predicate(text)
+
+
+def test_dims_reads_two_columns_and_still_binds_both(survey):
+    """Screen 4's exact cluster is the one predicate that needs two columns.
+
+    A rule reads exactly one column and that property is worth keeping, so
+    `dims` is one column carrying one value whose *compiled* form touches two.
+    The value never becomes syntax: it leaves as two bound integers.
+    """
+    compiled = triage.compile_predicate(triage.predicate("dims", "=", "1920x1080"))
+    assert compiled.kind == "bucket"
+    assert compiled.params == [1920, 1080]
+    assert compiled.bound("k") == "(k.width = ? AND k.height = ?)"
+    assert "1920" not in compiled.sql
+
+
+def test_dims_is_not_the_same_set_as_width_alone(survey):
+    """The distinction the screen exists for: 1920x1080 is not every 1920-wide."""
+    survey.execute(
+        "INSERT INTO origin (path, root, ext, size, sha256, seen_at) "
+        "VALUES (?, 'backup', '.png', 10, ?, '2026-08-03T00:00:00+00:00')",
+        (r"G:\photos\backup\photos\holiday\tall.png", "i" * 64),
+    )
+    survey.execute(
+        "INSERT INTO file (sha256, size, ext, kind, width, height, state, feature_ver) "
+        "VALUES (?, 10, '.png', 'image', 1920, 2560, 'pending', 'test')",
+        ("i" * 64,),
+    )
+    triage_survey.build(survey)
+
+    rules = triage.load_rules(survey)
+    exact = triage_screens.page(survey, rules, candidate=rule("dims", "=", "1920x1080"))
+    wide = triage_screens.page(survey, rules, candidate=rule("width", "=", 1920))
+    assert {row["p"].rsplit("\\", 1)[-1] for row in exact["photos"]} == {"hero.png"}
+    assert {row["p"].rsplit("\\", 1)[-1] for row in wide["photos"]} == {"hero.png", "tall.png"}
+
+
+@pytest.mark.parametrize(
+    "value", ["1920", "axb", "1920x1080x9", "1920X1080", "x1080", "1920x", "", "1920 x 1080"]
+)
+def test_a_malformed_dims_value_is_refused(value):
+    with pytest.raises(triage.PredicateError):
+        triage.predicate("dims", "=", value)
+
+
+def test_a_dims_rule_orders_against_the_others(survey):
+    """It compiles into the same CASE, so first-match-wins has to cover it too."""
+    save(survey, rule("dims", "=", "1920x1080", "include"), rule("ext", "=", ".png", "exclude"))
+    summary = triage.counts(survey)
+    # hero.png is 1920x1080 and the include is above the exclude, so it stays;
+    # the other three .png go.
+    assert summary["excluded_paths"] == 3
+    assert summary["per_rule"][0]["paths"] == 1
 
 
 def test_the_prefilters_stored_predicates_still_compile(conn):
@@ -356,6 +409,75 @@ def test_a_page_never_shows_what_the_rules_already_excluded(survey):
     save(survey, rule("dir_segment", "=", "node_modules"))
     payload = triage_screens.page(survey, triage.load_rules(survey))
     assert all("node_modules" not in row["p"] for row in payload["photos"])
+
+
+def test_a_page_row_carries_its_override(survey):
+    """The per-file toggle has to render what it is toggling.
+
+    Null is the ordinary case and is not missing information: it means no
+    override exists and the rules decide this one.
+    """
+    rules = triage.load_rules(survey)
+    before = {row["s"]: row["o"] for row in triage_screens.page(survey, rules)["photos"]}
+    assert set(before.values()) == {None}
+
+    sha = "c" * 64
+    survey.execute(
+        "INSERT INTO state.triage_override (sha256, decision, created_at) "
+        "VALUES (?, 'exclude', '2026-08-03T00:00:00+00:00')",
+        (sha,),
+    )
+    after = {row["s"]: row["o"] for row in triage_screens.page(survey, rules)["photos"]}
+    assert after[sha] == "exclude"
+    assert [value for key, value in after.items() if key != sha] == [None] * (len(after) - 1)
+
+
+# --- the probe's worklist ---------------------------------------------------------------
+
+
+def test_the_probe_worklist_is_only_what_the_rules_still_keep(survey):
+    """A directory rule has to restrict the worklist, and once did not.
+
+    `Verdict.query` emits the directory CTE first, but `probe` puts its own
+    parameterised `candidate` CTE between that and the `kept` expression -- so
+    binding `verdict.params` as one unit fed the first *extension* to the
+    directory CTE. It then matched no directories, and the worklist quietly
+    contained every path a `dir_segment` rule had excluded.
+
+    Invisible with a bucket-only rule set, which is why it survived: the
+    categorical prefilter is nine `ext` rules. `PLAN.md` runs this after screen
+    1, whose whole output is directory rules.
+    """
+    assert {path for _sha, path in probe.worklist(survey)} == {
+        r"G:\photos\backup\rcr\node_modules\x\logo.png",
+        r"G:\photos\backup\rcr\node_modules\y\icon.png",
+    }
+
+    save(survey, rule("dir_segment", "=", "node_modules"))
+    assert probe.worklist(survey, triage.load_rules(survey)) == []
+
+
+def test_the_probe_reports_its_worklist_without_reading_anything(survey, monkeypatch):
+    """The button's whole job. It counts; it never opens a file.
+
+    `probe.measure` is the only thing in that module that touches a media root,
+    and reporting must not reach it -- the reads land on the USB HDD and the
+    write lands in the catalog, neither of which belongs in a request.
+    """
+    monkeypatch.setattr(
+        probe, "measure", lambda path: pytest.fail(f"the report opened {path}")
+    )
+    report = probe.pending(survey)
+    assert report["worklist"] == 2
+    assert report["command"] == "python -m photolib.probe"
+    assert ".png" in report["formats"]
+
+    save(survey, rule("dir_segment", "=", "node_modules"))
+    empty = probe.pending(survey, triage.load_rules(survey))
+    assert empty["worklist"] == 0
+    # No command when there is nothing to run: an empty worklist says so rather
+    # than offering a step that would do nothing.
+    assert empty["command"] is None
 
 
 # --- latency ---------------------------------------------------------------------------

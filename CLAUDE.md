@@ -191,6 +191,26 @@ audited against future import on 2026-08-02 and needs no change, chiefly because
 **no schema migration** and the walk/hash helpers are already root-parameterised. Do not invent a
 procedure in passing, and do not treat the gap as a reason to redesign anything.
 
+The grid and the eight triage screens are one client, two modes, served by one process on
+`127.0.0.1:8770`. Read-only except `/api/triage/*`, whose write handlers hold a connection to
+`state.sqlite3` with no `ATTACH` of the catalog.
+
+```bash
+python -m photolib.grid --open
+```
+
+Its source is `ui/` — Svelte 5, no Kit. `npm run build` emits `photolib/static/bundle.js` and
+`bundle.css` under fixed unhashed names, and **those two files are committed**: they are the only
+generated code in this repository, and they are here so the server runs from a clean checkout
+without a node toolchain. Edit `ui/src`, never the bundle, and rebuild before committing. No
+literal `style="…"` in a `.svelte` file — the CSP carries no `unsafe-inline`, and Svelte compiles
+a static style attribute to `setAttribute`, which is blocked; `style:` directives and classes are
+not.
+
+```bash
+cd ui && npm run check && npm run build
+```
+
 To run the archived test suite as a reference oracle:
 
 ```bash

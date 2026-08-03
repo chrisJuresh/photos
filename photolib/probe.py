@@ -57,6 +57,47 @@ HEADER_FORMATS = frozenset(
 )
 
 
+def _worklist_sql(
+    verdict: triage.Verdict, formats: list[str], *, select: str, suffix: str = ""
+) -> tuple[str, list]:
+    """The worklist query, as either its rows or a count over them.
+
+    Driven from `file`, which is 787,798 rows and mostly already measured,
+    rather than from the 1,374,328-row path list: reaching the paths of a small
+    candidate set through `origin_sha` costs the candidates, and grouping the
+    whole path list first cost 17 s.
+
+    The extension is filtered on `origin.ext`, not `file.ext`. One content hash
+    can have paths with different extensions -- the empty file has dozens -- and
+    picking `min(path)` off a `file.ext` match hands the prober a name it cannot
+    open.
+
+    Returns the SQL and its parameters together, because they cannot be assembled
+    independently here. `candidate` is a parameterised CTE sitting *between* the
+    verdict's directory CTE and the `kept` expression in the WHERE, so the bind
+    order is dir, formats, case, formats -- not `verdict.params` as one unit.
+    Binding it as one unit fed the first extension to the directory CTE, which
+    then matched nothing and quietly kept every path a `dir_segment` rule had
+    excluded. That is invisible without a directory rule in the set, which is
+    why it survived step 10: the prefilter is nine `ext` rules.
+    """
+    placeholders = ", ".join("?" * len(formats))
+    sql = verdict.query(
+        f"""candidate AS (
+      SELECT sha256 FROM file WHERE width IS NULL AND lower(ext) IN ({placeholders})
+    )""",
+        tail=f"""SELECT {select}
+      FROM candidate c
+      CROSS JOIN origin g ON g.sha256 = c.sha256
+      JOIN triage_path tp ON tp.origin_id = g.id
+      JOIN triage_bucket k ON k.id = tp.bucket_id
+      {verdict.join}
+      WHERE {verdict.kept} AND lower(g.ext) IN ({placeholders})
+      {suffix}""",
+    )
+    return sql, [*verdict.dir_params, *formats, *verdict.case_params, *formats]
+
+
 def worklist(
     conn: sqlite3.Connection,
     rules: list[triage.Rule] | None = None,
@@ -72,32 +113,51 @@ def worklist(
     """
     rules = triage.load_rules(conn) if rules is None else rules
     verdict = triage.verdict_expression(rules)
-    formats = sorted(formats)
-    placeholders = ", ".join("?" * len(formats))
-    # Driven from `file`, which is 787,798 rows and mostly already measured,
-    # rather than from the 1,374,328-row path list: reaching the paths of a
-    # small candidate set through `origin_sha` costs the candidates, and
-    # grouping the whole path list first cost 17 s.
-    #
-    # The extension is filtered on `origin.ext`, not `file.ext`. One content
-    # hash can have paths with different extensions -- the empty file has
-    # dozens -- and picking `min(path)` off a `file.ext` match hands the prober
-    # a name it cannot open.
-    sql = verdict.query(
-        f"""candidate AS (
-      SELECT sha256 FROM file WHERE width IS NULL AND lower(ext) IN ({placeholders})
-    )""",
-        tail=f"""SELECT g.sha256, min(g.path)
-      FROM candidate c
-      CROSS JOIN origin g ON g.sha256 = c.sha256
-      JOIN triage_path tp ON tp.origin_id = g.id
-      JOIN triage_bucket k ON k.id = tp.bucket_id
-      {verdict.join}
-      WHERE {verdict.kept} AND lower(g.ext) IN ({placeholders})
-      GROUP BY g.sha256
-      ORDER BY 2""",
+    sql, params = _worklist_sql(
+        verdict,
+        sorted(formats),
+        select="g.sha256, min(g.path)",
+        suffix="GROUP BY g.sha256 ORDER BY 2",
     )
-    return conn.execute(sql, [*formats, *verdict.params, *formats]).fetchall()
+    return conn.execute(sql, params).fetchall()
+
+
+def pending(
+    conn: sqlite3.Connection,
+    rules: list[triage.Rule] | None = None,
+    *,
+    formats: frozenset[str] = HEADER_FORMATS,
+) -> dict:
+    """How much work the probe has, without doing any of it.
+
+    This is what the triage UI's probe button reports, and it is deliberately
+    the *only* thing an HTTP request does about the probe. Hard rule 4 keeps
+    media work out of a request, and here that is not ceremony:
+
+      * `probe.store` writes `file.width`/`height` into the **catalog**, while
+        the triage write surface is handed a connection with no `ATTACH` of the
+        catalog precisely so "triage writes metadata only" is a fact about the
+        connection rather than a convention somebody maintains;
+      * the reads land on `G:`, the USB HDD whose contention `PLAN.md` measures
+        in whole megabytes per second, at whatever moment a request arrives;
+      * and on this corpus it would buy nothing -- the worklist is 25 files,
+        all of them unreadable cache blobs, so the probe stores zero rows.
+
+    So this counts, in pure SQL, and the caller runs `python -m photolib.probe`
+    if the count ever justifies it. `formats` rides along because it is the
+    honest explanation for why screen 3's `unknown` band does not shrink to
+    zero: everything outside this list stays unmeasured however long you wait.
+    """
+    rules = triage.load_rules(conn) if rules is None else rules
+    verdict = triage.verdict_expression(rules)
+    ordered = sorted(formats)
+    sql, params = _worklist_sql(verdict, ordered, select="count(DISTINCT g.sha256)")
+    count = conn.execute(sql, params).fetchone()[0]
+    return {
+        "worklist": count,
+        "formats": ordered,
+        "command": "python -m photolib.probe" if count else None,
+    }
 
 
 def measure(path: Path) -> tuple[int, int] | None:

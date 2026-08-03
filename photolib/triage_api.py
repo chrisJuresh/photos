@@ -27,7 +27,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from photolib import triage, triage_screens
+from photolib import probe, triage, triage_screens
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_NOTE_CHARS = 200
@@ -262,14 +262,19 @@ def _candidate(params: dict[str, list[str]]) -> triage.Rule | None:
     if decision not in triage.DECISIONS:
         raise Refused("decision")
     value: object = raw
-    if column in triage.INT_COLUMNS:
+    # `is null` is tested first because it takes no value at all, and three of
+    # the four columns that accept it are integer columns. Testing the column
+    # first made `long_edge is null` unexpressible as a candidate -- which is
+    # screen 3's `unknown` band, the one holding every file whose bytes have
+    # never been read.
+    if op == "is null":
+        value = None
+    elif column in triage.INT_COLUMNS:
         if raw is None or not raw.isdigit():
             raise Refused("value")
         value = int(raw)
     elif op == "in":
         value = (raw or "").split(",")
-    elif op == "is null":
-        value = None
     try:
         return triage.Rule(0, triage.predicate(column, op, value), decision)
     except triage.PredicateError:
@@ -362,9 +367,20 @@ def read_page(conn: sqlite3.Connection, params: dict) -> tuple[int, dict]:
     return 200, payload
 
 
+def read_probe(conn: sqlite3.Connection, params: dict) -> tuple[int, dict]:
+    """`GET /api/triage/probe` -- how much work the probe has. It does not run it.
+
+    A count, in SQL, over the current rule set. Running the probe from here
+    would open files on `G:` and write the catalog from a request handler; see
+    `probe.pending` for why neither is worth the 25 files it would measure.
+    """
+    return 200, probe.pending(conn)
+
+
 READ_ROUTES = {
     "/api/triage/counts": read_counts,
     "/api/triage/files": read_files,
     "/api/triage/screen": read_screen,
     "/api/triage/page": read_page,
+    "/api/triage/probe": read_probe,
 }

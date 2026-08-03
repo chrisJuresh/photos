@@ -1,13 +1,16 @@
-"""The read-only grid: one infinite page of every photo, newest first.
-
-Four routes on 127.0.0.1, one process, no framework and no bundler:
+"""The grid and the triage screens: one server, two modes of one client.
 
     GET  /                                                the page
     GET  /api/photos?before=&before_id=&limit=&kind=      a keyset page
     GET  /t/<sha256>.webp                                 a thumbnail, immutable
-    POST /api/reveal {"id": N}                            select it in Explorer
+    POST /api/reveal {"id": N} | {"origin": N}            select it in Explorer
+    GET  /api/triage/*                                    the survey, read-only
+    POST /api/triage/*                                    the only writes there are
 
-Nothing here writes. The only surface that leaves the process is `/api/reveal`,
+Everything except `/api/triage/*` is read-only, and those writes reach
+`state.sqlite3` through a connection that cannot see the catalog — see
+`GridServer.state_writer`. The only surface that leaves the process is
+`/api/reveal`,
 and its path proof lives in `photolib.reveal` so it can be read and tested on
 its own — `F51` is v1 putting routers, SQL, security and browser launch in one
 4,700-line module.
@@ -54,10 +57,13 @@ DEFAULT_LIMIT = 500
 MAX_LIMIT = 1000
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# `bundle.js` and `bundle.css` are built from `ui/src` by `npm run build` and
+# committed, so the server runs from a clean checkout with no node toolchain.
+# `index.html` is hand-written and is not a build output.
 STATIC_ROUTES = {
     "/": ("index.html", "text/html; charset=utf-8"),
-    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-    "/style.css": ("style.css", "text/css; charset=utf-8"),
+    "/bundle.js": ("bundle.js", "text/javascript; charset=utf-8"),
+    "/bundle.css": ("bundle.css", "text/css; charset=utf-8"),
 }
 
 # 64 lowercase hex characters cannot traverse, cannot be absolute and cannot
@@ -111,6 +117,12 @@ class Roots:
     thumb_root: Path
     mediavault_root: Path
     reveal_root: Path
+    # Triage's containment root, and only triage's. A triage subject is an
+    # `origin` path under `G:\photos`, which is a different tree from the vault
+    # objects `reveal_root` covers. Which of the two applies is decided by the
+    # kind of id the request carries, before anything resolves -- never by
+    # trying one and falling back to the other.
+    photos_root: Path
 
     @classmethod
     def from_config(cls) -> Roots:
@@ -121,6 +133,7 @@ class Roots:
             thumb_root=config.thumb_root,
             mediavault_root=config.mediavault_root,
             reveal_root=config.reveal_root,
+            photos_root=config.photos_root,
         )
 
 
@@ -241,6 +254,17 @@ def reveal_relpath(conn: sqlite3.Connection, photo_id: int) -> tuple | None:
         "JOIN file AS f ON f.sha256 = p.rep_sha256 WHERE p.id = ?",
         (photo_id,),
     ).fetchone()
+
+
+def origin_source_path(conn: sqlite3.Connection, origin_id: int) -> tuple | None:
+    """The source path one `origin` row records, as a row, or None.
+
+    Triage's subject is a path, not a photo: most of what it looks at has no
+    `photo` row and 85% of it has no thumbnail either. `origin.path` is NOT NULL,
+    so unlike `vault_relpath` there is no "recorded but empty" case to tell
+    apart from "no such row".
+    """
+    return conn.execute("SELECT path FROM origin WHERE id = ?", (origin_id,)).fetchone()
 
 
 # --------------------------------------------------------------------------
@@ -530,24 +554,41 @@ class GridHandler(BaseHTTPRequestHandler):
         payload = self._json_body(MAX_REVEAL_BODY)
         if payload is None:
             return
-        photo_id = payload.get("id")
-        # isinstance(True, int) is True, so bool has to be excluded by type.
-        if type(photo_id) is not int or photo_id <= 0:
+
+        # Two id kinds: `id` is a photo and resolves under the vault, `origin`
+        # is a triage subject and resolves under the photos root. Exactly one
+        # may be present, and which one it is fixes the containment root before
+        # anything resolves. Accepting both and preferring one would be a silent
+        # choice, and trying one root then the other is the `F05`/`F13` shape.
+        keys = [key for key in ("id", "origin") if key in payload]
+        if len(keys) != 1:
             self._fail(400, "id")
             return
-
-        row = reveal_relpath(self.server.connection(), photo_id)
-        if row is None:
-            self._fail(404, "id")
-            return
-        relpath = row[0]
-        if not relpath:
-            self._fail(409, "path")
+        key = keys[0]
+        identifier = payload[key]
+        # isinstance(True, int) is True, so bool has to be excluded by type.
+        if type(identifier) is not int or identifier <= 0:
+            self._fail(400, key)
             return
 
         roots = self.server.roots
+        conn = self.server.connection()
         try:
-            target = reveal_module.resolve(relpath, roots.mediavault_root, roots.reveal_root)
+            if key == "origin":
+                row = origin_source_path(conn, identifier)
+                if row is None:
+                    self._fail(404, key)
+                    return
+                target = reveal_module.resolve_absolute(row[0], roots.photos_root)
+            else:
+                row = reveal_relpath(conn, identifier)
+                if row is None:
+                    self._fail(404, key)
+                    return
+                if not row[0]:
+                    self._fail(409, "path")
+                    return
+                target = reveal_module.resolve(row[0], roots.mediavault_root, roots.reveal_root)
         except reveal_module.RevealRefused:
             # The reason is in the server log. The client gets a field name.
             self._fail(403, "path")
@@ -574,7 +615,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m photolib.grid", description=__doc__)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--open", action="store_true", help="open a browser once bound")
-    for name in ("catalog", "state", "thumb-root", "mediavault-root", "reveal-root"):
+    for name in (
+        "catalog",
+        "state",
+        "thumb-root",
+        "mediavault-root",
+        "reveal-root",
+        "photos-root",
+    ):
         parser.add_argument(f"--{name}", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -585,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
         thumb_root=args.thumb_root or roots.thumb_root,
         mediavault_root=args.mediavault_root or roots.mediavault_root,
         reveal_root=args.reveal_root or roots.reveal_root,
+        photos_root=args.photos_root or roots.photos_root,
     )
 
     server = serve(roots, args.port)
@@ -597,6 +646,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  catalog         {roots.catalog_db}")
     print(f"  thumbnails      {roots.thumb_root}")
     print(f"  reveal root     {roots.reveal_root}")
+    print(f"  triage root     {roots.photos_root}")
     print("  kinds           " + ", ".join(f"{kind} {count:,}" for kind, count in counts))
     if args.open:
         import webbrowser

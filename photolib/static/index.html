@@ -4,16 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>photos</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/bundle.css">
 <link rel="icon" href="data:,">
 </head>
 <body>
-<!-- One mount element. Every tile the client creates lives inside #canvas and
-     nothing outside it is touched, so a later component layer wraps this rather
-     than untangling it. No inline script: the CSP has no 'unsafe-inline'. -->
-<main id="canvas"><div id="sentinel"></div></main>
-<div id="status" hidden></div>
-<pre id="debug" hidden></pre>
-<script src="/app.js"></script>
+<!-- One mount element. bundle.js and bundle.css are built from ui/src by
+     `npm run build` and committed, so this page works from a clean checkout
+     without a node toolchain; ui/src is the source of truth. No inline script:
+     the CSP carries no 'unsafe-inline'. -->
+<div id="app"></div>
+<script type="module" src="/bundle.js"></script>
 </body>
 </html>

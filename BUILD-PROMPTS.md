@@ -1481,9 +1481,70 @@ exclude-then-re-include test passes, and the probe's runtime is known: 0.4 s ove
 
 ---
 
-# Step 11 — Triage screens
+# Step 11 — Triage screens — ✅ **DONE 2026-08-03**
 
 **Effort:** `medium` · run in plan mode first · ~2 h
+
+**Built in Svelte 5 without Kit.** `ui/` holds the source, `npm run build` emits
+`photolib/static/bundle.{js,css}` under fixed unhashed names, and those two files are
+**committed** so `python -m photolib.grid` runs from a clean checkout with no node toolchain.
+The grid moved into the same app rather than triage becoming a second one — `packRows`,
+`visibleRows`, `aspect` and the ThumbHash decoder moved verbatim into `ui/src/lib/`, and the
+recycling core became `sheet.js` with three parameters. `photolib/static/app.js` and `style.css`
+are gone; `tests/test_features.py` now runs the decoder from `ui/src/lib/thumbhash.js`, the
+source rather than the minified bundle.
+
+**Two numbers in the prompt below were wrong, and one of them changes the design.**
+
+- **`GET /api/triage/files` is ~25 s, not ~2.9 s** — 8×, for the same answer. "Fetch that once
+  per screen" is therefore not what was built: it reports the *saved* rule set, so it cannot vary
+  by screen, and re-fetching on a nav click would spend 25 s arriving back at the number already
+  on the display. It is fetched once at start, struck through and marked `stale — rules changed`
+  by any write, and refreshed by an explicit button.
+- **`GET /api/triage/counts` is 267–357 ms of SQL**, near enough the 216–297 ms on record.
+  Debounced at 220 ms with a sequence guard so a slow response cannot overwrite a newer one. The
+  450–600 ms a fresh `curl` sees is `ThreadingHTTPServer` opening a new per-thread SQLite
+  connection per socket, not the query.
+
+**Two defects found by building the screens, both invisible to step 10's own tests.**
+
+- **`probe.worklist` ignored every directory rule.** `Verdict.query` emits the directory CTE
+  first while `probe` interposes its own parameterised `candidate` CTE, so binding
+  `verdict.params` as one unit fed the first *extension* to the directory CTE. It matched no
+  directories and the worklist silently kept every path a `dir_segment` rule had excluded. Step
+  10 measured 25 correctly because the prefilter is nine `ext` rules; the bug fires the moment
+  screen 1 saves anything, which is exactly where `PLAN.md` puts the probe. `Verdict` now carries
+  `dir_params` and `case_params` separately.
+- **`long_edge is null` was unexpressible as a candidate**, because the query-string parser tested
+  the integer column before the operator and demanded a digit. That is screen 3's `unknown` band —
+  1,057,184 paths, the largest row on the screen.
+
+**Three additions the screens required.** A `dims` predicate (`"1920x1080"` →
+`(width = ? AND height = ?)`) so screen 4 can express an exact cluster without weakening "a rule
+reads one column" — no migration, no survey rebuild. An `o` field on every contact-sheet row, so
+the override chip renders what it is toggling. And `POST /api/reveal {"origin": N}`, because a
+triage subject is an `origin` path under `photos_root`, not a vault object — the containment root
+is fixed by which id the request carries, before anything resolves, which is not the `F05`/`F13`
+shape of a *set* of roots tried until one passes.
+
+**The probe button reports; it does not run the probe.** Hard rule 4 was kept, and not as
+ceremony: `probe.store` writes `file.width` into the **catalog**, while every triage write reaches
+`state.sqlite3` through a connection that cannot see the catalog at all — a handler that wrote it
+would dissolve that guarantee for every future handler. Its reads also land on `G:`, the USB HDD
+whose contention `PLAN.md` measures in whole megabytes per second. And it would buy nothing: the
+worklist is 25 files, all unreadable cache blobs, so the probe stores zero rows.
+`GET /api/triage/probe` counts in SQL and names the command.
+
+**Verified against the real catalog**, driving the browser: all eight screens, live counts moving
+with the candidate, `confirm` adding a rule whose take matched its prediction to the path
+(`.mca`, +4,749), delete and move restoring the previous counts exactly, the override chip
+cycling `none → drop → keep → none`, and multi-page keyset paging carrying page 1's cursor into
+page 2 with 817 mounted tiles unique and in ascending path order. `state.sqlite3` was returned to
+its exact baseline — nine prefilter rules, dense `seq`, zero overrides. No CSP violations.
+Scroll-*triggered* paging could not be exercised in the automation pane, which runs the tab
+hidden (`document.hidden === true`), suspending both `requestAnimationFrame` and
+`IntersectionObserver`; the paging itself was forced through the same `needsMore()` path by
+viewport geometry instead.
 
 ```text
 Read PLAN.md "Triage" — the screen table in particular. Reuse the grid from step 6: same
@@ -1535,7 +1596,10 @@ anything uncommitted on purpose, say which and why.
 ```
 
 **Gate:** you can work screens 0 through 7 end to end and land on a kept-file count you believe.
-That count is what step 12 and step 14 operate on.
+That count is what step 12 and step 14 operate on. **The screens work; the count has not been
+landed, because landing it means looking at the photographs and that is yours to do.** As it
+stands — the nine prefilter rules and nothing else — it is **686,351 files / 544.14 GB kept**,
+101,447 / 4.76 GB excluded.
 
 **Then snapshot the decisions, and do it after every triage session, not just this one:**
 

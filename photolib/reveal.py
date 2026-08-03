@@ -113,6 +113,32 @@ def resolve(vault_relpath: str, mediavault_root: Path, reveal_root: Path) -> Pat
     raise RevealRefused(f"outside reveal root: {vault_relpath!r}")
 
 
+def resolve_absolute(absolute: str, root: Path) -> Path:
+    """The real, existing file `absolute` names, proven inside `root`.
+
+    Triage names its subjects by their `origin.path`, which is absolute and
+    lives under `photos_root` -- a different root from the vault objects that
+    `resolve` was written for. This does not add a *second* root to a search:
+    the caller picks the root from the kind of id it was given, before anything
+    resolves, and there is still exactly one root per resolution. `F05` and
+    `F13` are a set of roots tried in turn until one passes, which is a
+    different shape and not this one.
+
+    Reduced to `resolve` rather than reimplemented, so the realpath and
+    `samestat` containment proof stays in one place. The lexical `relative_to`
+    only builds the argument; it proves nothing and is not relied on to.
+    """
+    if not absolute or "\x00" in absolute:
+        raise RevealRefused("empty or NUL-bearing path")
+    try:
+        relative = PureWindowsPath(absolute).relative_to(PureWindowsPath(root))
+    except ValueError:
+        raise RevealRefused(f"not under the reveal root: {absolute!r}") from None
+    if not str(relative) or str(relative) == ".":
+        raise RevealRefused(f"is the reveal root itself: {absolute!r}")
+    return resolve(str(relative), Path(root), Path(root))
+
+
 def command_line(target: Path, explorer: str) -> str:
     """The exact lpCommandLine. Quotes go around the path, never around the switch."""
     text = str(target)

@@ -1422,6 +1422,42 @@ every later page is ~15 ms.
 thumbnails, click-to-reveal. Triage adds a rule sidebar and the only write endpoints in the
 system — separate route namespace, and that surface goes away when triage is done.
 
+**The eight screens were built 2026-08-03**, in Svelte 5 without Kit (`ui/`, built to
+`photolib/static/bundle.{js,css}` and committed). The grid moved into the same app rather than
+triage becoming a second one: `packRows`, `visibleRows`, `aspect` and the ThumbHash decoder moved
+verbatim, and the recycling core became `ui/src/lib/sheet.js` with three parameters — the page
+fetcher, a per-tile decorator, and the click handler. Four things measuring it changed:
+
+- **`/api/triage/files` is ~25 s, not the ~2.9 s on record** — 8× — while returning the same
+  answer (686,351 kept files / 544.14 GB). So it is not fetched per screen: it reports the
+  *saved* rule set, which does not vary by screen, so re-fetching on a nav click would spend
+  25 s arriving back at the number already displayed. It is fetched once at start, marked
+  `stale` by any write, and refreshed on demand.
+- **`counts` is 267–357 ms of SQL**, close to the 216–297 ms on record and comfortable behind a
+  220 ms debounce with a sequence guard. Over a fresh HTTP connection it reads 450–600 ms, but
+  that is `ThreadingHTTPServer` opening a new per-thread SQLite connection per socket; a browser
+  reuses one.
+- **`probe.worklist` ignored every directory rule.** `Verdict.query` emits the directory CTE
+  first and `probe` interposes its own parameterised `candidate` CTE, so binding `verdict.params`
+  as one unit fed the first *extension* to the directory CTE. It matched nothing, and the
+  worklist silently contained every path a `dir_segment` rule had excluded. Invisible with a
+  bucket-only rule set — which is why step 10 measured 25 correctly against nine `ext` rules —
+  and wrong from the moment screen 1 saves anything. `Verdict` now exposes `dir_params` and
+  `case_params` separately.
+- **A candidate could not express `long_edge is null`**, because the query-string parser checked
+  the integer column before the operator and demanded a digit. That is screen 3's `unknown`
+  band: 1,057,184 paths, the largest single row on the screen.
+
+Screen 4 needed the one thing the engine deliberately does not do — two columns in one rule. It
+is a `dims` predicate carrying `"1920x1080"` and compiling to `(width = ? AND height = ?)`, so a
+rule still reads one column and the value still leaves as bound integers. No migration and no
+survey rebuild: `triage_bucket` already carries both.
+
+The probe stays a **report**, not a run: `GET /api/triage/probe` counts its worklist in SQL and
+names the command. Running it from a handler would write `file.width` into the *catalog* from a
+request — dissolving the guarantee that the triage writer's connection cannot see the catalog at
+all — and would put unscheduled reads on the contended USB HDD, to store zero rows.
+
 ## Grid
 
 Read-only server on `127.0.0.1`. Four routes. No framework — one `index.html`, one `app.js`,

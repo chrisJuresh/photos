@@ -31,6 +31,7 @@ only ~440,000 distinct predicate tuples.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -60,7 +61,16 @@ OPERATORS = {
     "height": ("=", "<=", ">", "is null"),
     "long_edge": ("=", "<=", ">", "is null"),
     "camera": ("=",),
+    "dims": ("=",),
 }
+
+# Screen 4 selects an exact `(width, height)` cluster, which is the one thing in
+# the plan's screens that two columns decide together -- and "a rule reads
+# exactly one column" is a property worth keeping rather than weakening for it.
+# So `dims` is one column as far as the rule set is concerned, carrying one
+# value, and only its compiled form touches two. The value's shape is checked
+# here rather than trusted: it still leaves as two bound integers.
+DIMS = re.compile(r"^([0-9]{1,6})x([0-9]{1,6})$")
 
 # A rule set is human input and the UI authors it. An `in` list is bounded so a
 # single rule cannot generate unbounded SQL text.
@@ -78,11 +88,22 @@ class Compiled:
 
     `kind` is `bucket` -- `sql` is a boolean expression over `triage_bucket`
     columns -- or `dir`, where `sql` is a SELECT yielding one `dir_id` column.
+
+    A bucket expression carries its own `{a}.` qualifiers and is finished with
+    `bound(alias)`. The caller used to paste `f"{alias}.{compiled.sql}"`, which
+    silently assumed every predicate begins with exactly one column name --
+    true until `dims`, whose expression reads two. Qualifying inside the
+    compiler keeps `origin.ext` and `origin.size` from ever resolving in place
+    of the bucket's, which in a join is a wrong answer rather than an error.
     """
 
     kind: str
     sql: str
     params: list
+
+    def bound(self, alias: str = "k") -> str:
+        """The expression with its columns qualified by `alias`."""
+        return self.sql.format(a=alias)
 
 
 @dataclass(frozen=True)
@@ -175,29 +196,46 @@ def compile_predicate(text: str) -> Compiled:
             [stem, stem + "\\", stem + "]"],
         )
 
+    if column == "dims":
+        # Screen 4's exact cluster. The bucket table already carries `width` and
+        # `height`, so this needs no column, no migration and no survey rebuild
+        # -- only a value shape and two bound integers.
+        match = DIMS.match(value)
+        if not match:
+            raise PredicateError(f"dims is '<width>x<height>', got {value!r}")
+        return Compiled(
+            "bucket",
+            "({a}.width = ? AND {a}.height = ?)",
+            [int(match.group(1)), int(match.group(2))],
+        )
+
     if column in INTERNED:
         # An uncorrelated subquery, so SQLite resolves the text to an id once
         # per statement and the per-row work is an integer comparison. A value
         # the corpus has never seen resolves to no row and the predicate simply
-        # matches nothing, which is the right answer and not an error.
+        # matches nothing, which is the right answer and not an error. Only the
+        # outer column is qualified: the one inside the subquery belongs to the
+        # interning table.
         table = INTERNED[column]
         if op == "in":
             placeholders = ", ".join("?" * len(value))
             return Compiled(
                 "bucket",
-                f"{column}_id IN (SELECT id FROM {table} WHERE {column} IN ({placeholders}))",
+                f"{{a}}.{column}_id IN (SELECT id FROM {table} WHERE {column} IN ({placeholders}))",
                 [item.lower() for item in value],
             )
         return Compiled(
             "bucket",
-            f"{column}_id = (SELECT id FROM {table} WHERE {column} = ?)",
+            f"{{a}}.{column}_id = (SELECT id FROM {table} WHERE {column} = ?)",
             [value.lower()],
         )
     if op == "is null":
-        return Compiled("bucket", f"{column} IS NULL", [])
+        return Compiled("bucket", f"{{a}}.{column} IS NULL", [])
     if op == "in":
-        return Compiled("bucket", f"{column} IN ({', '.join('?' * len(value))})", list(value))
-    return Compiled("bucket", f"{column} {op} ?", [value])
+        return Compiled(
+            "bucket", f"{{a}}.{column} IN ({', '.join('?' * len(value))})", list(value)
+        )
+    return Compiled("bucket", f"{{a}}.{column} {op} ?", [value])
 
 
 def describe(text: str) -> str:
@@ -300,16 +338,16 @@ def _bucket_case(rules: list[Rule], alias: str = "k") -> tuple[str, list]:
 
     CASE stops at its first true branch, so emitting the branches in position
     order makes the expression itself the first-match-wins rule -- no second
-    pass, no min over a list. Every compiled bucket predicate starts with its
-    column name, so qualifying it is a prefix: `origin` also has `ext` and
-    `size`, and an unqualified column in a join is a silent wrong answer.
+    pass, no min over a list. Qualification is `Compiled.bound`'s job: `origin`
+    also has `ext` and `size`, and an unqualified column in a join is a silent
+    wrong answer.
     """
     branches, params = [], []
     for rule in rules:
         compiled = compile_predicate(rule.predicate)
         if compiled.kind != "bucket":
             continue
-        branches.append(f"WHEN {alias}.{compiled.sql} THEN {rule.position}")
+        branches.append(f"WHEN {compiled.bound(alias)} THEN {rule.position}")
         params.extend(compiled.params)
     if not branches:
         return str(NO_MATCH), []
@@ -430,7 +468,7 @@ def candidate_relation(candidate: Rule | None) -> tuple[DirRelation, str, list]:
     dirs = _dir_cte([candidate], "cv")
     compiled = compile_predicate(candidate.predicate)
     if compiled.kind == "bucket":
-        return dirs, f"k.{compiled.sql}", compiled.params
+        return dirs, compiled.bound("k"), compiled.params
     return dirs, "0", []
 
 
@@ -545,12 +583,27 @@ class Verdict:
 
     `ctes` and `join` are empty when the set holds no directory rule, so a
     caller composes all four pieces unconditionally.
+
+    The parameters come in two groups because they bind in two different places
+    and a caller may put SQL of its own between them. `dir_params` belongs to
+    the directory CTE, which `query` emits first; `case_params` belongs to
+    `kept`, which lands wherever the caller pastes it. `params` concatenates
+    them for the common case where the caller adds no parameterised CTE of its
+    own, and is the wrong thing to use when it does -- see `probe._worklist_sql`,
+    whose `candidate` CTE sits between the two and which bound them as one list
+    until it was measured against a rule set holding a directory rule.
     """
 
     ctes: list[str]
     join: str
     kept: str
-    params: list
+    dir_params: list
+    case_params: list
+
+    @property
+    def params(self) -> list:
+        """Both groups, in text order, for a caller that interposes nothing."""
+        return [*self.dir_params, *self.case_params]
 
     def query(self, *ctes: str, tail: str) -> str:
         """`WITH <dir CTE?>, <the caller's CTEs> <tail>`."""
@@ -568,7 +621,7 @@ def verdict_expression(rules: list[Rule], alias: str = "k") -> Verdict:
     kept, case_params = _kept_expression(dirs, rules, alias)
     join = dirs.join.replace("k.dir_id", f"{alias}.dir_id")
     ctes = [dirs.cte] if dirs.cte else []
-    return Verdict(ctes, join, kept, [*dirs.params, *case_params])
+    return Verdict(ctes, join, kept, dirs.params, case_params)
 
 
 def file_counts(conn: sqlite3.Connection, rules: list[Rule] | None = None) -> dict[str, int]:

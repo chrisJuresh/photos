@@ -222,13 +222,19 @@ def second_level(conn: sqlite3.Connection, rules: list[triage.Rule], root: str) 
 
 # --- the contact sheet ------------------------------------------------------------
 
+# `o.decision` rides along because the sheet's per-file toggle has to render
+# what it is toggling. Without it the chip would have to guess, and a chip that
+# shows "no override" over a file you excluded five minutes ago is worse than no
+# chip. It is a LEFT JOIN on a PRIMARY KEY over a table holding tens of rows, so
+# it costs nothing measurable next to the path ordering.
 _PAGE_TAIL = """
-SELECT g.id, g.path, g.sha256, f.width, f.height, f.thumbhash
+SELECT g.id, g.path, g.sha256, f.width, f.height, f.thumbhash, o.decision
 FROM origin g
 JOIN triage_path tp ON tp.origin_id = g.id
 JOIN kept_bucket k ON k.id = tp.bucket_id
 {cv_join}
 LEFT JOIN file f ON f.sha256 = g.sha256
+LEFT JOIN state.triage_override o ON o.sha256 = g.sha256
 WHERE {candidate}{cursor}
 ORDER BY g.path, g.id
 LIMIT ?
@@ -287,6 +293,10 @@ def page(
             "w": row[3],
             "h": row[4],
             "th": base64.b64encode(row[5]).decode("ascii") if row[5] is not None else None,
+            # `include` | `exclude` | null -- the per-file override, which beats
+            # every rule. Null is the ordinary case and is not an absence of
+            # information: it means the rules decide this one.
+            "o": row[6],
         }
         for row in rows
     ]

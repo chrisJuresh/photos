@@ -1,0 +1,17 @@
+{
+  "name": "photolib-ui",
+  "private": true,
+  "type": "module",
+  "description": "The grid and triage client. Builds to photolib/static/bundle.{js,css}, which the Python server serves; those two files are committed so `python -m photolib.grid` runs without npm.",
+  "scripts": {
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./jsconfig.json --threshold warning",
+    "dev": "vite build --watch"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.4",
+    "vite": "^6.0.11"
+  }
+}

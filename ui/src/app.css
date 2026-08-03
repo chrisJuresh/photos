@@ -1,0 +1,218 @@
+/* Carried over from the step 6 grid: the empty tile is a colour, never an
+   image, because .gitignore excludes every raster format and a placeholder that
+   needs a network request defeats the point. */
+:root {
+  --bg: #101012;
+  --panel: #17171a;
+  --line: #2a2a30;
+  --tile-empty: #1d1d21;
+  --tile-missing: #232327;
+  --text: #e8e8ea;
+  --dim: #8a8a93;
+  --accent: #6ea8fe;
+  --keep: #4a9e6a;
+  --drop: #b4442e;
+  --error: #b4442e;
+  --side: 360px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-y: scroll; /* never let the scrollbar appearing change the width */
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: #212127;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
+  background: #0c0c0e;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 3px 6px;
+}
+
+/* ------------------------------------------------------------------ shell */
+
+.shell {
+  padding-left: var(--side);
+}
+
+.side {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--side);
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 10px;
+  z-index: 10;
+}
+
+.main {
+  padding: 0 4px 4px;
+}
+
+/* ------------------------------------------------------------------ tiles */
+
+#canvas {
+  position: relative;
+  display: block;
+}
+
+#sentinel {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  pointer-events: none;
+}
+
+/* Absolute + transform: repositioning a recycled tile is compositor work, not
+   layout. The box is sized from the stored width/height before any image is
+   requested, so an image arriving later cannot shift anything. */
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  background-color: var(--tile-empty);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  contain: strict;
+}
+
+.tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* a fallback aspect crops, it never shifts */
+  display: block;
+  opacity: 0;
+  transition: opacity 120ms linear;
+}
+
+.tile.loaded img {
+  opacity: 1;
+}
+
+/* Only 102,605 of the 686,351 kept files have a tile. The other 85% are these,
+   and they are the normal case rather than an error state: the path is what
+   identifies them, so it is shown rather than the tile being hidden. */
+.tile.missing {
+  background-color: var(--tile-missing);
+}
+
+.tile.error {
+  outline: 2px solid var(--error);
+  outline-offset: -2px;
+}
+
+.tile-path {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 3px 5px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--dim);
+  background: rgba(0, 0, 0, 0.72);
+  word-break: break-all;
+  max-height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tile.loaded .tile-path {
+  opacity: 0;
+  transition: opacity 120ms linear;
+}
+
+.tile:hover .tile-path {
+  opacity: 1;
+}
+
+.chip {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 22px;
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--dim);
+}
+
+.chip[data-state="include"] {
+  background: var(--keep);
+  color: #fff;
+  border-color: var(--keep);
+}
+
+.chip[data-state="exclude"] {
+  background: var(--drop);
+  color: #fff;
+  border-color: var(--drop);
+}
+
+/* ------------------------------------------------------------------ chrome */
+
+h1 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.muted {
+  color: var(--dim);
+}
+
+.blurb {
+  color: var(--dim);
+  margin: 0 0 8px;
+  max-width: 90ch;
+}
+
+.status {
+  position: fixed;
+  left: calc(var(--side) + 8px);
+  bottom: 8px;
+  padding: 6px 10px;
+  background: var(--error);
+  color: #fff;
+  border-radius: 3px;
+  z-index: 20;
+}

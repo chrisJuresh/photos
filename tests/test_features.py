@@ -1,9 +1,14 @@
 """The perceptual hashes, the ThumbHash encoder, and the 18 quality scalars.
 
-The ThumbHash test runs the decoder `photolib/static/app.js` actually ships,
-under node, rather than a Python re-implementation. `file.thumbhash` is NULL in
-every row before this step, so that function has never executed and "the tiles
-look plausible" would not be evidence that the two halves agree.
+The ThumbHash test runs the decoder the client actually ships, under node,
+rather than a Python re-implementation. `file.thumbhash` is NULL in every row
+before this step, so that function has never executed and "the tiles look
+plausible" would not be evidence that the two halves agree.
+
+It reads `ui/src/lib/thumbhash.js`, the source, and not `photolib/static/bundle.js`,
+the build output: the bundle is minified, so the harness could not find the
+function by name in it, and a stale bundle would make this test pass against
+code the browser is no longer running.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from PIL import Image
 
 from photolib import features
 
-APP_JS = Path(__file__).resolve().parent.parent / "photolib" / "static" / "app.js"
+APP_JS = Path(__file__).resolve().parent.parent / "ui" / "src" / "lib" / "thumbhash.js"
 HARNESS = Path(__file__).resolve().parent / "thumbhash_decode.js"
 
 

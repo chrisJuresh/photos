@@ -1,12 +1,17 @@
-// Runs the ThumbHash decoder that photolib/static/app.js actually ships, so the
-// encoder in photolib/features.py is checked against the code the browser will
-// execute rather than against a second implementation written to agree with it.
+// Runs the ThumbHash decoder the client actually ships, so the encoder in
+// photolib/features.py is checked against the code the browser will execute
+// rather than against a second implementation written to agree with it.
 //
 // `th` is NULL in every catalog row until step 9, which means that function has
 // never run against a real hash. The browser half of it is a canvas, so the
 // stubs below supply just enough of one to capture the ImageData.
 //
-//   node tests/thumbhash_decode.js <path to app.js> <base64 hash>
+//   node tests/thumbhash_decode.js ui/src/lib/thumbhash.js <base64 hash>
+//
+// The source module, not the built bundle: the slice below finds the function
+// by name, which minification removes. Slicing from `function` also drops the
+// `export` keyword in front of it, which is what lets `new Function` evaluate
+// an ES module's contents.
 //
 // prints {"w":…, "h":…, "data":[r,g,b,a, …]} on stdout.
 
