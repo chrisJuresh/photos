@@ -171,7 +171,11 @@ listed here so you know why the prompts read the way they do.
    is `/t/<sha256>.webp`. The storage table said AVIF; the Phase 2a row said adopt the WebP.
 4. **Triage needs a header-only dimension probe** between screens 2 and 3. Screens 0–2 run on
    path and extension alone; screen 3 needs `width`/`height`, which files outside MediaVault
-   do not have.
+   do not have. **Built at step 10 and it finds nothing to do:** 667,705 `file` rows are indeed
+   dimensionless, but every one of them that a raster extension would send to screen 3 was
+   already measured by MediaVault — 54,896 of the 54,899 `.png` included. The worklist is 25
+   files and all 25 are cache blobs with image extensions. The premise held; the consequence
+   did not.
 5. **`/api/reveal` resolves against one configured containment root**, which is
    `G:\MediaVault\objects` until step 14 and `G:\vault` after. A *set* of allowed roots is how
    `F05`/`F13` happen.
@@ -1380,11 +1384,59 @@ NEX-5N photos from 2019-12-31 to 2021-09-24 should be the right way up.
 
 ---
 
-# Step 10 — Triage engine and survey
+# Step 10 — Triage engine and survey — ✅ **DONE 2026-08-03**
 
 **Effort:** `high` · run in plan mode first · ~2 h
 
 Backend only. Nothing visual.
+
+**Done 2026-08-03. The gate below is written as "well under 100 ms" and that was not achieved:
+recompute is 216–297 ms** over the full 1,374,328-path corpus, including the override
+correction. The other two gate conditions are met — the exclude-then-re-include test passes, and
+the probe's runtime is known.
+
+**100 ms was not reachable, and the reason is worth having before step 11.** Three costs were
+measured and two of them are floors:
+
+- Scanning all 1,374,328 `origin` rows is 51 ms. Twelve `LIKE '%\node_modules\%'` patterns over
+  them is **2,914 ms**. Substring matching was the whole problem, so no predicate here is a
+  LIKE: a directory-name predicate is an index seek (4 ms for twelve) and a subtree predicate is
+  a range scan. That is the one cost that turned out to be avoidable outright.
+- SQLite does not common-subexpression a computed column across aggregates, so eight sums over
+  one `CASE` re-ran it eight times: **1,193 ms**. Grouping by the winning rule position instead
+  is 222 ms — and yields the per-rule breakdown for free, so the sidebar table and the totals
+  come from one query.
+- A `GROUP BY` over 448,512 rows is ~108 ms on its own, and the nine-branch `CASE` is another
+  ~90 ms. That is the floor. Getting under it would need the saved rule set's verdict
+  materialized on save and only the candidate's delta computed live — real, and not built,
+  because 220 ms behind a debounce is usable and the materialization adds a staleness class of
+  bug this project does not need.
+
+**Two design answers this prompt left open, decided by measurement.**
+
+- **The counting surface is not the path list.** `triage_bucket` (migration `005`) is one row
+  per distinct combination of everything a predicate can read: 448,512 rows for 1,374,328 paths.
+  Folding a verdict over the paths themselves is ~470 ms however free the predicate is.
+  `python -m photolib.triage_survey` rebuilds the whole projection in ~40 s of pure SQL.
+- **The four numbers are paths and bytes.** A rule decides paths, and this document's own "over
+  1.38M rows" is `origin`. Distinct content — a file is kept if *any* of its paths is kept, the
+  bytes being identical — is exact, separate, and **~2.9 s**. Both are exposed; only one is on
+  the keystroke path.
+
+**Three findings step 11 has to absorb** — they are folded into its prompt below, and repeated
+here because each one contradicts a sentence that used to be in it.
+
+- **The dimension probe is a no-op on this corpus.** Its worklist after screens 0–2 is **25
+  files**, and all 25 are cache blobs carrying image extensions. MediaVault measured every
+  raster the library holds, 54,896 of the 54,899 `.png` included, so screen 3 already has its
+  dimensions. The step reports zero in 0.4 s.
+- **Screen 1's leaderboard cannot be live.** Re-costing it against the current rules is
+  1.9–3.2 s whatever shortlist is used, because the top 50 segments span 1,953,553 of the
+  2,894,845 rows in the segment index. It is served from the survey-time rollup in 3 ms and
+  labels itself `scope: "whole inventory"`; the candidate's own count is live at ~250 ms.
+- **Most of what triage looks at has no thumbnail.** 102,605 of the 686,351 currently-kept files
+  have a tile — 15%. "A contact sheet of every match" over the remainder is mostly empty
+  rectangles, and that is a fact about the corpus rather than a bug to fix.
 
 ```text
 Read PLAN.md "Triage" in full. No UI in this step.
@@ -1423,8 +1475,9 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** candidate-rule counts recompute in well under 100 ms; the exclude-then-re-include
-test passes; the probe's runtime is known before you commit to step 11.
+**Gate:** ~~candidate-rule counts recompute in well under 100 ms~~ — **216–297 ms, and 100 ms
+was the wrong target**; see above for the floor and what it would cost to go under it. The
+exclude-then-re-include test passes, and the probe's runtime is known: 0.4 s over 25 files.
 
 ---
 
@@ -1440,21 +1493,36 @@ the same app, not a second app.
 Eight screens in PLAN.md's order — 0 no image content, 1 container directories, 2 file type,
 3 dimensions, 4 exact-dimension clusters, 5 EXIF camera presence, 6 source folder, 7 remainder.
 
+Step 10 built the engine, the survey, the eight screen queries, the probe and /api/triage/*.
+Read its section in this file before you start — three things it measured contradict what this
+prompt used to say, and they are corrected below.
+
 Each screen shows:
   - the rule as an editable predicate
-  - live counts of what it would exclude and what it would keep, files and GB, updating as I
-    edit and BEFORE anything is saved
+  - live counts of what it would exclude and what it would keep, PATHS and GB, updating as I
+    edit and BEFORE anything is saved. Paths, not files: GET /api/triage/counts is 216-297 ms
+    and is the one that can move while I type. Distinct-content counts are GET
+    /api/triage/files at ~2.9 s — fetch that once per screen, never per keystroke, and label
+    the two differently so I always know which number I am reading.
   - a virtualised contact sheet of EVERY match, not a sample. Nothing reaches the vault without
-    having been seen at thumbnail scale at least once.
+    having been seen at thumbnail scale at least once. Only 102,605 of the 686,351 currently
+    kept files have a tile, so most of the sheet is empty rectangles: show the path for those,
+    do not hide them, and do not go generating thumbnails to fill them in.
   - a per-file override toggle
   - an explicit confirm. Nothing applies until confirmed.
 
 Screen 0 is a table, not a contact sheet — you cannot look at a .d.ts.
+Screen 1's leaderboard is the survey-time rollup over the WHOLE inventory and does not move as
+I edit — re-costing it live is 1.9-3.2 s, so it is not offered by default. Its rows carry
+scope: "whole inventory"; surface that, and let the live candidate count next to the rule be
+the number that responds.
 Screens 3 and 4 are what actually decide the 54,899 .png files: make each dimension bucket and
 each exact-dimension cluster click straight through into the contact sheet for that set.
 Screen 5 is a sort, not a filter — messaging apps strip EXIF, so absence of a camera tag is not
 evidence of anything. Use it to order the remainder for review.
-Run the step 10 dimension probe automatically when I leave screen 2, with a progress bar.
+Do NOT build a progress bar for the dimension probe. Its worklist is 25 files and it finishes
+in 0.4 s — MediaVault already measured every raster in the library. Offer it as a button that
+reports its result, and if the worklist is empty say so rather than showing a bar that flashes.
 
 Add nothing else. No settings page, no undo-history UI beyond flipping a rule, no keyboard
 shortcut system unless a screen is genuinely unusable without one.
@@ -1501,6 +1569,17 @@ does today.
 The paging contract to reuse, as built: `{photos: [{id, s, w, h, th}], next: {before, before_id}
 | null, kind, limit}`, cursor in the envelope rather than per row, and `next` derived from a
 `limit + 1` probe so exhaustion is a fact rather than `len < limit`.
+
+`GET /api/triage/page` is the same envelope with two differences the grid component has to
+tolerate rather than special-case: each row carries `p`, the origin path, because a triage
+subject is a path and most of them have no thumbnail to identify them by; and the order is
+**ascending by `(path, id)`**, not descending by `(sort_key, id)`, because a contact sheet of a
+directory tree is read in tree order. What is paged is whichever candidate predicate you pass —
+one endpoint serves clicking an extension on screen 2, a directory name on screen 1, a
+`(width, height)` pair on screen 4, and screen 7's whole remainder with no candidate at all.
+One cost to design around: the first page of a `dir_under` scope is ~1.1 s, because the sheet is
+path-ordered and a subtree that sorts late is reached by walking to it. Every later page is
+~15 ms, and every other predicate's first page is ~20-180 ms.
 
 ---
 
