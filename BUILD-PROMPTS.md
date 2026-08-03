@@ -1631,8 +1631,9 @@ screens is trivial. Svelte without Kit keeps the Python server serving static fi
 does today.
 
 The paging contract to reuse, as built: `{photos: [{id, s, w, h, th}], next: {before, before_id}
-| null, kind, limit}`, cursor in the envelope rather than per row, and `next` derived from a
-`limit + 1` probe so exhaustion is a fact rather than `len < limit`.
+| null, kind, limit, total}`, cursor in the envelope rather than per row, and `next` derived from
+a `limit + 1` probe so exhaustion is a fact rather than `len < limit`. `total` was added between
+11 and 12 — see below.
 
 `GET /api/triage/page` is the same envelope with two differences the grid component has to
 tolerate rather than special-case: each row carries `p`, the origin path, because a triage
@@ -1644,6 +1645,53 @@ one endpoint serves clicking an extension on screen 2, a directory name on scree
 One cost to design around: the first page of a `dir_under` scope is ~1.1 s, because the sheet is
 path-ordered and a subtree that sorts late is reached by walking to it. Every later page is
 ~15 ms, and every other predicate's first page is ~20-180 ms.
+
+---
+
+# Between 11 and 12 — the sheet's scrollbar and its images — ✅ **DONE 2026-08-03**
+
+Not a numbered step. Two complaints from actually using the triage client for a while, both
+about `sheet.js`, both fixed before step 12. Recorded here because a fresh session reads this
+file and would otherwise re-derive the same two measurements, or worse, re-introduce the code
+they replaced — the comment that used to sit over the canvas height argued *against* what is
+now there, and the argument was sound at step 6's scale and wrong at this one.
+
+**The scrollbar was a stub that grew every time you reached the bottom.** The height is now
+reserved for the whole answer from the first page. Step 6 reserved nothing on the grounds that
+a stable bar is bought with a scroll mapping that corrects itself under the reader; that trade
+only holds while the estimate is a guess, and it is not one here. Over the grid after a
+reading-speed pass: **34,400 px before, 4,361,790 px now**, settling within ±2% instead of
+doubling per page.
+
+The total is exact in both modes and free per request. The grid's is 1.07 s — 146,034 index
+lookups, there is no index on `file.kind` — but every connection in that process is read-only,
+so `GridServer.kind_totals` counts it once under a lock and `main` warms it before the browser
+opens. **Triage's is a new `page_paths` key on `triage.counts`**, which falls out of the tally
+that already runs for the rule bar, so no second 220 ms query lands in front of the first paint.
+It is `triage_screens.page`'s own relation — kept by the saved rules, matched by the candidate —
+and deliberately outside the override correction, because the sheet reports overrides per tile
+and does not filter on them.
+
+**Screen 7 is the one place the bar is not proportional.** 1,240,828 rows want ~44M px at
+1280 wide and Chrome breaks down near 33.5M, so the reservation clamps at 30M.
+
+**Tiles were grey before they were pictures.** Two causes, both client-side — the server was
+never in it, at 2,239 thumbnails/s. Decoding one ThumbHash is ~1.1 ms of canvas work, ~130 ms a
+screenful, and it ran on the line *above* the `img.src`, so every request in a fresh window
+started a tenth of a second late. It is held to the next frame now, which is also late enough to
+skip it entirely when a warm cache has already fired `load`. And the prefetch band went from one
+viewport below the fold to two, with `fetchpriority` ordering the visible rows ahead of the band
+in a freshly built window. A/B at a pinned 1280×900, flinging at 25,000 px/s: **20.6 of 32.5
+visible tiles grey before, 5.2 after**, with long-task time flat. At reading speed both keep
+every visible tile loaded.
+
+**What this did not add, and what it would cost.** Dragging the thumb deep into the reserved
+region still pages sequentially to reach it. A real jump was measured and rejected: `LIMIT 500
+OFFSET n` is 1.3 s at grid mid-corpus and 6.8–12.2 s in triage, so random access needs a
+materialised rank index. If that is ever wanted, it is its own step — do not bolt it onto one.
+
+Nothing here changes what step 12 reads or writes. The only contract that moved is `/api/photos`
+gaining `total`, and `/api/triage/counts` gaining `page_paths`; both are additions.
 
 ---
 
