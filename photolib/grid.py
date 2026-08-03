@@ -15,11 +15,14 @@ and its path proof lives in `photolib.reveal` so it can be read and tested on
 its own — `F51` is v1 putting routers, SQL, security and browser launch in one
 4,700-line module.
 
-Three properties carry the stated requirement, that perceived load delay be
+Four properties carry the stated requirement, that perceived load delay be
 small:
 
   * `file.width`/`height` come back with the page, so justified rows lay out
     before a single image is requested. No measuring, no layout shift.
+  * every page carries `total`, so the client can give the scrollbar its final
+    length while it still holds only the first page. Counted once per process,
+    because it is 1.07 s and it cannot change while the server runs.
   * thumbnail URLs are content hashes, so `immutable` is honest and the browser
     stops asking after the first pass. `F47` is that header on a URL whose
     meaning can change.
@@ -212,13 +215,26 @@ def page_sql(kinds: tuple[str, ...], cursor: tuple[str, int] | None) -> tuple[st
     return sql, params
 
 
-def page(conn: sqlite3.Connection, kinds: tuple[str, ...], cursor, limit: int) -> dict:
+def page(
+    conn: sqlite3.Connection,
+    kinds: tuple[str, ...],
+    cursor,
+    limit: int,
+    *,
+    total: int | None = None,
+) -> dict:
     """One keyset page, with an honest end-of-stream marker.
 
     Reads `limit + 1` rows and returns `limit`. Whether the extra row existed is
     what sets `next`, so exhaustion is a fact rather than an inference — a page
     that happens to hold exactly `limit` rows is not the end, and deriving it
     that way is a bug that only reproduces at particular corpus sizes.
+
+    `total` is how many rows the whole query has, which the client needs in order
+    to give the scrollbar its final length on the first page instead of growing
+    it under the reader on every page. It is carried rather than computed here:
+    it costs 1.07 s and it is the same number for every page, so it is counted
+    once per process — see `GridServer.kind_totals`.
     """
     sql, params = page_sql(kinds, cursor)
     rows = conn.execute(sql, [*params, limit + 1]).fetchall()
@@ -239,7 +255,13 @@ def page(conn: sqlite3.Connection, kinds: tuple[str, ...], cursor, limit: int) -
     following = None
     if has_more and rows:
         following = {"before": rows[-1][5], "before_id": rows[-1][0]}
-    return {"photos": photos, "next": following, "kind": list(kinds), "limit": limit}
+    return {
+        "photos": photos,
+        "next": following,
+        "kind": list(kinds),
+        "limit": limit,
+        "total": total,
+    }
 
 
 def reveal_relpath(conn: sqlite3.Connection, photo_id: int) -> tuple | None:
@@ -292,6 +314,8 @@ class GridServer(ThreadingHTTPServer):
         self.roots = roots
         self.spawn = spawn
         self._local = threading.local()
+        self._totals: dict[str, int] | None = None
+        self._totals_lock = threading.Lock()
         super().__init__(address, handler)
         port = self.server_address[1]
         # Literal, built after binding. The Origin check compares against this
@@ -314,6 +338,28 @@ class GridServer(ThreadingHTTPServer):
             conn.execute("PRAGMA query_only = ON")
             self._local.conn = conn
         return conn
+
+    def kind_totals(self) -> dict[str, int]:
+        """`photo` rows per media kind, counted once and served from memory after.
+
+        The sheet reserves scrollbar height for the pages it has not asked for
+        yet, so it needs the size of the whole answer while it still holds only
+        the first page. There is no index on `file.kind`, so this is 146,034
+        index lookups at 1.07 s — but every connection in this process is
+        read-only, so the answer cannot change while the server runs. Counted
+        under the lock rather than around it, so two threads arriving together
+        pay for one query and not two; `main` warms it before the browser opens,
+        which is why no request ever waits on it.
+        """
+        with self._totals_lock:
+            if self._totals is None:
+                self._totals = dict(
+                    self.connection().execute(
+                        "SELECT f.kind, count(*) FROM photo AS p "
+                        "JOIN file AS f ON f.sha256 = p.rep_sha256 GROUP BY f.kind"
+                    )
+                )
+            return self._totals
 
     def state_writer(self) -> sqlite3.Connection:
         """This thread's write connection -- to `state.sqlite3` and nothing else.
@@ -456,7 +502,14 @@ class GridHandler(BaseHTTPRequestHandler):
         except BadRequest as exc:
             self._fail(400, exc.field)
             return
-        payload = page(self.server.connection(), kinds, cursor, limit)
+        totals = self.server.kind_totals()
+        payload = page(
+            self.server.connection(),
+            kinds,
+            cursor,
+            limit,
+            total=sum(totals.get(kind, 0) for kind in kinds),
+        )
         self._json(200, payload)
 
     def _thumbnail(self, sha256: str) -> None:
@@ -641,6 +694,9 @@ def main(argv: list[str] | None = None) -> int:
     counts = server.connection().execute(
         "SELECT kind, count(*) FROM file GROUP BY kind ORDER BY kind"
     ).fetchall()
+    # Counted here rather than on the first request, which would put its 1.07 s
+    # in front of the first paint the reader sees.
+    totals = server.kind_totals()
     print(f"grid on {url}")
     print(f"  host allowlist  {sorted(server.allowed_hosts)}")
     print(f"  catalog         {roots.catalog_db}")
@@ -648,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  reveal root     {roots.reveal_root}")
     print(f"  triage root     {roots.photos_root}")
     print("  kinds           " + ", ".join(f"{kind} {count:,}" for kind, count in counts))
+    print("  grid photos     " + ", ".join(f"{kind} {n:,}" for kind, n in sorted(totals.items())))
     if args.open:
         import webbrowser
 

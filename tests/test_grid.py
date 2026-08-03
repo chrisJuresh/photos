@@ -284,6 +284,48 @@ def test_undated_photos_sort_last(make_grid):
     assert ids[-2:] == [7, 3]
 
 
+def test_every_page_carries_the_length_of_the_whole_walk(make_grid):
+    """The client reserves scrollbar height from this while it holds one page.
+
+    On every page and not only the first, because a client that resumes from a
+    cursor -- a reflow, a re-mount -- never sees the first one. And equal to the
+    walk it is reserving for: a total that disagrees with the paging is a
+    scrollbar that lies in a direction nobody can see until the last page.
+    """
+    grid = make_grid(count=120)
+    ids, pages = walk(grid.port, limit=50)
+    assert pages == 3  # so there is a middle page and a last one to check
+    cursor = None
+    for _ in range(pages):
+        url = "/api/photos?limit=50" + (
+            f"&before={cursor['before']}&before_id={cursor['before_id']}" if cursor else ""
+        )
+        body = get_json(grid.port, url)
+        assert body["total"] == len(ids) == 120
+        cursor = body["next"]
+
+
+def test_the_total_follows_the_kind_selection(grid):
+    """One memo per kind, summed per request -- not one count of everything.
+
+    `raw_image` is 1 photo in 9 here, so a total that ignored `kind` would be
+    caught, and one that counted only `image` would be caught the other way.
+    """
+    stills, _ = walk(grid.port)
+    raw, _ = walk(grid.port, kind="raw_image")
+    assert get_json(grid.port, "/api/photos?kind=raw_image")["total"] == len(raw)
+    assert get_json(grid.port, "/api/photos")["total"] == len(stills)
+    assert 0 < len(raw) < len(stills)
+
+
+def test_the_total_is_counted_once_for_the_life_of_the_server(grid):
+    """1.07 s over the real corpus, and it cannot change: every connection here
+    is read-only. Paying it per page would put it in front of every scroll."""
+    first = grid.server.kind_totals()
+    get_json(grid.port, "/api/photos?limit=1")
+    assert grid.server.kind_totals() is first
+
+
 def test_kind_selects_over_http(grid):
     stills, _ = walk(grid.port)
     raw, _ = walk(grid.port, kind="raw_image")

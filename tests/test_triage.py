@@ -411,6 +411,67 @@ def test_a_page_never_shows_what_the_rules_already_excluded(survey):
     assert all("node_modules" not in row["p"] for row in payload["photos"])
 
 
+def walk_page(conn, rules, candidate=None, limit=3) -> int:
+    """How many rows the contact sheet actually serves, by paging to exhaustion."""
+    seen, cursor = 0, None
+    while True:
+        payload = triage_screens.page(
+            conn, rules, candidate=candidate, cursor=cursor, limit=limit
+        )
+        seen += len(payload["photos"])
+        if payload["next"] is None:
+            return seen
+        cursor = (payload["next"]["before"], payload["next"]["before_id"])
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        None,
+        rule("dir_segment", "=", "node_modules"),
+        rule("ext", "=", ".png"),
+        rule("ext", "in", [".png", ".jpg"]),
+        rule("dir_under", "=", r"G:\photos\backup\rcr"),
+        rule("width", "=", 1920),
+        rule("camera", "=", 1, decision="include"),
+        rule("long_edge", "is null", None),
+    ],
+)
+def test_page_paths_is_the_length_of_the_contact_sheet(survey, candidate):
+    """The client sizes the scrollbar from this before it has paged the answer.
+
+    It is a by-product of the tally `counts` already runs, so an off-by-anything
+    here is silent: the number is never compared against a walk in production.
+    Both branches of the candidate filter are covered -- the bucket predicates
+    and the directory relation -- because they reach the tally's `hit` column by
+    different routes.
+    """
+    save(survey, rule("dir_segment", "=", "node_modules"))
+    rules = triage.load_rules(survey)
+    summary = triage.counts(survey, rules, candidate=candidate)
+    assert summary["page_paths"] == walk_page(survey, rules, candidate)
+
+
+def test_page_paths_ignores_the_overrides_the_sheet_only_reports(survey):
+    """An override changes a tile's chip, not whether the sheet serves the row.
+
+    `kept_paths` moves when one is stored, because the verdict moves. The sheet's
+    own length does not, and reading it off `kept_paths` would drift by one row
+    per override for as long as triage runs.
+    """
+    rules = triage.load_rules(survey)
+    before = triage.counts(survey, rules)
+    survey.execute(
+        "INSERT INTO state.triage_override (sha256, decision, created_at) "
+        "VALUES (?, 'exclude', '2026-08-03T00:00:00+00:00')",
+        ("a" * 64,),
+    )
+    after = triage.counts(survey, rules)
+    assert after["kept_paths"] == before["kept_paths"] - 1
+    assert after["page_paths"] == before["page_paths"]
+    assert after["page_paths"] == walk_page(survey, rules)
+
+
 def test_a_page_row_carries_its_override(survey):
     """The per-file toggle has to render what it is toggling.
 

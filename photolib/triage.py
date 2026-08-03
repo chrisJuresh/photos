@@ -520,7 +520,8 @@ def counts(
     a rule typed into the last screen means.
 
     `per_rule` comes out of the same query: how many paths and bytes each rule
-    actually takes, in order, which is the rule sidebar and screen 0's table.
+    actually takes, in order, which is the rule sidebar and screen 0's table. So
+    does `page_paths`, the size of the contact sheet the same candidate produces.
     """
     rules = load_rules(conn) if rules is None else rules
     position = len(rules) if at is None else at
@@ -541,6 +542,7 @@ def counts(
             "candidate_kept_bytes",
             "candidate_excluded_paths",
             "candidate_excluded_bytes",
+            "page_paths",
         ),
         0,
     )
@@ -562,6 +564,17 @@ def counts(
         side = "kept" if (cand_kept if taken else kept) else "excluded"
         result[f"candidate_{side}_paths"] += paths
         result[f"candidate_{side}_bytes"] += size
+
+        # How many rows the contact sheet will serve, which is what lets the
+        # client give the scrollbar its final length from the first page. It is
+        # `triage_screens.page`'s own relation -- kept by the saved rules, and
+        # matched by the candidate -- so it falls out of this tally for free
+        # rather than costing a second 220 ms query. Position does not enter it:
+        # the sheet shows what the candidate covers, not what it would win.
+        # Neither do the overrides, which the sheet reports per tile and does
+        # not filter on, so this is deliberately outside the correction below.
+        if kept and (candidate is None or hit):
+            result["page_paths"] += paths
 
     if overrides:
         delta = _override_correction(conn, rules)

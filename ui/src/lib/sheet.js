@@ -14,26 +14,55 @@
 //   activate(item, event)                  a click that was not handled by fill's
 //                                          own controls
 //
-// Everything else — the packing, the windowing, the recycling, the prefetch —
-// is the code step 6 measured, unchanged.
+// The packing and the recycling are step 6's, unchanged. Two things about the
+// windowing are not, because step 6 was measured on a sheet the size of one
+// screen and both only show up on a sheet the size of the library:
+//
+//   * the height is reserved for the whole answer, not grown page by page, so
+//     the scrollbar stops being 1% of its final length — see `reserve`
+//   * placeholders are decoded a frame after the images are requested, not on
+//     the line before, so a fresh window's requests leave immediately — see
+//     `drainPlaceholders`
 
-import { GAP, aspect, packRows, visibleRows } from "./layout.js";
+import { GAP, TARGET_H, aspect, packRows, visibleRows } from "./layout.js";
 
-const PREFETCH_PX = 1000;
+// How much laid-out runway to keep ahead of the reader before asking for another
+// page. One page is roughly 2,500px of rows, so this is about one page of slack.
+// At reading speed that is enough never to arrive at the packed edge; a fling
+// still outruns it, and outruns any figure that does not page the whole library.
+const PREFETCH_PX = 2500;
+
+// Viewports of tiles kept mounted around the fold. Ahead is where images are
+// won: a tile mounted two screens down has its request in flight long before it
+// is looked at, which is the difference between arriving at a loaded row and
+// arriving at a grey one. Measured cold, a fresh window's thumbnails take ~220ms
+// to arrive, of which ~110ms is queueing behind the six connections a browser
+// gives one origin — so they have to start early, not fast.
+const BEHIND = 1;
+const AHEAD = 2;
+
+// Chrome clamps an element's height near 33.5M px and then disagrees with any
+// layout computed past it. Triage's largest screen is 1.24M rows, which wants
+// ~80M px, so the reservation below stops well short of the cliff: the bar is
+// still the length of the track, it just stops being linear in the deep tail.
+const MAX_CANVAS_PX = 30_000_000;
 
 export function createSheet(canvas, sentinel, options) {
   const items = []; // page order, never reordered
   const rows = []; // {top, height, from, to} — immutable once pushed
   const mounted = new Map(); // item index -> element
   const pool = []; // detached tiles, reused
+  const pending = []; // mounted, still owed a ThumbHash placeholder
 
   let packed = 0; // items consumed into rows
   let nextTop = 0; // y of the next row to commit
   let cursor = null; // the envelope's `next`, passed straight back
+  let total = null; // rows the whole query has, or null while unknown
   let exhausted = false;
   let inflight = false;
   let width = 0;
   let generation = 0; // bumped by reset(); stale pages are dropped
+  let placeholderFrame = 0;
   let onState = options.onState || (() => {});
 
   // ------------------------------------------------------------- layout
@@ -48,10 +77,34 @@ export function createSheet(canvas, sentinel, options) {
       rows.push({ top: nextTop, height, from, to });
       nextTop += height + GAP;
     });
-    // The total height grows as pages arrive. It is deliberately NOT estimated
-    // from a row count and a mean height: that buys a stable scrollbar and pays
-    // with a scroll mapping that corrects itself under the reader.
-    canvas.style.height = nextTop + "px";
+    stretch();
+  }
+
+  // Height for the rows the sheet has not paged in yet, so the scrollbar is the
+  // length of the whole answer from the first page rather than growing under the
+  // reader on every one of them.
+  //
+  // The earlier version reserved nothing, on the grounds that a stable bar is
+  // bought with a scroll mapping that corrects itself. That trade only holds if
+  // the estimate is a guess: here `total` is exact — counted from `photo` for the
+  // grid, from the bucket surface for triage — so the only inexact part is the
+  // mean row of what has not been read yet, and that converges after one page.
+  // What is left is a bar that settles instead of one that grows 250 times.
+  function reserve() {
+    // Same guard as `pack`: with no width there is no row to average and no
+    // sensible per-row occupancy, and guessing one asks for a 278M px canvas.
+    if (total === null || exhausted || width <= 0 || packed >= total) return 0;
+    const perRow = rows.length ? packed / rows.length : Math.max(1, width / TARGET_H);
+    const rowHeight = rows.length ? nextTop / rows.length : TARGET_H + GAP;
+    const wanted = Math.round(((total - packed) / perRow) * rowHeight);
+    return Math.max(0, Math.min(wanted, MAX_CANVAS_PX - nextTop));
+  }
+
+  // The sentinel stays at the end of the *packed* rows, never at the end of the
+  // reservation: it exists to say "real content is running out", and parking it
+  // in reserved emptiness would stop it ever saying so.
+  function stretch() {
+    canvas.style.height = nextTop + reserve() + "px";
     sentinel.style.top = Math.max(0, nextTop - 1) + "px";
   }
 
@@ -93,14 +146,24 @@ export function createSheet(canvas, sentinel, options) {
     pool.push(el);
   }
 
-  function mount(index, x, y, w, h) {
+  function mount(index, x, y, w, h, urgent) {
     let el = mounted.get(index);
     const item = items[index];
     if (!el) {
       el = acquire();
       el.dataset.index = String(index);
-      placeholder(el, item);
-      el.firstChild.src = "/t/" + item.s + ".webp";
+      const img = el.firstChild;
+      // Before the src, because the hint is read when the request is created and
+      // ignored afterwards — which also means it only ever decides the order
+      // *within* a freshly built window: a reset, a screen change, a first paint,
+      // where 23 visible tiles and 57 prefetched ones are queued in one go and
+      // have to share six connections. During steady scrolling every tile enters
+      // through the prefetch band and they are all "low", which is the same
+      // ordering they would have had anyway.
+      img.fetchPriority = urgent ? "high" : "low";
+      img.src = "/t/" + item.s + ".webp";
+      // The placeholder is deliberately not decoded here. See drainPlaceholders.
+      pending.push(index);
       if (options.fill) options.fill(el, item);
       canvas.appendChild(el);
       mounted.set(index, el);
@@ -116,30 +179,53 @@ export function createSheet(canvas, sentinel, options) {
     if (item.url) el.style.backgroundImage = "url(" + item.url + ")";
   }
 
-  function placeRow(row) {
+  // Decoding one ThumbHash is ~1.1 ms of canvas work — ~130 ms for a screenful —
+  // and it used to run inside `mount`, on the line above the `img.src`. So every
+  // request in a fresh window started a tenth of a second late, waiting on
+  // placeholders for tiles whose images had not been asked for yet.
+  //
+  // Held to the next frame instead. That is late enough for a warm cache to have
+  // fired `load` already, which is what makes the skip below worth having: on a
+  // revisited region the decode is not deferred, it is not done at all.
+  function drainPlaceholders() {
+    placeholderFrame = 0;
+    for (const index of pending) {
+      const el = mounted.get(index);
+      // Released while it waited, or the real image got there first.
+      if (el && !el.classList.contains("loaded")) placeholder(el, items[index]);
+    }
+    pending.length = 0;
+  }
+
+  function placeRow(row, urgent) {
     let x = 0;
     for (let i = row.from; i < row.to; i++) {
       const last = i === row.to - 1;
       // The last tile takes the remainder, so a row is exactly `width` wide and
       // rounding never accumulates into a ragged right edge.
       const w = last ? width - x : Math.round(aspect(items[i]) * row.height);
-      mount(i, x, row.top, w, row.height);
+      mount(i, x, row.top, w, row.height, urgent);
       x += w + GAP;
     }
   }
 
   function render() {
     const vh = window.innerHeight;
-    // One screen above, one visible, one below.
     const top = origin();
-    const span = visibleRows(rows, top - vh, top + vh * 2);
+    const span = visibleRows(rows, top - vh * BEHIND, top + vh * (1 + AHEAD));
     if (!span) return;
     const lo = rows[span[0]].from;
     const hi = rows[span[1]].to;
     for (const [index, el] of Array.from(mounted)) {
       if (index < lo || index >= hi) release(index, el);
     }
-    for (let r = span[0]; r <= span[1]; r++) placeRow(rows[r]);
+    for (let r = span[0]; r <= span[1]; r++) {
+      const row = rows[r];
+      placeRow(row, row.top < top + vh && row.top + row.height > top);
+    }
+    if (pending.length && !placeholderFrame) {
+      placeholderFrame = requestAnimationFrame(drainPlaceholders);
+    }
   }
 
   // ------------------------------------------------------------- paging
@@ -159,7 +245,7 @@ export function createSheet(canvas, sentinel, options) {
     if (inflight || exhausted) return;
     inflight = true;
     const mine = generation;
-    onState({ loading: true, count: items.length, exhausted });
+    onState({ loading: true, count: items.length, exhausted, total });
     try {
       do {
         const body = await options.fetchPage(cursor);
@@ -169,16 +255,20 @@ export function createSheet(canvas, sentinel, options) {
         for (const photo of body.photos) items.push(photo);
         cursor = body.next;
         exhausted = cursor === null; // an explicit end, not len < limit
+        // `/api/photos` carries it; `/api/triage/page` does not, because there it
+        // costs 220 ms and the same number arrives free with the counts — see
+        // `setTotal`. So this is "if this endpoint knows", not "if it is set".
+        if (typeof body.total === "number") total = body.total;
         pack(exhausted);
         render();
-        onState({ loading: true, count: items.length, exhausted });
+        onState({ loading: true, count: items.length, exhausted, total });
       } while (!exhausted && needsMore());
     } catch (err) {
       if (mine === generation) onState({ error: String(err) });
     } finally {
       if (mine === generation) {
         inflight = false;
-        onState({ loading: false, count: items.length, exhausted });
+        onState({ loading: false, count: items.length, exhausted, total });
       }
     }
   }
@@ -258,13 +348,28 @@ export function createSheet(canvas, sentinel, options) {
       for (const [index, el] of Array.from(mounted)) release(index, el);
       items.length = 0;
       rows.length = 0;
+      pending.length = 0;
       packed = 0;
       nextTop = 0;
       cursor = null;
+      // A new predicate is a new answer and therefore a new size. Keeping the
+      // old one would reserve the previous screen's height for this one.
+      total = null;
       exhausted = false;
       canvas.style.height = "0px";
       window.scrollTo(0, 0);
       loadNext();
+    },
+    // The size of the whole answer, for the endpoints that do not carry it in
+    // the page envelope. Triage's is a by-product of the counts the rule bar
+    // already asks for, so it arrives beside the first page rather than in
+    // front of it — a second query would put 220 ms before the first paint.
+    setTotal(value) {
+      const next = typeof value === "number" ? value : null;
+      if (next === total) return;
+      total = next;
+      stretch();
+      onState({ total });
     },
     // Re-bind one already-mounted item, for an override toggle that changed it.
     refresh(item) {
@@ -279,6 +384,7 @@ export function createSheet(canvas, sentinel, options) {
       resize.disconnect();
       intersect.disconnect();
       clearTimeout(reflowTimer);
+      cancelAnimationFrame(placeholderFrame);
     },
   };
 }

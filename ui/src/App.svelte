@@ -26,7 +26,7 @@
   let busy = $state(false);
   let saving = $state(false);
   let loadingRows = $state(false);
-  let sheet = $state({ loading: false, count: 0, exhausted: false });
+  let sheet = $state({ loading: false, count: 0, exhausted: false, total: null });
   let failed = $state(null);
 
   const screen = $derived(SCREENS[index]);
@@ -292,9 +292,9 @@
 
       {#if showSheet}
         <div class="sheetbar muted">
-          {count(sheet.count)} loaded{sheet.exhausted ? " · all of them" : ""}{sheet.loading
-            ? " · loading…"
-            : ""}
+          {count(sheet.count)}{sheet.total ? " of " + count(sheet.total) : ""} loaded{sheet.exhausted
+            ? " · all of them"
+            : ""}{sheet.loading ? " · loading…" : ""}
           <span class="hint">click a tile to reveal it · click the corner chip to override</span>
         </div>
       {:else if screen.sheet === false}
@@ -308,6 +308,7 @@
       <Sheet
         key={sheetKey}
         {fetchPage}
+        total={mode === "grid" ? null : (counts?.page_paths ?? null)}
         triage={mode === "triage"}
         onActivate={activate}
         onOverride={override}

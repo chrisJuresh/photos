@@ -11,6 +11,7 @@
   let {
     key = "",
     fetchPage,
+    total = null,
     triage = false,
     onActivate = () => {},
     onOverride = async () => null,
@@ -84,12 +85,21 @@
     return () => instance?.destroy();
   });
 
+  // Read both props first so the effect subscribes to them before any early
+  // return. One effect rather than two, because the order matters: `reset` drops
+  // the total along with the rows it sized, so re-applying it has to come after,
+  // and two effects would leave that to declaration order.
+  //
+  // `total` is null in grid mode, which takes it from the page envelope instead.
   $effect(() => {
-    // Read `key` first so the effect subscribes to it before any early return.
     const next = key;
-    if (!instance || next === started) return;
-    started = next;
-    instance.reset();
+    const size = total;
+    if (!instance) return;
+    if (next !== started) {
+      started = next;
+      instance.reset();
+    }
+    instance.setTotal(size);
   });
 </script>
 
