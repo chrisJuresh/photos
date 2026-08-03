@@ -107,6 +107,11 @@ MIRRORED = {"2", "4", "5", "7"}
 
 LOCK_NAME = "phase2a.lock"
 
+# The decode workers import their target by name, and under `python -m` this
+# module's `__name__` is "__main__". Spawn's main-module fixup does resolve that,
+# but naming the module outright means the workers do not depend on it.
+WORKER_MODULE = __spec__.name if __spec__ else __name__
+
 
 class Phase2aRefused(RuntimeError):
     """Raised before anything is read or written. Nothing happened."""
@@ -532,7 +537,7 @@ def repair_arw(
     repaired: list[tuple] = []
 
     with decode.BoundedPool(
-        f"{__name__}:decode_rotate", workers=decoders, timeout_s=timeout_s
+        f"{WORKER_MODULE}:decode_rotate", workers=decoders, timeout_s=timeout_s
     ) as pool:
         with ThreadPoolExecutor(min(8, len(tasks))) as pumps:
             pumps.map(_reader(pool, source_root, mismatch), enumerate(tasks))
@@ -709,7 +714,7 @@ def compute_features(
     progress = Progress("features", len(tasks))
 
     with decode.BoundedPool(
-        f"{__name__}:decode_features", workers=decoders, timeout_s=timeout_s
+        f"{WORKER_MODULE}:decode_features", workers=decoders, timeout_s=timeout_s
     ) as pool:
 
         def read(indexed: tuple[int, tuple]) -> None:
@@ -800,6 +805,52 @@ def _commit_features(conn: sqlite3.Connection, rows: list[tuple]) -> None:
     rows.clear()
 
 
+def recompute_composite(conn: sqlite3.Connection) -> dict:
+    """Re-derive `composite_quality` from the scalars already persisted.
+
+    The composite is a stated *policy* over the other seventeen, not a
+    measurement, so changing the policy must not cost a 47-minute re-decode of
+    103,207 files. Pure SQL and arithmetic, seconds, and it touches no disk
+    outside the catalog. The `quality` half of `feature_ver` moves with it --
+    an explicit version bump is how a projection gets invalidated, and the
+    substrate token it carries is preserved.
+    """
+    rows: list[tuple] = []
+    changed = 0
+    skipped = 0
+    for sha256, quality, version in conn.execute(
+        "SELECT sha256, quality, feature_ver FROM file WHERE quality IS NOT NULL"
+    ):
+        scalars = json.loads(quality)
+        if "sharpness" not in scalars:
+            skipped += 1  # a row that recorded a decode error, not scalars
+            continue
+        before = scalars.get("composite_quality")
+        scalars["composite_quality"] = features.composite_quality(scalars)
+        changed += scalars["composite_quality"] != before
+        versions = json.loads(version)
+        _, _, substrate = (versions.get("quality") or "").partition("/")
+        versions["quality"] = f"{features.QUALITY_VER}/{substrate or 'unknown'}"
+        rows.append(
+            (json.dumps(scalars, sort_keys=True), json.dumps(versions, sort_keys=True), sha256)
+        )
+
+    started = time.perf_counter()
+    for start in range(0, len(rows), 5000):
+        conn.execute("BEGIN")
+        conn.executemany(
+            "UPDATE file SET quality = ?, feature_ver = ? WHERE sha256 = ?",
+            rows[start : start + 5000],
+        )
+        conn.execute("COMMIT")
+    return {
+        "rows": len(rows),
+        "changed": changed,
+        "skipped": skipped,
+        "elapsed_s": time.perf_counter() - started,
+    }
+
+
 # --- verify the tiers this build does not decode -----------------------------
 
 
@@ -872,6 +923,20 @@ def regression(
     For the rest the evidence is SPIKE C's direction-verified r=1.000, which is
     recorded and not re-derived here; the report counts them so the gap is a
     number rather than an omission.
+
+    **(3) also has no reference at all for `.arw`, which this run established.**
+    `PLAN.md` exception D says to prefer `asset_extended_metadata` over
+    `assets.width/height`, and that is right for `.rw2` (12,568/12,568 portrait
+    at a transposing tag) and `.jpg` (16,880/16,895). For `.arw` it is
+    1,483/1,483 *landscape* at a transposing tag -- AEM carries the raw embedded
+    preview's dimensions, uncorrected, because v1 read them from the same
+    preview whose missing Orientation tag caused the derivative defect. So the
+    reading cannot referee the shape. Detected per asset rather than by
+    hardcoding the extension: a reference that agrees with the raster as it
+    stood *before* this run turned it is a reference that was never corrected.
+    Those are counted and named, never silently passed. Direction is not lost
+    with them -- assertion (2) covers it, and polarity could never have told a
+    90 CCW from a 90 CW in any case.
     """
     stored = {
         row[0]: row[1:]
@@ -883,6 +948,7 @@ def regression(
     dim_mismatch: list[str] = []
     rotation_wrong: list[str] = []
     polarity_wrong: list[str] = []
+    uncorrected: list[str] = []
 
     for asset_id, asset in assets.items():
         row = derivatives.get((asset_id, SUBSTRATE_EDGE))
@@ -911,16 +977,25 @@ def regression(
         aem = metadata.get(asset_id)
         want = _polarity(aem[0], aem[1]) if aem else 0
         got = _polarity(*published)
-        if want and got and want != got:
+        if not want or not got:
+            counter["polarity blind"] += 1
+        elif want == got:
+            counter["polarity ok"] += 1
+        elif rot and want == _polarity(width, height):
+            # The reading agrees with the raster as it stood before this run
+            # turned it, so it was never orientation-corrected and cannot
+            # referee the published shape. True of every `.arw`.
+            counter["reference uncorrected"] += 1
+            uncorrected.append(
+                f"{asset.sha256} {asset.ext} tag {tag} published "
+                f"{published[0]}x{published[1]} metadata {aem[0]}x{aem[1]}"
+            )
+        else:
             counter["polarity mismatch"] += 1
             polarity_wrong.append(
                 f"{asset.sha256} tag {tag} published {published[0]}x{published[1]} "
                 f"metadata {aem[0]}x{aem[1]}"
             )
-        elif want and got:
-            counter["polarity ok"] += 1
-        else:
-            counter["polarity blind"] += 1
         if tag in MIRRORED or tag == "3":
             counter["aspect-invisible"] += 1
 
@@ -929,6 +1004,7 @@ def regression(
         "dim_mismatch": dim_mismatch,
         "rotation_wrong": rotation_wrong,
         "polarity_wrong": polarity_wrong,
+        "uncorrected": uncorrected,
     }
 
 
@@ -1003,7 +1079,7 @@ def benchmark(
     sizes: list[int] = []
     sharpness = []
     ok = 0
-    with decode.BoundedPool(f"{__name__}:decode_features", workers=decoders) as pool:
+    with decode.BoundedPool(f"{WORKER_MODULE}:decode_features", workers=decoders) as pool:
 
         def pump(indexed: tuple[int, tuple]) -> None:
             tid, (_aid, row) = indexed
@@ -1125,6 +1201,20 @@ def _print_regression(result: dict, gap: dict, arw: dict) -> None:
         print(f"  {label:<22}{len(result[key]):>9,}")
         for item in result[key][:20]:
             print(f"          {item}")
+    if result["uncorrected"]:
+        by_ext = collections.Counter(line.split()[1] for line in result["uncorrected"])
+        print(
+            f"  {'no usable reference':<22}{len(result['uncorrected']):>9,}  "
+            + ", ".join(f"{ext} {count:,}" for ext, count in sorted(by_ext.items()))
+        )
+        print(
+            "          asset_extended_metadata for these agrees with the raster as it stood "
+            "BEFORE\n          this run turned it, so the reading was never orientation-"
+            "corrected and cannot\n          referee the published shape. PLAN.md exception D "
+            "prefers AEM over\n          assets.width/height, which holds for .rw2 and .jpg and "
+            "does NOT hold here.\n          Direction for these is assertion 2 above, which "
+            "passed."
+        )
 
     print(
         f"\n  detail tier   {gap['detail']:,} of {gap['substrate']:,} assets; "
@@ -1193,6 +1283,13 @@ def run(
             )
             _print_repair(result)
             failures += len(result["mismatch"]) + len(result["failed"])
+        if "q" in passes:
+            result = recompute_composite(conn)
+            print(
+                f"\nQ composite {result['changed']:,} of {result['rows']:,} rows moved, "
+                f"{result['skipped']:,} skipped as error rows, in {result['elapsed_s']:.1f}s "
+                f"-- {features.QUALITY_VER}, no decode"
+            )
         if "c" in passes:
             result = compute_features(
                 conn, config, assets, metadata, derivatives,
@@ -1227,7 +1324,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "passes", nargs="?", default="abc",
-        help="any of a (re-hash objects), b (repair ARW), c (features); or 'bench'",
+        help="any of a (re-hash objects), b (repair ARW), c (features), q (re-derive "
+        "composite_quality from the persisted scalars, no decode); 'e' for the "
+        "regression report alone; or 'bench'",
     )
     parser.add_argument("--n", type=int, default=500, help="bench sample size")
     parser.add_argument("--only", default="ac", help="which halves of the bench to run")

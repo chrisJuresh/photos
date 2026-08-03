@@ -33,7 +33,7 @@ The 18 scalars, matching v1's column set one for one:
 | `incomplete_decode`      | 1 when the decoder had to tolerate truncation or returned a size other than the header's |
 | `thumbnail_likelihood`   | how far the true long edge falls under 640 px |
 | `edit_likelihood`        | from the adopted `software_text` and edit history, not from pixels |
-| `composite_quality`      | the documented weighted combination at the foot of this module |
+| `composite_quality`      | the documented weighted combination at the foot of this module. Signed, not clamped |
 
 `luminance_histogram` (16 bins) and `resolution_class` come out alongside them;
 v1 carried both too, and neither is a scalar.
@@ -56,7 +56,7 @@ import numpy as np
 PHASH_VER = "photolib-phash-v1"
 DHASH_VER = "photolib-dhash-v1"
 THUMBHASH_VER = "photolib-thumbhash-v1"
-QUALITY_VER = "photolib-quality-v1"
+QUALITY_VER = "photolib-quality-v2"  # v2 unclamped the composite; see composite_quality
 
 TILES = 16  # 16x16 tiles over the frame, whatever its pixel size
 HASH_SIDE = 32  # pHash DCT input
@@ -424,6 +424,13 @@ def composite_quality(scalars: dict) -> float:
     Weights are a stated policy, not a fit: focus dominates, information content
     helps, and each way an image can be unusable subtracts. Sharpness is folded
     through `SHARP_KNEE` because it is the one unbounded term.
+
+    **Not clamped, and not a probability.** Roughly -0.75 to +0.60 on this
+    corpus, higher being better. Clipping the foot to zero put 18,717 of 103,207
+    assets on exactly 0.0 -- and a tie is the one answer a cover ranker cannot
+    use, since it compares members *within* a stack and a stack of dark frames
+    is precisely where the ordering still has to come out somewhere. A total
+    order over a signed range costs nothing and keeps every comparison decidable.
     """
     sharp = _clamp(math.sqrt(max(scalars["sharpness"], 0.0)) / SHARP_KNEE)
     score = (
@@ -438,4 +445,4 @@ def composite_quality(scalars: dict) -> float:
         - 0.20 * scalars["corruption"]
         - 0.20 * scalars["incomplete_decode"]
     )
-    return round(_clamp(score), 4)
+    return round(score, 4)

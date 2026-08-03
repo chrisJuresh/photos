@@ -272,4 +272,20 @@ def test_composite_quality_prefers_the_usable_image():
     blank = features.pixel_features(np.full((120, 200, 3), 128, dtype=np.uint8))
     blank.update(features.metadata_features(4000, None, False))
     assert features.composite_quality(good) > features.composite_quality(blank)
-    assert 0.0 <= features.composite_quality(blank) <= 1.0
+
+
+def test_composite_quality_does_not_pile_bad_images_onto_one_value():
+    """Clamping the foot to zero put 18,717 of 103,207 real assets on exactly
+    0.0. A cover ranker compares members within a stack, so a stack of dark
+    frames still has to come out in some order."""
+    rng = np.random.default_rng(3)
+    scores = []
+    for texture in (0, 3, 8, 20, 50):
+        array = np.clip(rng.normal(14, texture, (120, 200, 1)), 0, 255)
+        scalars = features.pixel_features(array.repeat(3, axis=2).astype(np.uint8))
+        scalars.update(features.metadata_features(4000, None, False))
+        scores.append(features.composite_quality(scalars))
+    # All five are dark enough that the old clamped form put them on 0.0.
+    assert len(set(scores)) == len(scores), scores
+    assert scores == sorted(scores), scores
+    assert min(scores) < 0.0  # the range is signed, and that is the point

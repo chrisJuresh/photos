@@ -844,7 +844,24 @@ sheet: you can't look at a `.d.ts`.
 the same engine triage uses, so the one step that looked irreversible reverses by the same
 mechanism as everything else.
 
-### Phase 2a — Adopt MediaVault and verify
+### Phase 2a — Adopt MediaVault and verify — ✅ **RAN 2026-08-03**
+
+> **Outcome.** 146,034 objects re-hashed against the SHA-256 *and* the byte count in their own
+> filenames: **0 mismatches**, 451.2 GB in **3h50m28s at 32.6 MB/s**. 1,486 `.arw` turned
+> upright, 2,972 files written, 2m45s. 103,207 assets given pHash, dHash, ThumbHash and the 18
+> quality scalars in 47m11s — **0 decode timeouts, 0 decode errors, 0 checksum mismatches, 0
+> absent**. The 2560 detail tier checksummed clean, 21,845/21,845, 13.04 GB. Regression check:
+> measured raster equals the manifest in 103,207/103,207, and applied rotation equals the
+> container's orientation in 103,207/103,207.
+>
+> **32.6 MB/s, not the 62.0 step 5 measured, and the cause is not the code.** `F:` and `G:` are
+> two partitions of *one* physical disk — the WD Elements USB HDD — and a `curl` download was
+> writing to `F:` at 15–18 MB/s throughout. The disk gave ~57 MB/s aggregate at queue depth 2.6,
+> split about 2:1 in the read's favour. A 500-object benchmark under the same contention gave
+> 27.4 MB/s, so the tree-ordered walk still bought ~20% over a random sample, exactly as step 5
+> predicted it would.
+
+
 
 **MediaVault's `objects` tree acts as staging.** The bytes are already content-addressed and
 on the right volume, so nothing is copied here — promotion in Phase 4 is a hardlink.
@@ -882,6 +899,20 @@ derivative. Any regression check, repair predicate or Library display logic must
 `asset_extended_metadata` or re-measure the object. Record as a separate defect against v1's
 metadata extraction.
 
+> **And the substitute is not safe for `.arw` either — found 2026-08-03, extending this
+> exception rather than contradicting it.** Preferring `asset_extended_metadata` over
+> `assets.width/height` holds for `.rw2` (12,568 / 12,568 portrait at a transposing
+> orientation) and `.jpg` (16,880 / 16,895). For `.arw` it is **1,483 / 1,483 landscape at a
+> transposing orientation** — AEM carries the *raw embedded preview's* dimensions,
+> uncorrected, because v1 read them from the same preview whose missing Orientation tag caused
+> the derivative defect in the first place. So the ARW rows have **no orientation-corrected
+> dimension source anywhere in the manifest**, and any polarity check against them must say so
+> rather than count it either way. `photolib.phase2a.regression` detects this per asset — a
+> reference that agrees with the raster as it stood *before* the repair is a reference that was
+> never corrected — and reports it as "no usable reference", 1,483 of them, all `.arw`.
+> Direction for those is carried by the applied-rotation-equals-tag assertion, which passed;
+> polarity could never have distinguished 90° CW from 90° CCW in any case.
+
 What did hold: `assets` and `asset_extended_metadata` agree on `orientation_text` for all
 146,034 assets, there is exactly one AEM row per asset, and a single `analyzer_version`
 (`vault-derivative-v1`) produced all 605,981 derivative rows — so the single-implementation
@@ -902,6 +933,15 @@ one of them.
   AND orientation_text <> '1'` = 1,486 assets** (orientation 8: 1,459; 6: 24; 3: 3) × 4 tiers
   = **5,944 files, ~15 min.** Transform, measured: orientation 8 → rotate 90° CCW; 6 → 90° CW;
   3 → 180°.
+- **Done, but as 2,972 files rather than 5,944, and not over v1's copies.** MediaVault is
+  read-only until step 14 and every derivative in it carries a `checksum_sha256`, so rewriting
+  one in place would turn a verified tree into 1,486 apparent corruptions — the signal reserved
+  for real damage. The repaired pixels went to the two destinations this build actually reads:
+  the 1536 substrate to `deriv_root`, the 384 tile over step 5's copy on `thumb_root`. The 192
+  and 768 tiers exist only inside MediaVault, nothing here reads them, and they regenerate from
+  the repaired 1536 in seconds. **Consequence to carry into step 14: the working 1536 substrate
+  is now split** — 1,486 assets under `G:\vault\deriv`, the other 101,721 still under
+  `G:\MediaVault\derivatives`.
 - **Do not select by aspect transposition.** Orientations 2, 3 and 4 are invisible to it by
   construction, and three orientation-3 ARW are published *upside down* today — not sideways,
   so neither an aspect predicate nor the "sideways tiles" symptom can see them.
@@ -956,10 +996,11 @@ rounding), but it inherits the ARW defect identically and is covered by the same
 repair. No derivative carries a WebP EXIF chunk — 0 of 10,090 checked — so orientation cannot
 be corrected at display time by a viewer. The pixels have to be rotated.
 
-**Estimate: 5–6 hours**, dominated by the 420 GB object re-hash at the measured 22–35 MB/s
-(~4–5 h), plus the 21.65 GB derivative pass and ~15 min for the ARW repair. ~442 GB read, no
-large writes, no decode of originals, no RAW decode at all. The earlier **1.5–2 h figure
-assumed 110 MB/s and is withdrawn.**
+~~**Estimate: 5–6 hours**~~ **Actual: 4h55m** — 3h50m for the re-hash, 2m45s for the ARW
+repair, 47m for the features, 14m for the detail-tier checksum. 471 GB read (451.2 GB of
+objects, 6.33 GB of 1536 derivatives, 13.04 GB of 2560), 279 MB written. No decode of
+originals and no RAW decode at all, as planned. On an idle disk the re-hash would have been
+~2h and the total ~3h05m; the difference is the `F:` contention recorded above.
 
 The verification read can run concurrently with triage **only after** the 384px thumbnail copy
 to `E:` has completed, so that triage touches no G: head. Contention on this volume is severe:

@@ -384,6 +384,38 @@ def test_a_checksum_mismatch_is_reported_and_nothing_is_computed_from_it(vault):
     ).fetchone()[0] is None
 
 
+def test_the_composite_is_re_derivable_without_a_decode(vault):
+    """The composite is a policy over the other seventeen scalars, so changing
+    it must not cost a re-decode of 103,207 files."""
+    config, conn, corpus = vault
+    assets, metadata, derivatives = scanned(config)
+    phase2a.compute_features(conn, config, assets, metadata, derivatives, readers=4, decoders=2)
+    sha256 = corpus["jpg-upright"]["sha256"]
+    conn.execute(
+        "UPDATE file SET quality = json_set(quality, '$.composite_quality', 99.0)"
+        " WHERE sha256 = ?",
+        (sha256,),
+    )
+    result = phase2a.recompute_composite(conn)
+    assert result["rows"] == len(corpus) and result["changed"] == 1
+    quality, version = conn.execute(
+        "SELECT quality, feature_ver FROM file WHERE sha256 = ?", (sha256,)
+    ).fetchone()
+    scalars = json.loads(quality)
+    assert scalars["composite_quality"] == features.composite_quality(scalars)
+    # the version moves, and the substrate token it carries survives
+    assert json.loads(version)["quality"] == f"{features.QUALITY_VER}/deriv1536"
+
+
+def test_recompute_skips_a_row_that_recorded_a_decode_error(vault):
+    config, conn, corpus = vault
+    assets, metadata, derivatives = scanned(config)
+    corpus["jpg-upright"]["derivatives"][phase2a.SUBSTRATE_EDGE].write_bytes(b"not a derivative")
+    phase2a.compute_features(conn, config, assets, metadata, derivatives, readers=4, decoders=2)
+    result = phase2a.recompute_composite(conn)
+    assert result["skipped"] == 1 and result["rows"] == len(corpus) - 1
+
+
 def test_features_resume_and_do_not_recompute(vault):
     config, conn, _ = vault
     assets, metadata, derivatives = scanned(config)
@@ -411,6 +443,43 @@ def test_the_regression_check_passes_after_a_full_run(vault):
     assert set(report["by_orientation"]) == {"1", "3", "6", "8"}
     assert report["by_orientation"]["8"]["rotated 90"] == 1
     assert report["by_orientation"]["3"]["aspect-invisible"] == 1
+
+
+def test_an_uncorrected_metadata_reading_is_named_not_counted_as_a_failure(vault):
+    """The real corpus's `.arw` rows: asset_extended_metadata carries the raw
+    embedded preview's dimensions, uncorrected, because v1 read them from the
+    same preview whose missing Orientation tag caused the defect. It therefore
+    cannot referee the published shape, and saying so is not the same as
+    passing it."""
+    config, conn, corpus = vault
+    assets, metadata, derivatives = scanned(config)
+    # Point the .arw readings at the stored preview's own shape, uncorrected,
+    # which is what the real manifest holds: 1616x1080 landscape on a tag-8
+    # asset whose display shape is portrait.
+    for name in ("arw-8", "arw-6"):
+        stored = corpus[name]["stored"]
+        for asset_id, asset in assets.items():
+            if asset.sha256 == corpus[name]["sha256"]:
+                metadata[asset_id] = (stored.width, stored.height, *metadata[asset_id][2:])
+    phase2a.repair_arw(conn, config, assets, derivatives, decoders=2)
+    phase2a.compute_features(conn, config, assets, metadata, derivatives, readers=4, decoders=2)
+
+    report = phase2a.regression(conn, assets, metadata, derivatives)
+    assert report["rotation_wrong"] == []  # direction is still asserted
+    assert report["polarity_wrong"] == []  # and this is not reported as one
+    assert len(report["uncorrected"]) == 2
+    assert all(" .arw " in line for line in report["uncorrected"])
+
+
+def test_a_genuine_mis_rotation_is_still_a_polarity_failure(vault):
+    """The uncorrected-reference branch must not become a way for a real wrong
+    turn to escape. A derivative left unturned under a corrected reading is."""
+    config, conn, corpus = vault
+    assets, metadata, derivatives = scanned(config)
+    phase2a.compute_features(conn, config, assets, metadata, derivatives, readers=4, decoders=2)
+    report = phase2a.regression(conn, assets, metadata, derivatives)
+    assert len(report["polarity_wrong"]) == 2  # the two transposing ARW, unturned
+    assert report["uncorrected"] == []
 
 
 def test_the_regression_check_names_a_derivative_that_was_not_turned(vault):

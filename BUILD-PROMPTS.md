@@ -1220,10 +1220,41 @@ verdict reaches the read path.
 
 ---
 
-# Step 9 — Phase 2a verification read
+# Step 9 — Phase 2a verification read — ✅ **DONE 2026-08-03**
 
 **Effort:** `high` · run in the background · **~2–3 h** (step 5 re-measured this; it was 5–6),
 the largest single I/O in the project
+
+**Done 2026-08-03. Gate met: 0 hash mismatches across 146,034 objects.** 451.2 GB in
+**3h50m28s at 32.6 MB/s**, 4h55m for all four passes. The ARW repair is **2,972 files, not
+5,944** — see `PLAN.md` "Phase 2a" for why writing over MediaVault's checksummed copies was the
+wrong move and where the pixels went instead. 103,207 assets carry pHash, dHash, ThumbHash and
+18 quality scalars with **0 decode timeouts, 0 decode errors, 0 checksum mismatches**.
+
+**The 22–35 MB/s band this prompt warned about is what happened, and the cause was found before
+the run rather than after.** A 500-object benchmark gave 27.4 MB/s. `F:` and `G:` are two
+partitions of **one** physical disk, and a `curl` download was writing to `F:` at 15–18 MB/s.
+Step 5's 62.0 was measured on an idle volume. Nothing about the method differed. The
+tree-ordered walk still beat the random sample by ~20%, as step 5 predicted.
+
+**Two findings worth carrying forward.**
+
+- **`asset_extended_metadata.width/height` is not orientation-corrected for `.arw`** —
+  1,483/1,483 landscape at a transposing tag, against 12,568/12,568 correct for `.rw2`. So
+  exception D's substitute has its own hole, and the ARW rows have no corrected dimension
+  source in the manifest at all. Recorded in `PLAN.md`; the regression check detects it per
+  asset and reports "no usable reference" rather than a pass or a failure.
+- **The shipped ThumbHash decoder was correct**, now proven rather than assumed:
+  `tests/test_features.py` runs `thumbHashToDataURL` itself under node against hashes from the
+  new encoder, checking the DC path as arithmetic and the AC path by which quadrant lands
+  where. `/api/photos` now returns `th` for 103,207 of 146,034 photo rows; the remaining 42,827
+  are the error rows with no derivative and are step 12's problem.
+
+**Clamping `composite_quality` to [0,1] was wrong and was changed after seeing the data**: it
+put 18,717 of 103,207 assets on exactly 0.0, and a tie is the one answer a cover ranker cannot
+use. It is now a signed score, -0.71 to 0.60, largest tie 619. `python -m photolib.phase2a q`
+re-derives it from the persisted scalars in seconds, so a change of policy never costs another
+47-minute decode.
 
 ```text
 Read PLAN.md "Phase 2a" in full (it was rewritten on 2026-08-01 — read the current text),
