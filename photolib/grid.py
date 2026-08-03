@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from photolib import db, reveal as reveal_module
+from photolib import db, reveal as reveal_module, triage_api
 from photolib.config import load
 from photolib.thumbnails import thumb_path
 
@@ -73,6 +73,11 @@ CURSOR_ID = re.compile(r"^[0-9]{1,19}$")
 LIMIT_VALUE = re.compile(r"^[0-9]{1,5}$")
 
 MAX_REVEAL_BODY = 1024
+# A rule body carries a predicate value -- a directory path or an `in` list --
+# so it is larger than a reveal's `{"id": N}`, and still nowhere near a bulk
+# upload. `triage.MAX_IN_VALUES` and `MAX_VALUE_CHARS` bound the same thing
+# from the other side.
+MAX_TRIAGE_BODY = 64 * 1024
 
 SECURITY_HEADERS = (
     ("X-Content-Type-Options", "nosniff"),
@@ -286,6 +291,20 @@ class GridServer(ThreadingHTTPServer):
             self._local.conn = conn
         return conn
 
+    def state_writer(self) -> sqlite3.Connection:
+        """This thread's write connection -- to `state.sqlite3` and nothing else.
+
+        The catalog is not attached, so no `/api/triage/*` handler has a name
+        that reaches `origin`, `file`, `photo` or the survey. "Triage writes
+        metadata only" is then a fact about the connection rather than a rule
+        somebody has to keep obeying.
+        """
+        conn = getattr(self._local, "writer", None)
+        if conn is None:
+            conn = triage_api.writer(self.roots.state_db)
+            self._local.writer = conn
+        return conn
+
 
 class GridHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -356,7 +375,9 @@ class GridHandler(BaseHTTPRequestHandler):
             self._photos(query)
         elif thumbnail:
             self._thumbnail(thumbnail.group(1))
-        elif path == "/api/reveal":
+        elif path in triage_api.READ_ROUTES:
+            self._triage_read(path, query)
+        elif path == "/api/reveal" or path in triage_api.WRITE_ROUTES:
             self._respond(405, b"", (("Allow", "POST"),))
         else:
             self._fail(404)
@@ -371,6 +392,8 @@ class GridHandler(BaseHTTPRequestHandler):
         path = self.path.partition("?")[0]
         if path == "/api/reveal":
             self._reveal()
+        elif path in triage_api.WRITE_ROUTES:
+            self._triage_write(path)
         else:
             self._refuse_body()
             self._fail(404)
@@ -435,42 +458,77 @@ class GridHandler(BaseHTTPRequestHandler):
             ),
         )
 
-    def _reveal(self) -> None:
+    def _json_body(self, max_bytes: int) -> dict | None:
+        """A validated JSON object body, or None having already answered.
+
+        Same gauntlet for every POST in the process: same-origin, an explicit
+        JSON content type so any cross-origin attempt needs a preflight there is
+        no handler for, and a size budget checked *before* a byte is read --
+        `F45` is that budget arriving after the read.
+        """
         origin = self.headers.get("Origin")
         if origin is None or origin not in self.server.allowed_origins:
             self._refuse_body()
             self._fail(403, "origin")
-            return
+            return None
         content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
-            # Forces a preflight for any cross-origin attempt, and there is no
-            # OPTIONS handler to satisfy one.
             self._refuse_body()
             self._fail(415, "content-type")
-            return
+            return None
         if self.headers.get("Transfer-Encoding"):
             self._refuse_body()
             self._fail(400, "body")
-            return
+            return None
         raw_length = self.headers.get("Content-Length")
         if raw_length is None or not raw_length.strip().isdigit():
             self._refuse_body()
             self._fail(411, "body")
-            return
+            return None
         length = int(raw_length)
-        if length > MAX_REVEAL_BODY:
-            # Checked before a byte is read. F45 is the budget arriving late.
+        if length > max_bytes:
             self._refuse_body()
             self._fail(413, "body")
-            return
-
+            return None
         try:
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             self._fail(400, "body")
-            return
+            return None
         if not isinstance(payload, dict):
             self._fail(400, "body")
+            return None
+        return payload
+
+    def _triage_read(self, path: str, query: str) -> None:
+        params = parse_qs(query, keep_blank_values=True)
+        try:
+            status, payload = triage_api.READ_ROUTES[path](self.server.connection(), params)
+        except triage_api.Refused as exc:
+            self._fail(exc.status, exc.field)
+            return
+        self._json(status, payload)
+
+    def _triage_write(self, path: str) -> None:
+        """The only write in the process, and the only one there will be.
+
+        The connection it is handed reaches `state.sqlite3` and nothing else --
+        see `GridServer.state_writer`. Invariant 3 on a new surface: a triage
+        decision is a row, never a file operation.
+        """
+        payload = self._json_body(MAX_TRIAGE_BODY)
+        if payload is None:
+            return
+        try:
+            status, body = triage_api.WRITE_ROUTES[path](self.server.state_writer(), payload)
+        except triage_api.Refused as exc:
+            self._fail(exc.status, exc.field)
+            return
+        self._json(status, body)
+
+    def _reveal(self) -> None:
+        payload = self._json_body(MAX_REVEAL_BODY)
+        if payload is None:
             return
         photo_id = payload.get("id")
         # isinstance(True, int) is True, so bool has to be excluded by type.

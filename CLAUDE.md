@@ -121,6 +121,26 @@ MediaVault, nothing here reads them, and rewriting a checksummed MediaVault deri
 would turn a verified tree into 1,486 apparent corruptions. So the working 1536 substrate is
 split: 1,486 assets under `G:\vault\deriv`, the rest still under `G:\MediaVault\derivatives`.
 
+To build the triage survey — the derived, regenerable projection of `origin` and `file` that the
+rule engine reads. ~40 s, pure SQL, no media root is opened. It collapses 1,374,328 paths onto a
+counting surface of 448,512 buckets, which is what lets a rule set be re-costed in ~220 ms instead
+of ~2.9 s. Re-run it after anything that changes the catalog — `capture_time`, `probe`. It holds
+no decisions, so dropping every row loses nothing.
+
+```bash
+python -m photolib.triage_survey
+```
+
+To fill `file.width`/`height` for triage screen 3 by reading image **headers**, never decoding.
+Runs only on what the current rule set still keeps, which is why `PLAN.md` puts it after screens
+0–2. On this corpus the worklist is **25 files** and all 25 are unreadable — MediaVault already
+measured every raster the library holds, including 54,896 of the 54,899 `.png`. `--dry-run`
+reports the worklist and stops; `--ext` overrides the format list.
+
+```bash
+python -m photolib.probe --dry-run
+```
+
 To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
 regenerated — onto `C:`, a different physical disk from `E:`. Instant, ~20 KB before triage. Uses
 `VACUUM INTO`, so it is safe against a live WAL, and it refuses to write onto the source's own

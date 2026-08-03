@@ -1386,6 +1386,38 @@ decisive screens come first: the probe only ever runs on the remainder.
 (invariant 3 on a new surface). And decisions save as a versioned rule set, so any decision
 reverses by flipping a rule; the survey data is already on the SSD.
 
+**Built 2026-08-03, and what measuring it changed.** The engine is `photolib/triage.py`, its
+projection `photolib/triage_survey.py` (migration `005`), the eight screens
+`photolib/triage_screens.py`, the probe `photolib/probe.py`, and the write endpoints
+`photolib/triage_api.py`. Four things came out differently from what this section assumed:
+
+- **"Counts recompute instantly — it is all SQL over a sub-GB catalog on NVMe" was wrong, and
+  the reason is not the row count.** Scanning all 1,374,328 `origin` rows costs 51 ms. Twelve
+  `LIKE '%\node_modules\%'` patterns over them cost **2.9 s**. Substring matching was the
+  problem, so no predicate is a LIKE: a directory-name predicate is a seek into a segment index
+  (4 ms for twelve) and a subtree predicate is a range scan. The other half was that SQLite
+  re-evaluates a computed column once per aggregate, so eight sums over one `CASE` cost 1,193 ms
+  where grouping by the winning rule position costs 222 ms.
+- **The counting surface is not the path list.** `triage_bucket` holds one row per distinct
+  combination of everything a predicate can read: 448,512 rows for 1,374,328 paths. Folding a
+  verdict over the paths themselves is ~470 ms however cheap the predicate is.
+- **The four numbers are paths and bytes, not files.** "the full 1.38M-row inventory" is
+  `origin`, and a rule decides paths. The distinct-content fold — a file is kept if *any* of its
+  paths is kept — is exact and separate, at ~2.9 s. Measured recompute: **216–297 ms** for the
+  eight numbers over the full corpus, including the override correction.
+- **The header-only probe is a no-op on this corpus.** Its worklist after screens 0–2 is **25
+  files**, and all 25 are cache blobs with image extensions. MediaVault already measured every
+  raster the library holds — 54,896 of the 54,899 `.png` included — so screen 3 has its
+  dimensions without a single read. The step stays, because it is the thing that would be needed
+  if it were not true, and it is one command that reports zero.
+
+Two costs are honest rather than hidden. Screen 1's leaderboard is served from a rollup computed
+at survey time and says so in its `scope` field: re-costing it live against the current rules is
+1.9–3.2 s whatever shortlist is used, because the top 50 segments alone span 1,953,553 of the
+2,894,845 rows in the segment index. And the first page of a `dir_under` scope is ~1.1 s, because
+the contact sheet is ordered by path and a subtree that sorts late is reached by walking there;
+every later page is ~15 ms.
+
 **Same app as the grid**, different mode: shared virtualised grid, keyset paging, SSD
 thumbnails, click-to-reveal. Triage adds a rule sidebar and the only write endpoints in the
 system — separate route namespace, and that surface goes away when triage is done.
@@ -1572,8 +1604,8 @@ later.**
 | 5 | Grid UI against adopted 384px thumbnails | Proves paging, thumbnails, reveal — on real data, early |
 | ~~6~~ | ~~Phase 0 inventory~~ | **Done 2026-08-02 in 12h50m.** `origin` 1,374,328 rows, all hashed, 0 errors; 787,798 distinct SHA-256; all 251,087 adopted hashes agreed. Content-level cross-check complete: every one of the 1,374,298 snapshot file nodes reconstructed from the repo and compared per-file, **zero** same-size same-mtime disagreements. `check --read-data` clean. Top-up snapshot `1e80c50e` covers the 39 drifted files |
 | ~~7~~ | ~~Phase 1 prefilter~~ | **Done 2026-08-02 in 2.7s.** Nine `exclude` rules at `seq` 0–8 in `state.sqlite3`, nothing written to the catalog. **101,986 files / 4.77 GB excluded, 685,812 / 544.14 GB surviving** — not the ≈41,700 / 0.5 GB this document predicted, which was the adopted subset. `.png`, `.gif`, `.webp`, `.bmp` matched by no rule |
-| 8 | Phase 2a verification read + ARW repair | Background it; ~4–5 h; nothing else may touch G: |
-| 9 | Triage UI | — |
+| ~~8~~ | ~~Phase 2a verification read + ARW repair~~ | **Done 2026-08-03.** |
+| 9 | Triage UI | **Engine, survey, screens, probe and write API done 2026-08-03** — see "Triage". No UI yet |
 | 10 | Phase 2b gap fill | Benchmark on 500 files first |
 | 11 | **`origins.jsonl` export + server upload** | **Moved ahead of Phase 4. `G:\photos` deletable; Phase 4 unblocked** |
 | 12 | Phase 4 promote + Phase 5 group | Gated on step 11 completing and verifying |

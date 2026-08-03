@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 4
+LATEST = 5
 
 
 def test_applies_from_empty(pair):
@@ -23,7 +23,22 @@ def test_applies_from_empty(pair):
     # The gate: version 2 in both files, each read on its own.
     assert file_version(catalog) == LATEST
     assert file_version(state) == LATEST
-    assert table_names(catalog) == {"schema_version", "origin", "file", "photo"}
+    # The catalog holds the three product tables plus the triage survey, which
+    # is derived and regenerable and therefore belongs on this side. Decisions
+    # stay in state, and migration 005 adds nothing there.
+    assert table_names(catalog) == {
+        "schema_version",
+        "origin",
+        "file",
+        "photo",
+        "triage_dir",
+        "triage_dir_segment",
+        "triage_segment",
+        "triage_ext",
+        "triage_root",
+        "triage_bucket",
+        "triage_path",
+    }
     assert table_names(state) == {"schema_version", "triage_rule", "triage_override"}
 
 
@@ -36,7 +51,17 @@ def test_creates_every_index(conn):
         )
         if not row[0].startswith("sqlite_")
     }
-    assert indexes == {"origin_sha", "origin_fid", "file_state", "file_phash", "photo_sort"}
+    assert indexes == {
+        "origin_sha",
+        "origin_fid",
+        "file_state",
+        "file_phash",
+        "photo_sort",
+        "triage_dir_key",
+        "triage_dir_segment_i",
+        "triage_bucket_dir",
+        "triage_path_bucket",
+    }
 
 
 def test_is_idempotent(pair):

@@ -496,7 +496,21 @@ def test_nothing_is_written_to_the_manifest(vault: Vault, conn, tmp_path):
 
 
 def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
-    """PLAN.md lists three catalog tables; the import adds none of its own."""
+    """PLAN.md lists three catalog tables; the import adds none of its own.
+
+    Migration 005 adds the triage survey, which is a derived projection rebuilt
+    by `photolib.triage_survey` and never written by this import -- so it is
+    named here rather than allowed in by a loosened assertion.
+    """
+    survey = {
+        "triage_dir",
+        "triage_dir_segment",
+        "triage_segment",
+        "triage_ext",
+        "triage_root",
+        "triage_bucket",
+        "triage_path",
+    }
     connection = db.connect(*migrated)
     try:
         names = {
@@ -507,4 +521,4 @@ def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
         }
     finally:
         connection.close()
-    assert names == {"origin", "file", "photo", "schema_version"}
+    assert names == {"origin", "file", "photo", "schema_version"} | survey
