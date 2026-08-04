@@ -1695,11 +1695,20 @@ gaining `total`, and `/api/triage/counts` gaining `page_paths`; both are additio
 
 ---
 
-# Step 12 — Phase 2b gap fill
+# Step 12 — Phase 2b gap fill — ✅ **DONE 2026-08-04**
 
-**Effort:** `high` · run in the background · ~1 h, but **re-estimate before running**: this was
-sized from "the step 7 gap", which turned out not to exist. Population 2 is now whatever triage
-keeps out of 1,123,241 non-media files, which is not known until triage runs.
+**Effort:** `high` · run in the background · ~~~1 h~~ **3m22s.**
+
+**Population 2 was empty.** At the 391-rule set all 38,376 surviving files are already MediaVault
+objects, so the step billed as the only one that reads the photos root read none of it, and
+`G:\vault\.staging` was never created. Population 1: **1,252 of 1,659 decoded**; the 407 failures
+are 406 files under 50 KB — 295 of them TypeScript source named `.mts` — plus one truncated DNG.
+See `PLAN.md` § "Phase 2b" for the full result, including the two subprocess bounds that fired on
+real files and the `edit_likelihood` scalar found dead at 1.0 corpus-wide.
+
+**Steps 13–16 below were written before this ran and three of them need the corrections marked
+`⚠ CORRECTED 2026-08-04`.** The one that matters is step 13's check 2, which as originally
+written cannot pass.
 
 ```text
 Read PLAN.md "Phase 2b" in full.
@@ -1773,10 +1782,35 @@ fan-out is for attacking the results, not for producing them.
    re-read it rather than repeating 420 GB — AND every gap-filled object from step 12 matching
    its recorded sha256.
 
-2. Every origin row that survived the Phase 1 prefilter has a file row in state 'read' or
-   'adopted'. List any that do not, with their paths. AND count(distinct origin.path) ==
-   count(origin rows) — restic's reported paths are not injective, so a trivially-passing
-   check 2 can be an artifact of two files having collapsed into one row upstream.
+   ⚠ CORRECTED 2026-08-04: THE GAP-FILLED SET IS EMPTY. Step 12 staged nothing, because
+   population 2 turned out to be empty, and G:\vault\.staging does not exist. Assert that
+   POSITIVELY — zero file rows in state 'staged', and staging_root absent or holding no files —
+   rather than reporting a check over an empty set as a pass. An empty result from a query that
+   was silently looking in the wrong place looks identical.
+
+2. ⚠ CORRECTED 2026-08-04 — THE ORIGINAL WORDING OF THIS CHECK CANNOT PASS. It read "every
+   origin row that survived the Phase 1 prefilter has a file row in state 'read' or 'adopted'".
+   Only 263,931 of 1,374,328 origin rows do. That is not a defect and nothing is missing: the
+   Phase 1 prefilter only removed 101,986 files by extension, and it is TRIAGE — not the
+   prefilter — that decides what gets a vault copy. Everything triage excluded was never going
+   to be read, by design.
+
+   If you run the original check it BLOCKS a correctly-completed build, and the tempting repair
+   is to go and read ~540,000 excluded files. Do not.
+
+   What to assert instead:
+     - every TRIAGE-KEPT origin row has a file row in state 'read', 'adopted' or 'staged'.
+       Expected: 38,376 kept files, all of them 'read'. Zero shortfall. List any that fall short,
+       with their paths.
+     - every triage-EXCLUDED origin row is covered by check 3 instead — its bytes live only in
+       restic once G:\photos is deleted, which is exactly what check 3 establishes and is the
+       reason a wrong exclusion is reversible at all.
+     - AND count(distinct origin.path) == count(origin rows) — restic's reported paths are not
+       injective, so a trivially-passing check 2 can be an artifact of two files having collapsed
+       into one row upstream.
+
+   Derive the kept set from the saved rule set through photolib.triage, never by re-deriving the
+   verdict yourself. It is ~25 s over the whole corpus.
 
 3. CONTENT-level reconciliation, not a path diff. A path diff CANNOT catch the failure this gate
    exists to prevent: a file rewritten in place at constant size with mtime preserved appears in
@@ -1887,6 +1921,13 @@ Read PLAN.md's Gate section and the origins.jsonl row of the storage table.
 Export <vault_root>\origins.jsonl: one line per distinct file —
   {sha256, ext, size, taken_at, taken_src, paths: [every original path under G:\photos]}
 
+⚠ CORRECTED 2026-08-04: ALL 787,798 FILES, INCLUDING THE 749,422 TRIAGE EXCLUDED. "One line per
+distinct file" is easy to read as "per kept file", and that reading destroys the point of the
+export. Reversal of a WRONG EXCLUSION is what this file exists for, and a file that was wrongly
+excluded is by definition not in the kept set — if it is missing from origins.jsonl there is no
+way back from its content hash to a path restic can be asked for. The kept set is 38,376 of
+787,798, so getting this backwards loses 95% of the map.
+
 This is the one-to-many store that has to survive the source being deleted, so it must be
 readable with nothing but a text editor. No database required, no schema knowledge required, no
 compression.
@@ -1974,6 +2015,23 @@ single-USB-HDD rule broken by its own build order.
 
 Write the promotion, then show me a DRY RUN before anything executes.
 
+⚠ THE COUNTS THE DRY RUN MUST PRODUCE, measured 2026-08-04 at the 391-rule set. The gate for this
+step is "the dry run's counts match your triage numbers exactly", which is uncheckable without
+them:
+    promote from MediaVault      38,376   (435.6 GB)
+    unlink as excluded          107,658
+    rename out of staging             0
+    ------------------------------------
+    MediaVault objects          146,034
+Re-derive these from the saved rule set before trusting them — a rule added since will move them —
+but a dry run that disagrees by more than the rules changed is a dry run to stop and read.
+
+⚠ THE STAGING BRANCH IS DEAD ON THIS CORPUS AND MUST STAY IN THE CODE. Step 12 staged nothing, so
+"accepted gap-filled assets: rename out of staging" has an empty input and G:\vault\.staging does
+not exist. Keep the branch and its no-replace semantics: population 2 is a property of the rule
+set, and one include rule over a folder outside MediaVault repopulates staging on the next step-12
+run. Do not let a zero count read as dead code.
+
 THE MECHANISM IS PROVEN; THE ORDERING IS THE PART THAT KILLS. From step 1's SPIKE B:
 CreateHardLinkW needs no privilege, creates no reparse point, and cross-volume fails loudly
 with winerror 17 creating nothing. First-name unlink is O(1) in file size. 6,000 full
@@ -2050,7 +2108,16 @@ promotions ran clean. What follows is everything around it.
   sequence, never as a bulk pass over a list. Before ANY unlink, prove the resolved path is
   under the MediaVault objects root or the staging root, and that its sha256 is explicitly
   marked excluded by the saved rule set. Nothing else may ever be unlinked, under any condition,
-  including an empty or malformed rule set.
+  including an empty or malformed rule set. This is 107,658 objects — the majority of the run,
+  not an afterthought to the 38,376 promotions.
+
+- ⚠ THEIR DERIVATIVES ARE NOT UNLINKED AND THAT IS DELIBERATE. Step 5 copied a 384px tile to
+  E:\photolib\thumb for all 146,034 MediaVault assets, and steps 9 and 12 wrote 2,738 substrates
+  to G:\vault\deriv, in both cases regardless of what triage would later say. So after this step
+  ~107,658 thumbnails and some substrates belong to objects that no longer exist. They are small,
+  regenerable and on the NVMe, and nothing reads a tile for a sha256 that is not a photo row.
+  Leave them, report the count, and do not let step 16 read them as a half-promotion. Sweeping
+  them is a separate decision, not part of the step that deletes.
 
 - Vault target names must be collision-free BY CONSTRUCTION, including case-insensitively. Path
   lengths are bounded (real object paths max 148 chars) and 369-char paths work unprefixed on
@@ -2104,11 +2171,36 @@ Read PLAN.md "Phase 5".
 
 Pure database work. Minutes, not hours.
 
+⚠ FIRST, A HOLE NOBODY OWNS — read this before writing any grouping code. NOTHING IN THE BUILD
+ORDER FILTERS `photo` TO WHAT TRIAGE KEPT. `photo` holds 146,034 rows today, one per MediaVault
+asset, kept or excluded. `photolib/capture_time.resolve()` rebuilds it with
+
+    DELETE FROM photo;
+    INSERT INTO photo (rep_sha256, sort_key) SELECT sha256, ... FROM file ORDER BY sha256;
+
+and that SELECT has NO WHERE CLAUSE AT ALL. It produced 146,034 rows only because it last ran
+when `file` held 146,034 rows; `file` now holds 787,798, so re-running it today would put every
+triage-excluded file — every .pyc, every node_modules .js — into the grid as a tile. Step 14 sets
+`file.state` for excluded assets but no step rebuilds `photo` from it.
+
+Decide where that filter lives and implement it as part of this step, because this step is the
+one that rewrites `photo` and it is the last step that does. State which you chose:
+  (a) `capture_time.resolve()` grows a state predicate, so the filter is wherever `photo` is
+      built and cannot be forgotten by a later caller; or
+  (b) this step builds `photo` itself from the kept set and `capture_time` stops writing it.
+Either way, add the test that a file in state 'excluded' or 'pending' never becomes a tile.
+
 - RAW+JPEG pairing on (directory, stem) plus a corroborating EXIF timestamp. The Lumix card is
   P1080096.JPG alongside P1080096.RW2 throughout, so this is near-certain evidence, not
   similarity. Expect roughly 14,000 tiles to collapse. If it finds nothing, something is wrong:
   v1's pairing returned zero groups and that was the symptom of its empty perceptual_hash
   starving a multi-signal test, not the truth about the corpus.
+
+  ⚠ Measured over the actual kept set on 2026-08-04, by union-find over (directory, stem) with no
+  EXIF corroboration: 38,376 kept files, 25,949 (dir, stem) groups holding both a raw and a
+  JPEG, **13,840 tiles collapsed into 24,536 components**. So "roughly 14,000 collapse" was
+  right and the gate below was not. Adding the EXIF timestamp check can only reduce 13,840 —
+  treat it as the ceiling, and if your number lands far under it, say why before shipping.
 
 - Representative selection: highest pixel count, then largest bytes, then has EXIF. Unedited
   beats edited.
@@ -2136,7 +2228,10 @@ Stage by explicit path; never `git add -A` or `git add -u`. No *.sqlite3, *.json
 anything uncommitted on purpose, say which and why.
 ```
 
-**Gate:** ~30,000 tiles. Non-zero RAW/JPEG groups. The incremental-cost test passes.
+**Gate:** ~~~30,000 tiles~~ **~24,500 tiles** (⚠ corrected 2026-08-04 — the old figure predated
+triage and was taken against 146,034 assets rather than the 38,376 the rule set keeps). Non-zero
+RAW/JPEG groups. No tile for any file in state 'excluded' or 'pending'. The incremental-cost test
+passes.
 
 **Close the grid before this runs, and reload it after.** Collapsing ~14,000 tiles rewrites the
 `photo` table, and `photo.id` is regenerable output that re-grouping reassigns —
@@ -2175,14 +2270,24 @@ Verify what step 14 actually did. This step writes nothing except its own report
 3. Assert no file remains under the MediaVault objects root for any sha256 the DB records as
    promoted, and no file remains in staging for any sha256 recorded as published.
 
+   ⚠ CORRECTED 2026-08-04: the staging half is vacuous on this corpus — step 12 staged nothing
+   and G:\vault\.staging does not exist. Assert emptiness positively (the directory is absent, or
+   holds no files, AND zero file rows are in state 'staged') rather than passing on a query that
+   returned nothing. Also expect ~107,658 orphaned 384px tiles under E:\photolib\thumb and some
+   orphaned substrates under G:\vault\deriv, belonging to objects step 14 unlinked as excluded.
+   Those are deliberate — see step 14 — and are NOT half-promotions. Count them, do not fail on
+   them, and do not delete them here.
+
 4. Reconcile the append-only unlink log against the excluded set: every unlink has a
    corresponding excluded sha256, and every excluded sha256 has exactly one unlink. Neither
    direction may have orphans.
 
-Budget: a full re-hash of the 451.2e9 bytes is ~2 h at step 5's measured 62.0 MB/s with one
-reader (it was costed at 4-5 h against the earlier 22-35 MB/s). If that is too long to
-accept, scope check 1 to rows the DB marks in-flight plus a random sample of the rest — and say
-explicitly which you did, because a scoped sweep is a weaker claim than a full one.
+Budget: ⚠ corrected 2026-08-04 — check 1 re-hashes PROMOTED names, which is the triage-kept
+435.6 GB and not MediaVault's whole 451.2 GB, so it is **~1h57m** at step 5's measured 62.0 MB/s
+with one reader. (The "4-5 h" in this step's effort header is older still, costed against
+22-35 MB/s; ~2 h is the current figure.) If that is too long to accept, scope check 1 to rows the
+DB marks in-flight plus a random sample of the rest — and say explicitly which you did, because a
+scoped sweep is a weaker claim than a full one.
 
 Print elapsed and throughput every 60 seconds. Nothing else may touch G: while this runs.
 
