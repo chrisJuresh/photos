@@ -1044,7 +1044,68 @@ Idempotent and restartable at row granularity via `file.state`. One process, one
 No job ledger, no leases, no worker runtime — those exist in v1 to let an HTTP API enqueue
 work, which does not happen here.
 
-**Estimate: under an hour**, dominated by however large the inventory gap turns out to be.
+~~**Estimate: under an hour**, dominated by however large the inventory gap turns out to be.~~
+**Actual: 3m22s**, because the inventory gap turned out to be nothing at all.
+
+> **Done 2026-08-04.** `python -m photolib.phase2b`. Benchmarked on 500 files first, which
+> projected 5m38s against the 3m22s it took.
+>
+> **Population 2 is empty, and that is the measurement this step owed.** Under the 391-rule
+> set all 38,376 surviving files are already MediaVault objects; the 641,764 never-read `file`
+> rows are excluded to the last one. Nothing was staged, nothing was read out of `G:\photos`,
+> and the step that was billed as "the only time originals are read" did not need to read one.
+> It is a property of the rule set and not of the code: change triage, re-run, and the same
+> pass stages whatever newly survives. The 356 v1 hash-error files are inside that excluded
+> set as ordinary members, which is the explicit outcome they were owed.
+>
+> **Population 1: 1,252 of 1,659 decoded** — 1,097 video poster frames, 145 DNG, 10 stills.
+> `file.quality` moves from 103,207 to 104,459. Three decode paths, each recorded per file in
+> `feature_ver` beside the tier: `deriv1536:poster:ffmpeg`, `deriv1536:raw-halfdemosaic`,
+> `deriv1536:decode`.
+>
+> **The RAW rule needed restating, and the restatement is a threshold.** "Extract the embedded
+> preview, never decode sensor data" is a cost argument — ~50 ms against 1–3 s — and neither
+> half of it survives contact with this corpus's DNG. All 146 are Galaxy S8 files whose only
+> embedded preview is a **504×376** bitmap, a third of the substrate in each direction; a
+> half-size demosaic measures **0.102 s** and yields 2016×1512. So the preference is
+> `RAW_PREVIEW_MIN_EDGE`: take the preview when it can make a 1536px substrate, demosaic at
+> half size when it cannot, and record which ran. The 16,239 adopted `.rw2`/`.arw` features are
+> untouched and still say `raw-preview`.
+>
+> **The 407 failures are the corpus, not a missing decoder, and 406 of them are under 50 KB.**
+> The one above it is a `.dng` holding 5.2 MB where its own header declares a 25 MB frame —
+> truncated, reported, not patched. Of the rest, **295 are TypeScript source files named
+> `.mts`**, first bytes `export `, `import ` and `/**`. That is the same v1 extension-table
+> error as the 18,789 `.ts` counted as video, under a second extension nobody checked, and it
+> means the "~1,464 real videos" figure above was ~1,181. The remaining ~110 are empty or
+> truncated stubs: a 0-byte `.png`, a 3-byte `.jpg`, RIFF and EBML headers with nothing behind
+> them. All 407 are excluded by the rule set in any case. A failure is persisted as
+> `quality = {"error": …}` rather than left NULL — NULL is indistinguishable from "not
+> attempted", and these would otherwise be re-read on every future run.
+>
+> **Two bounds fired on real files, and both were right.** 101 4K `.mp4` up to 1.8 GB failed
+> the first full run with "Nothing was written into output file": `thumbnail=100` buffers 100
+> frames, which at 3840×2160 is 1.24 GB and over the worker's 1 GiB job-object cap. The fix is
+> the filter *order*, not a bigger cap — `scale` runs first, so the buffer is N frames at
+> `POSTER_EDGE` whatever the source resolution. Separately, three stitched panoramas of 91,
+> 141 and 147 megapixels were refused by Phase 2a's 32M-pixel cap, which was sized for 1536px
+> derivatives and not for originals; the still path now caps at 160M and decodes through
+> libjpeg's `draft`, which scales in the DCT domain and costs one buffer instead of one per
+> magnitude of oversampling. The memory cap itself never moved.
+>
+> **Video does not obey "more readers is slower".** ffmpeg is reader and decoder both, but a
+> poster frame reads the head of a file and stops — 445 videos decoded 702 MB out of 4.6 GB of
+> container. Measured over one sample: 2 workers 1.65 files/s, 4 → 5.10, 8 → 10.67, 12 →
+> 12.77. Nearly linear, so twelve. This is a statement about poster frames; anything reading
+> whole videos would be back on the bandwidth curve.
+>
+> **One scalar is dead and this step did not introduce it.** `edit_likelihood` is 1.0 for every
+> row in the corpus, Phase 2a's 103,207 included, because MediaVault's `edit_history_json` is
+> the literal string `'[]'` in all 146,034 rows and a non-empty string is truthy. Phase 2b
+> reproduces the behaviour deliberately: a uniformly wrong scalar is fixable in one no-decode
+> sweep, a mixed one is not detectable, and these are relative judgements that only mean
+> anything when every value in a comparison came from one implementation. `composite_quality`
+> does not read it, so no ranking is currently affected. Fixing it is its own task.
 
 ### Gate: `G:\photos` becomes deletable
 
@@ -1371,6 +1432,7 @@ sub-GB catalog on NVMe.
 | 5 | **EXIF camera presence** | Not a filter (messaging apps strip EXIF) but the right way to *sort* the remainder: review the no-camera pile folder by folder |
 | 6 | **Source folder** — the 8 trees, then second level | Accept `lumix\DCIM` and `usb f\DCIM` (189 GB, pure camera) wholesale; scrutinise the backup trees |
 | 7 | **Everything still undecided** — plain contact sheet | Nothing reaches the vault without having been seen at thumbnail scale at least once |
+| 8 | **Directory tree** — what is left of the folder structure, one node at a time | Added 2026-08-04, after 0–7 had collapsed the corpus to 96,097 paths. Once the categorical wins are gone the remainder is a folder structure, and the decisions left are about places. One-click `dir_under` exclude per folder; a folder is listed only while it still holds something |
 
 Each screen: the rule, live counts of what it would exclude and keep (files + GB), a
 virtualised contact sheet of **every** match, per-file override toggles. Nothing applies
@@ -1457,6 +1519,32 @@ The probe stays a **report**, not a run: `GET /api/triage/probe` counts its work
 names the command. Running it from a handler would write `file.width` into the *catalog* from a
 request — dissolving the guarantee that the triage writer's connection cannot see the catalog at
 all — and would put unscheduled reads on the contended USB HDD, to store zero rows.
+
+**Screen 8, the directory tree, was added 2026-08-04**, after screens 0–7 had been used in anger
+and the working set had collapsed to 96,097 paths under 391 rules. It is what the review order
+leaves you needing once the categorical wins are gone: the remainder is a folder structure, and
+the decisions left are about places rather than about extensions or dimensions. Each node is one
+`GET /api/triage/tree?path=…` returning the children that still hold something, with their subtree
+paths and bytes; clicking a folder pages its contact sheet through the ordinary `dir_under`
+candidate, and a per-row ✕ saves that same rule at the end of the order with no candidate step. A
+folder appears only while it is still kept, so the tree shrinks as you work and never shows a zero.
+
+Two things measuring it changed:
+
+- **The screens are no longer in the 220 ms band, and it is the rule set, not the tree.** At 372
+  saved rules `counts` measures 2.3 s and screen 2's aggregate 2.8 s, against the 216–297 ms this
+  section recorded against nine. The cause is `_dir_cte`: 187 `dir_segment` rules cover **312,891
+  of the 315,680 directories**, so building that relation costs ~997 ms whatever is asked of it.
+  Nothing here fixes that — it is noted because the next person to measure a screen will otherwise
+  think they broke it.
+- **A tree cannot pay that per expansion, so `_dir_cte` learned to be bounded.** Restricting it to
+  the node's own subtree is an exact equivalence, not a shortcut: the relation is only ever reached
+  by a LEFT JOIN on `dir_id`, so a row for a directory outside the subtree could not have changed
+  an answer. Bounded, an ordinary node is **23–54 ms** instead of 1,358 ms. But the bound is linear
+  in the subtree while the unbounded relation is flat, and they cross at ~5,000 directories — so
+  `tree` spends one indexed count (0–131 ms) choosing between them. The root and the two arch
+  backups stay at 1.7–3.3 s, correctly: there the subtree is most of the corpus and there is
+  nothing to bound.
 
 ## Grid
 
@@ -1642,7 +1730,7 @@ later.**
 | ~~7~~ | ~~Phase 1 prefilter~~ | **Done 2026-08-02 in 2.7s.** Nine `exclude` rules at `seq` 0–8 in `state.sqlite3`, nothing written to the catalog. **101,986 files / 4.77 GB excluded, 685,812 / 544.14 GB surviving** — not the ≈41,700 / 0.5 GB this document predicted, which was the adopted subset. `.png`, `.gif`, `.webp`, `.bmp` matched by no rule |
 | ~~8~~ | ~~Phase 2a verification read + ARW repair~~ | **Done 2026-08-03.** |
 | 9 | Triage UI | **Built 2026-08-03** — engine, survey, eight screens, probe and write API, all verified against the real catalog. See "Triage". **The remaining work is not code: it is looking at the corpus and saving rules.** Nothing downstream can start until that lands a kept set — step 10 gap-fills only what triage keeps, and step 12 unlinks only what it excludes |
-| 10 | Phase 2b gap fill | Benchmark on 500 files first |
+| ~~10~~ | ~~Phase 2b gap fill~~ | **Done 2026-08-04 in 3m22s.** 1,252 of 1,659 decoded. **Population 2 is empty** — at the 391-rule set every surviving file is already a MediaVault object. Benchmarked on 500 first, which projected 5m38s |
 | 11 | **`origins.jsonl` export + server upload** | **Moved ahead of Phase 4. `G:\photos` deletable; Phase 4 unblocked** |
 | 12 | Phase 4 promote + Phase 5 group | Gated on step 11 completing and verifying |
 | 13 | Post-Phase-4 re-hash sweep | Phase 4 is not complete without it |

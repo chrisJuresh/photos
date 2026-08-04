@@ -45,8 +45,10 @@ Match written deliverables to the task. A bug fix does not need a summary docume
 
 ## Verifying work
 
-The root build is a plain Python package, no venv and no dependencies beyond `pytest`. From
-the repository root:
+The root build is a plain Python package with no venv. Its dependencies are `pytest`, `pillow`
+and `numpy`, plus `rawpy` for Phase 2b's DNG path; `ffmpeg` and `exiftool` are external
+binaries reached through PATH, and only Phase 2b needs them. Tests that need a binary skip when
+it is absent rather than failing. From the repository root:
 
 ```bash
 python -m pytest tests -q
@@ -141,6 +143,24 @@ reports the worklist and stops; `--ext` overrides the format list.
 python -m photolib.probe --dry-run
 ```
 
+Phase 2b's gap fill: the step billed as the only one that reads the photos root, which on this
+corpus reads none of it. ~3m20s. Two populations. **1** — the 1,659 MediaVault assets v1 could
+not preprocess, read from the object and decoded three ways: an ffmpeg poster frame for video
+(`scale` before `thumbnail`, or a 4K frame buffer breaks the worker's memory cap), libraw for
+DNG (embedded preview when it can make a 1536px substrate, half-size demosaic when it cannot —
+this corpus's previews are 504×376, so it always demosaics), a normal decode for stills. **2** —
+whatever survives triage with no MediaVault asset, copied into `G:\vault\.staging` and hash-
+verified first; that set is currently **empty** and the pass says so rather than skipping
+silently. One decode per file produces the 1536px substrate on `deriv_root`, the 384px tile on
+`thumb_root`, ThumbHash, pHash, dHash and the 18 quality scalars. Idempotent on
+`file.quality IS NULL`; failures persist as `{"error": …}` so 407 broken stubs are not re-read
+for ever, and `--retry-errors` clears them. Needs `ffmpeg` and `exiftool` on PATH and `rawpy`
+installed. `bench` projects the wall time without writing anything.
+
+```bash
+python -m photolib.phase2b bench --n 500
+```
+
 To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
 regenerated — onto `C:`, a different physical disk from `E:`. Instant, ~20 KB before triage. Uses
 `VACUUM INTO`, so it is safe against a live WAL, and it refuses to write onto the source's own
@@ -191,9 +211,15 @@ audited against future import on 2026-08-02 and needs no change, chiefly because
 **no schema migration** and the walk/hash helpers are already root-parameterised. Do not invent a
 procedure in passing, and do not treat the gap as a reason to redesign anything.
 
-The grid and the eight triage screens are one client, two modes, served by one process on
+The grid and the nine triage screens are one client, two modes, served by one process on
 `127.0.0.1:8770`. Read-only except `/api/triage/*`, whose write handlers hold a connection to
 `state.sqlite3` with no `ATTACH` of the catalog.
+
+Screen 8 is the directory tree: what is left of the folder structure, one node per request, with a
+one-click `dir_under` exclude per folder. A folder is listed only while the rules still keep
+something inside it, so excluding one removes it from the tree. An ordinary node costs 23–54 ms,
+but the root and the two arch backups are 1.7–3.3 s, because between them they hold most of the
+315,680 directories — the same band every other screen sits in at a 372-rule set.
 
 ```bash
 python -m photolib.grid --open
