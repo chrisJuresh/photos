@@ -371,6 +371,13 @@ export function createSheet(canvas, sentinel, options) {
       stretch();
       onState({ total });
     },
+    // Re-bind every mounted tile. For a change to state the tiles *display* but
+    // do not own — the saved rule set — which `fill` would otherwise not be
+    // asked about again until each tile happened to be recycled back into view.
+    refill() {
+      if (!options.fill) return;
+      for (const [index, el] of mounted) options.fill(el, items[index]);
+    },
     // Re-bind one already-mounted item, for an override toggle that changed it.
     refresh(item) {
       for (const [index, el] of mounted) {

@@ -381,6 +381,81 @@ def test_source_folder_drills_into_the_second_level(survey):
     assert rows == {"rcr": 4, "photos": 2}
 
 
+# --- the directory tree -------------------------------------------------------------
+
+
+def children(node) -> dict[str, int]:
+    return {child["name"]: child["paths"] for child in node["children"]}
+
+
+def test_the_tree_rolls_a_subtree_up_onto_each_child(survey):
+    """A child's number is everything below it, not what sits directly in it."""
+    root = triage_screens.tree(survey, [], r"G:\photos")
+    assert children(root) == {"backup": 6, "lumix": 2}
+    assert root["path"] == r"g:\photos"
+    # Nothing sits directly in the root, and both children have more below them.
+    assert root["here"] == {"paths": 0, "bytes": 0}
+    assert all(child["deeper"] for child in root["children"])
+
+
+def test_the_tree_hands_back_a_path_that_is_already_a_predicate_value(survey):
+    """The exclude button sends the row's own `path` straight back as a rule."""
+    node = triage_screens.tree(survey, [], r"G:\photos\backup")
+    rcr = next(child for child in node["children"] if child["name"] == "rcr")
+    kept = triage.counts(survey, [rule("dir_under", "=", rcr["path"])])
+    # The rule takes exactly what the row said it would.
+    assert kept["excluded_paths"] == rcr["paths"] == 4
+
+
+def test_the_tree_only_shows_what_the_rules_still_keep(survey):
+    """The screen's premise: excluding a folder removes it from the tree."""
+    rules = [rule("dir_under", "=", r"G:\photos\backup\rcr")]
+    root = triage_screens.tree(survey, rules, r"G:\photos")
+    assert children(root) == {"backup": 2, "lumix": 2}
+    # `rcr` is gone from `backup` entirely rather than showing as a zero.
+    assert children(triage_screens.tree(survey, rules, r"G:\photos\backup")) == {"photos": 2}
+
+
+def test_the_tree_separates_files_here_from_files_below(survey):
+    """A leaf reports its own files as `here` and offers no children."""
+    leaf = triage_screens.tree(survey, [], r"G:\photos\lumix\DCIM\100_PANA")
+    assert leaf["here"] == {"paths": 2, "bytes": 25_000_000}
+    assert leaf["children"] == []
+    # And a container reports the opposite: children, nothing of its own.
+    mid = triage_screens.tree(survey, [], r"G:\photos\lumix\DCIM")
+    assert mid["here"]["paths"] == 0 and children(mid) == {"100_pana": 2}
+
+
+def test_the_tree_marks_a_child_that_has_nothing_below_it(survey):
+    """`deeper` is what decides whether a row gets an expander."""
+    node = triage_screens.tree(survey, [], r"G:\photos\backup\rcr\node_modules")
+    assert {child["name"]: child["deeper"] for child in node["children"]} == {
+        "keep": False,
+        "x": False,
+        "y": False,
+    }
+
+
+def test_a_directory_the_corpus_never_held_is_empty_and_not_an_error(survey):
+    node = triage_screens.tree(survey, [], r"G:\photos\nope\deeper")
+    assert node["children"] == [] and node["here"]["paths"] == 0
+
+
+def test_bounding_the_verdict_to_the_node_changes_no_answer(survey, monkeypatch):
+    """The restricted and unrestricted plans are the same query, not two answers.
+
+    `RESTRICT_MAX_DIRS` picks between them on cost alone, so if the two ever
+    disagreed the tree would silently report a different set of files depending
+    on how big the subtree happened to be.
+    """
+    rules = [rule("dir_segment", "=", "node_modules"), rule("ext", "=", ".svg")]
+    for path in (r"G:\photos", r"G:\photos\backup", r"G:\photos\backup\rcr"):
+        monkeypatch.setattr(triage_screens, "RESTRICT_MAX_DIRS", 10**9)  # always bound
+        bounded = triage_screens.tree(survey, rules, path)
+        monkeypatch.setattr(triage_screens, "RESTRICT_MAX_DIRS", 0)  # never bound
+        assert bounded == triage_screens.tree(survey, rules, path)
+
+
 # --- paging -------------------------------------------------------------------------
 
 

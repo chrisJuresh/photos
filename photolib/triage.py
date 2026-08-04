@@ -121,6 +121,31 @@ class Rule:
 # --- predicates ---------------------------------------------------------------
 
 
+def dir_stem(value: str) -> str:
+    """The form a directory is compared in: lowercased, no trailing separator.
+
+    Shared rather than inlined into `dir_under`, because the directory tree
+    browses the same subtrees this predicate excludes. If the two normalised
+    differently, the tree could show you one set of files and the exclude button
+    under it take another.
+    """
+    stem = value.rstrip("\\/").lower()
+    if not stem:
+        raise PredicateError(f"a directory is needed, got {value!r}")
+    return stem
+
+
+def subtree_range(stem: str) -> tuple[str, str, str]:
+    """`(stem, low, high)`: the directory itself, then everything below it.
+
+    '\\' is 0x5C and ']' is 0x5D, so [stem+'\\', stem+']') is exactly the set of
+    directories strictly below `stem` under SQLite's BINARY collation. The
+    directory itself is not in that range, which is why it is a separate
+    equality and why this returns three values rather than two.
+    """
+    return stem, stem + "\\", stem + "]"
+
+
 def predicate(column: str, op: str, value) -> str:
     """One predicate as it is stored. Refuses to build what cannot be compiled."""
     text = json.dumps({"column": column, "op": op, "value": value})
@@ -182,18 +207,12 @@ def compile_predicate(text: str) -> Compiled:
             raise PredicateError("dir_segment is one directory name, not a path")
         return Compiled("dir", "SELECT dir_id FROM triage_dir_segment WHERE seg = ?", [value.lower()])
     if column == "dir_under":
-        # A subtree, as a range scan over `path_key`. '\\' is 0x5C and ']' is
-        # 0x5D, so [prefix+'\\', prefix+']') is exactly the set of directories
-        # strictly below `prefix` under SQLite's BINARY collation. The directory
-        # itself is the separate equality.
-        stem = value.rstrip("\\/").lower()
-        if not stem:
-            raise PredicateError("dir_under needs a directory")
+        stem = dir_stem(value)
         return Compiled(
             "dir",
             "SELECT id AS dir_id FROM triage_dir WHERE path_key = ? "
             "OR (path_key >= ? AND path_key < ?)",
-            [stem, stem + "\\", stem + "]"],
+            list(subtree_range(stem)),
         )
 
     if column == "dims":
@@ -302,19 +321,31 @@ class DirRelation:
         return f"LEFT JOIN {self.alias} ON {self.alias}.dir_id = k.dir_id"
 
 
-def _dir_cte(rules: list[Rule], alias: str) -> DirRelation:
+def _dir_cte(rules: list[Rule], alias: str, restrict: str | None = None) -> DirRelation:
     """`alias`(dir_id, pos): the lowest-positioned directory rule per directory.
 
     Each branch is an index seek, so this costs what the rules actually match
     rather than what the vocabulary holds -- 3.6 ms for twelve segment rules
     against 548 ms for the same twelve as LIKE patterns.
+
+    `restrict` is the name of a relation with a `dir_id` column, and it bounds
+    every branch to that set. It is an exact equivalence rather than a shortcut:
+    this relation is only ever reached by a LEFT JOIN on `dir_id`, so a row for a
+    directory the caller cannot join to could not have changed an answer. It
+    exists because "what the rules actually match" stopped being small -- the
+    live rule set's 187 segment rules cover 312,891 of the 315,680 directories,
+    so building the whole relation costs ~997 ms whatever is asked of it, and the
+    directory tree asks about one subtree at a time. Restricted to a subtree the
+    same relation costs 13 ms. Never client input: callers pass a CTE name they
+    wrote themselves.
     """
+    where = f" WHERE dir_id IN (SELECT dir_id FROM {restrict})" if restrict else ""
     branches, params = [], []
     for rule in rules:
         compiled = compile_predicate(rule.predicate)
         if compiled.kind != "dir":
             continue
-        branches.append(f"SELECT dir_id, {rule.position} AS pos FROM ({compiled.sql})")
+        branches.append(f"SELECT dir_id, {rule.position} AS pos FROM ({compiled.sql}){where}")
         params.extend(compiled.params)
     if not branches:
         return DirRelation(None, [], alias)
@@ -624,13 +655,17 @@ class Verdict:
         return ("WITH " + ",\n ".join(parts) + "\n" if parts else "") + tail
 
 
-def verdict_expression(rules: list[Rule], alias: str = "k") -> Verdict:
+def verdict_expression(rules: list[Rule], alias: str = "k", restrict: str | None = None) -> Verdict:
     """The same verdict the counts use, for a query over individual rows.
 
     Generated in one place so a contact sheet can never disagree with the
     number printed above it. The caller joins `triage_bucket AS <alias>`.
+
+    `restrict` names a relation of `dir_id` the caller has already bounded its
+    own scan to; see `_dir_cte` for why that is free of consequence and what it
+    is worth.
     """
-    dirs = _dir_cte(rules, "dv")
+    dirs = _dir_cte(rules, "dv", restrict)
     kept, case_params = _kept_expression(dirs, rules, alias)
     join = dirs.join.replace("k.dir_id", f"{alias}.dir_id")
     ctes = [dirs.cte] if dirs.cte else []

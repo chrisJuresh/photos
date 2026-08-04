@@ -1,4 +1,5 @@
-"""The survey queries behind `PLAN.md`'s eight triage screens.
+"""The survey queries behind `PLAN.md`'s eight triage screens, and the directory
+tree added alongside them.
 
 Each screen answers the same two questions in the same two shapes:
 
@@ -62,14 +63,20 @@ TOP_N = 200
 SEGMENT_POOL = 1000
 
 
-def _kept_bucket_cte(rules: list[triage.Rule]) -> tuple[triage.Verdict, str]:
+def _kept_bucket_cte(
+    rules: list[triage.Rule], restrict: str | None = None
+) -> tuple[triage.Verdict, str]:
     """`kept_bucket(id, dir_id, ...)`: the buckets the current rules still keep.
 
     Every screen aggregates over this rather than over `triage_bucket`, so the
     numbers on screen N are always "of what is left", which is what makes the
     review order collapse the working set.
+
+    `restrict` is passed straight to `triage.verdict_expression`: a caller that
+    has already bounded itself to a set of directories says so, and the verdict's
+    directory relation is built for those alone.
     """
-    verdict = triage.verdict_expression(rules)
+    verdict = triage.verdict_expression(rules, restrict=restrict)
     cte = f"""kept_bucket AS (
       SELECT k.id, k.dir_id, k.root_id, k.ext_id, k.kind, k.width, k.height,
              k.long_edge, k.camera, k.paths, k.bytes
@@ -218,6 +225,123 @@ def second_level(conn: sqlite3.Connection, rules: list[triage.Rule], root: str) 
         {"key": key, "detail": detail, "paths": paths, "bytes": size, "scope": "still kept"}
         for key, detail, paths, size in rows
     ]
+
+
+# --- the directory tree ------------------------------------------------------------
+
+# One node's children. `rest` is the part of a directory below the node, so ''
+# is the node itself -- the files sitting directly in it -- and everything else
+# groups under its first component.
+#
+# `deeper` is `max(rest holds a separator)`: whether this child has directories
+# of its own that still hold something. It is what decides whether a row gets an
+# expander, and it is computed here because the alternative is a request per row
+# that mostly answers "nothing".
+#
+# The join is to `kept_bucket`, so a subtree the rules have already taken has no
+# rows and does not appear. That is the screen's whole premise: what is left.
+_TREE_TAIL = r"""
+SELECT CASE WHEN instr(n.rest, '\') = 0 THEN n.rest
+            ELSE substr(n.rest, 1, instr(n.rest, '\') - 1) END AS name,
+       max(instr(n.rest, '\') > 0), sum(k.paths), sum(k.bytes)
+FROM node n JOIN kept_bucket k ON k.dir_id = n.dir_id
+GROUP BY 1 ORDER BY name = '' DESC, 3 DESC LIMIT ?
+"""
+
+# Both halves of the node's own subtree, and the offset that turns a directory
+# into its path below the node. `path_key` is lowercased, so the names this
+# yields are lowercased too -- which is the same text a `dir_under` rule stores,
+# so the path a row hands back is usable as a predicate value unchanged.
+#
+# MATERIALIZED because in the restricted plan this relation is read once per
+# directory rule -- 187 of them in the live rule set -- and re-running the range
+# scan that many times is the one thing that would give the restriction back.
+_NODE_CTE = """node(dir_id, rest) AS MATERIALIZED (
+   SELECT id, substr(path_key, ?) FROM triage_dir
+   WHERE path_key = ? OR (path_key >= ? AND path_key < ?)
+ )"""
+
+_NODE_DIRS = (
+    "SELECT count(*) FROM triage_dir WHERE path_key = ? OR (path_key >= ? AND path_key < ?)"
+)
+
+# Above this many directories in the subtree, bounding the verdict's directory
+# relation to the node costs more than building it whole. Measured on the live
+# 372-rule set, restricted against unrestricted, for the same node:
+#
+#        53 dirs      22 ms      1,080 ms
+#       507 dirs      67 ms        906 ms
+#     2,005 dirs     308 ms      1,253 ms
+#     4,038 dirs     783 ms      1,185 ms   <- still ahead
+#     6,204 dirs   1,315 ms      1,183 ms   <- behind
+#    58,443 dirs  13,596 ms      1,427 ms
+#
+# The unrestricted side is flat because it is the whole vocabulary every time;
+# the restricted side is linear in the subtree. They cross at ~5,000. Deciding
+# between them costs one indexed count: 0 ms at a leaf, 131 ms at the root.
+RESTRICT_MAX_DIRS = 5000
+
+
+def tree(conn: sqlite3.Connection, rules: list[triage.Rule], path: str) -> dict:
+    """One directory node's still-kept children, for the tree screen.
+
+    Lazy by node rather than a whole tree in one response: there are 315,680
+    directories, and the client only ever looks at the handful it has opened.
+
+    Cost tracks the subtree rather than the corpus -- `node` is a range scan of
+    the `path_key` index and reaches `triage_bucket` through `triage_bucket_dir`
+    -- with the root as the honest worst case, where the subtree *is* the corpus.
+
+    Ordinary nodes are fast only because the verdict's directory relation is
+    bounded to `node` too. Without that every node paid the ~1 s of building it
+    over the whole vocabulary, and a directory holding 72 paths measured 1,358 ms
+    -- expanding five rows cost seven seconds. With it, and only below
+    `RESTRICT_MAX_DIRS`, measured over the live 372-rule set: **23-54 ms** for an
+    ordinary node, whatever its depth or path count.
+
+    What stays slow is the handful of nodes that hold most of the 315,680
+    directories -- the root at ~3.3 s, `home-chris arch backup` at ~2.8 s, `10tb
+    arch backup` at ~1.7 s -- and there is nothing to bound there, because the
+    subtree really is most of the corpus. That band is the same one every other
+    screen sits in at this rule set (`counts` 2.3 s, screen 2's aggregate 2.8 s),
+    so it is the engine's cost and not the tree's. The root is also the one node
+    the client loads without being asked, so it is paid once per visit.
+    """
+    stem = triage.dir_stem(path)
+    subtree = triage.subtree_range(stem)
+    # One indexed count, then the cheaper of the two plans. See RESTRICT_MAX_DIRS.
+    node_dirs = conn.execute(_NODE_DIRS, subtree).fetchone()[0]
+    restrict = "node" if node_dirs < RESTRICT_MAX_DIRS else None
+    verdict, kept = _kept_bucket_cte(rules, restrict)
+    sql = verdict.query(kept, _NODE_CTE, tail=_TREE_TAIL)
+    # `node` is written last, so its parameters bind after both of the verdict's
+    # groups; see `Verdict.params` for when that ordering is not free.
+    #
+    # TOP_N + 2 rows, because the node's own '' group is sorted to the front and
+    # so occupies one of them: that leaves TOP_N + 1 children, which is what
+    # makes "there were more" an observation rather than an inference from a
+    # full page.
+    rows = conn.execute(sql, [*verdict.params, len(stem) + 2, *subtree, TOP_N + 2]).fetchall()
+
+    here = {"paths": 0, "bytes": 0}
+    children = []
+    for name, deeper, paths, size in rows:
+        if name == "":
+            here = {"paths": paths, "bytes": size}
+            continue
+        children.append(
+            {
+                "name": name,
+                "path": f"{stem}\\{name}",
+                "paths": paths,
+                "bytes": size,
+                "deeper": bool(deeper),
+            }
+        )
+    # A node with more children than the client will read still reports how many
+    # it got, rather than presenting a truncated list as the whole of it.
+    truncated = len(children) > TOP_N
+    return {"path": stem, "here": here, "children": children[:TOP_N], "truncated": truncated}
 
 
 # --- the contact sheet ------------------------------------------------------------

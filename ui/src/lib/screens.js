@@ -124,10 +124,96 @@ export const SCREENS = [
     heading: [],
     toRule: () => null,
   },
+  {
+    id: 8,
+    name: "directory_tree",
+    title: "Directory tree",
+    blurb:
+      "What is left of the folder structure, expanded one level at a time. A " +
+      "folder only appears while it still holds something, so excluding one " +
+      "removes it from the tree — which is what makes this readable as a " +
+      "shrinking list of places still to decide. Biggest first, not alphabetical.",
+    // The tree is this screen's picker, so there is no aggregate table and the
+    // contact sheet waits for a folder to be clicked rather than paging the
+    // whole remainder the way screen 7 does.
+    table: false,
+    tree: true,
+    heading: [],
+    // Whatever the tree hands back is already the lowercased form a `dir_under`
+    // rule stores, so the row's own path is the value unchanged.
+    toRule: (row) => ({ column: "dir_under", op: "=", value: row.key }),
+  },
 ];
+
+/**
+ * The directory one path sits in, or '' if excluding it would be too much.
+ *
+ * Too much is anything not strictly below `PHOTOS_ROOT`: a tile sitting directly
+ * in `G:\photos` would otherwise offer "exclude the entire library" as a
+ * one-click button on a photograph, which is not a thing a corner chip should be
+ * able to do. Both separators are looked for because a path is only guaranteed
+ * to be what the walk recorded.
+ */
+export function folderOf(path) {
+  const at = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  if (at <= 0) return "";
+  const dir = path.slice(0, at);
+  const root = PHOTOS_ROOT.toLowerCase();
+  return dir.toLowerCase().startsWith(root + "\\") ? dir : "";
+}
+
+/**
+ * Is `dir` one of `dirs`, or below one of them?
+ *
+ * `dirs` are already lowercased and stripped of a trailing separator; `dir` is
+ * lowercased here. This *is* coverage rather than the exact identity
+ * `decisionOf` settles for, and affordably so: a `dir_under` rule is a subtree
+ * by definition, and there are a handful of them against one string compare
+ * each.
+ */
+export function isUnder(dirs, dir) {
+  const key = dir.toLowerCase();
+  return dirs.some((d) => key === d || key.startsWith(d + "\\"));
+}
 
 export function describe(rule) {
   if (!rule) return "everything still kept";
   if (rule.op === "is null") return `${rule.column} is null`;
   return `${rule.column} ${rule.op} ${JSON.stringify(rule.value)}`;
+}
+
+// Values compare case-insensitively because the engine lowercases them before
+// it compares: `ext = '.PNG'` and `ext = '.png'` are one rule, not two. `is
+// null` carries null on both sides, which is screen 3's `unknown` band.
+function sameValue(a, b) {
+  if (typeof a === "string" && typeof b === "string") return a.toLowerCase() === b.toLowerCase();
+  return a === b;
+}
+
+/**
+ * The saved rule set's decision on one item, or null if no rule names it.
+ *
+ * Screen 1's leaderboard is the survey-time rollup over the whole inventory, so
+ * a segment you excluded five minutes ago is still on it with its original
+ * numbers — without this there is nothing on the row to say you already decided
+ * it. The other screens list only what is still kept, so what shows there is
+ * mostly `include` and the absence of a mark.
+ *
+ * This is exact predicate identity and deliberately not coverage: a row whose
+ * whole tree some *other* rule already took is not marked, because answering
+ * that is screen 1's 1.9-3.2 s live re-cost and this is meant to cost nothing.
+ *
+ * @param {Array<{term?: Rule, decision: string}>} rules
+ * @param {Rule | null} term
+ */
+export function decisionOf(rules, term) {
+  if (!term) return null;
+  const found = rules.find(
+    (rule) =>
+      rule.term &&
+      rule.term.column === term.column &&
+      rule.term.op === term.op &&
+      sameValue(rule.term.value, term.value),
+  );
+  return found ? found.decision : null;
 }

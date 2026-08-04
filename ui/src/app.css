@@ -188,6 +188,27 @@ select {
   border-color: var(--drop);
 }
 
+/* The folder chip, opposite corner from the override chip: one decides this file
+   and the other decides the directory it is in, and they must not be reachable
+   by the same mis-click. Red means the saved rules already exclude that folder,
+   which is also when it is disabled. */
+.dirchip {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--dim);
+}
+
+.dirchip[data-state="exclude"] {
+  background: var(--drop);
+  color: #fff;
+  border-color: var(--drop);
+}
+
 /* ------------------------------------------------------------------ chrome */
 
 h1 {

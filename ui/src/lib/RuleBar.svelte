@@ -113,8 +113,14 @@
     </div>
     <div class="echo muted">{describe(candidate)} &rarr; {candidate.decision ?? "exclude"}</div>
   {:else}
+    <!-- "or scroll" belongs only to the screen that has no picker at all. Screen
+         8 has no table either, but it has the tree, so its sheet waits to be
+         given a folder rather than already showing the remainder. -->
     <div class="none muted">
-      Pick a row to build a rule{screen.table === false ? ", or scroll — this is the remainder" : ""}.
+      Pick a {screen.tree ? "folder" : "row"} to build a rule{screen.table === false &&
+      !screen.tree
+        ? ", or scroll — this is the remainder"
+        : ""}.
     </div>
   {/if}
 </div>

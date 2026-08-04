@@ -64,6 +64,12 @@ export const api = {
 
   screen: (name, params = {}) => get("/api/triage/screen", { name, ...params }),
 
+  // One directory node's still-kept children. Lazy per node because there are
+  // 315,680 directories and the tree only ever shows the opened ones: 23-54 ms
+  // for an ordinary node, and 1.7-3.3 s for the root and the two arch backups,
+  // which hold most of those directories between them.
+  tree: (path) => get("/api/triage/tree", { path }),
+
   page: (rule, cursor, limit = 500) =>
     get("/api/triage/page", { ...candidateParams(rule), limit, ...(cursor || {}) }),
 

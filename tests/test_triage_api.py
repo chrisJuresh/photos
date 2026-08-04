@@ -16,6 +16,7 @@ import os
 import sqlite3
 import threading
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 import synthetic
@@ -64,9 +65,10 @@ def post(server, path: str, payload: dict, *, origin: str | None = None, **kwarg
     return status, json.loads(body) if body else None
 
 
-def get(server, path: str):
+def get(server, path: str, params: dict[str, str] | None = None):
     port = server.server_address[1]
-    status, _, body = http_request(port, "GET", path)
+    query = f"?{urlencode(params)}" if params else ""
+    status, _, body = http_request(port, "GET", path + query)
     return status, json.loads(body) if body else None
 
 
@@ -85,6 +87,14 @@ def test_a_rule_is_added_deleted_and_the_counts_follow(server):
     assert status == 200 and counts["excluded_paths"] == 3
     assert counts["rules"][0]["predicate"] == "dir_segment = 'node_modules'"
     assert counts["rules"][0]["paths"] == 3
+    # The structured form travels alongside the human one so a screen can mark
+    # the row whose item this rule already decided. `predicate` is Python's
+    # `repr` and is not something the client should be parsing.
+    assert counts["rules"][0]["term"] == {
+        "column": "dir_segment",
+        "op": "=",
+        "value": "node_modules",
+    }
 
     assert post(server, "/api/triage/rules/delete", {"id": added["id"]})[0] == 200
     assert get(server, "/api/triage/counts")[1]["excluded_paths"] == 0
@@ -135,6 +145,21 @@ def test_an_override_is_keyed_on_content_and_beats_the_rules(server):
 def test_a_bad_rule_is_refused_by_field_name(server, payload, field):
     status, body = post(server, "/api/triage/rules/add", payload)
     assert status == 400 and body == {"error": field}
+
+
+def test_the_tree_endpoint_serves_one_node_at_a_time(server):
+    status, body = get(server, "/api/triage/tree", {"path": r"G:\photos"})
+    assert status == 200
+    assert {child["name"]: child["paths"] for child in body["children"]} == {"backup": 6, "lumix": 2}
+    # And the path it hands back is what the next request asks for.
+    child = body["children"][0]
+    assert get(server, "/api/triage/tree", {"path": child["path"]})[1]["path"] == child["path"]
+
+
+@pytest.mark.parametrize("params", [{}, {"path": ""}, {"path": "\\"}])
+def test_a_tree_request_without_a_usable_path_is_refused_by_field_name(server, params):
+    status, body = get(server, "/api/triage/tree", params)
+    assert status == 400 and body == {"error": "path"}
 
 
 def test_a_refusal_never_echoes_the_value(server):
@@ -392,7 +417,13 @@ def test_no_triage_code_path_opens_a_file_under_the_photos_root_for_writing(tmp_
         triage_api.move_rule(writer, {"id": rule["id"], "at": 0})
         triage_api.set_override(writer, {"sha256": "a" * 64, "decision": "include"})
         for path, handler in triage_api.READ_ROUTES.items():
-            params = {"name": ["file_type"]} if path.endswith("screen") else {}
+            params: dict[str, list[str]] = {}
+            if path.endswith("screen"):
+                params = {"name": ["file_type"]}
+            elif path.endswith("tree"):
+                # The real temporary root, so a handler that turned this value
+                # into a path and opened it would be caught rather than missed.
+                params = {"path": [str(photos_root)]}
             handler(reader, params)
         triage_api.set_override(writer, {"sha256": "a" * 64, "decision": "clear"})
         triage_api.delete_rule(writer, {"id": rule["id"]})

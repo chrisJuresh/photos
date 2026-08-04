@@ -22,6 +22,7 @@ its value, which is the same rule `/api/reveal` follows.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from datetime import UTC, datetime
@@ -321,6 +322,12 @@ def read_counts(conn: sqlite3.Connection, params: dict) -> tuple[int, dict]:
             "id": rule.rule_id,
             "position": rule.position,
             "predicate": triage.describe(rule.predicate),
+            # The same predicate structurally, so the client can tell whether a
+            # row on a screen is an item some rule already names and mark it.
+            # `predicate` is for eyes -- it is Python's `repr` of the value, and
+            # reproducing that in JS to compare against is not a contract worth
+            # having.
+            "term": json.loads(rule.predicate),
             "decision": rule.decision,
             "note": rule.note,
             **summary["per_rule"][rule.position],
@@ -354,6 +361,23 @@ def read_screen(conn: sqlite3.Connection, params: dict) -> tuple[int, dict]:
     return 200, {"name": name, "rows": triage_screens.aggregate(conn, name, rules, live=live)}
 
 
+def read_tree(conn: sqlite3.Connection, params: dict) -> tuple[int, dict]:
+    """`GET /api/triage/tree?path=...` -- one directory node's kept children.
+
+    The path is a value, never a path this process opens: it is lowercased and
+    compared against `triage_dir.path_key` as bound parameters. A path the corpus
+    has never held matches no directory and comes back empty, which is the right
+    answer rather than an error.
+    """
+    path = _one(params, "path")
+    if path is None or len(path) > triage.MAX_VALUE_CHARS:
+        raise Refused("path")
+    try:
+        return 200, triage_screens.tree(conn, triage.load_rules(conn), path)
+    except triage.PredicateError:
+        raise Refused("path") from None
+
+
 def read_page(conn: sqlite3.Connection, params: dict) -> tuple[int, dict]:
     """`GET /api/triage/page` -- a keyset page, same contract as `/api/photos`."""
     rules = triage.load_rules(conn)
@@ -381,6 +405,7 @@ READ_ROUTES = {
     "/api/triage/counts": read_counts,
     "/api/triage/files": read_files,
     "/api/triage/screen": read_screen,
+    "/api/triage/tree": read_tree,
     "/api/triage/page": read_page,
     "/api/triage/probe": read_probe,
 }

@@ -6,15 +6,20 @@
   import { onMount } from "svelte";
   import { createSheet } from "./sheet.js";
   import { thumbHashToDataURL } from "./thumbhash.js";
-  import { PHOTOS_ROOT } from "./screens.js";
+  import { PHOTOS_ROOT, folderOf, isUnder } from "./screens.js";
 
   let {
     key = "",
     fetchPage,
     total = null,
     triage = false,
+    // The saved rule set's `dir_under` excludes, lowercased. The folder chip is
+    // a view of them and not of its own state, so a folder excluded from
+    // screen 6's table marks the tiles in it too.
+    excludedDirs = [],
     onActivate = () => {},
     onOverride = async () => null,
+    onExcludeFolder = () => {},
     onState = () => {},
   } = $props();
 
@@ -46,11 +51,31 @@
     chip.className = "chip";
     chip.type = "button";
     el.appendChild(chip);
+    // Constant, so it is set once per element ever created rather than on every
+    // bind. Only the state and the title vary per item.
+    const dir = document.createElement("button");
+    dir.className = "dirchip";
+    dir.type = "button";
+    dir.textContent = "dir";
+    el.appendChild(dir);
   }
 
   function fill(el, item) {
     const label = el.querySelector(".tile-path");
     if (label) label.textContent = item.p ? shortPath(item.p) : "";
+    const dir = el.querySelector(".dirchip");
+    if (dir) {
+      const folder = folderOf(item.p ?? "");
+      const done = folder !== "" && isUnder(excludedDirs, folder);
+      // Disabled rather than hidden when it is already excluded: the tile is
+      // still there to be looked at, and the red chip is how you find out why.
+      dir.hidden = folder === "";
+      dir.disabled = done;
+      dir.dataset.state = done ? "exclude" : "none";
+      dir.title = done
+        ? `already excluded: ${folder}`
+        : `exclude everything under ${folder}, subfolders included — one exclude rule at the end of the order`;
+    }
     const chip = el.querySelector(".chip");
     if (chip) {
       chip.dataset.state = item.o || "none";
@@ -72,6 +97,12 @@
       fill: triage ? fill : undefined,
       onState: (state) => onState(state),
       activate: async (item, event, tile) => {
+        // A disabled button dispatches no click at all, so the already-excluded
+        // case never arrives here and cannot fall through to the reveal either.
+        if (event.target.closest(".dirchip")) {
+          onExcludeFolder(item);
+          return;
+        }
         if (!event.target.closest(".chip")) {
           onActivate(item);
           return;
@@ -100,6 +131,19 @@
       instance.reset();
     }
     instance.setTotal(size);
+  });
+
+  // Re-mark the folder chips after a write. `fill` runs when a tile is bound, so
+  // without this the tiles already on screen keep the marks they were mounted
+  // with. Compared as a value rather than by identity because the counts refresh
+  // on every keystroke and hands back a new array each time, and re-binding
+  // ~150 tiles for an unchanged rule set is pure work.
+  let marked = "";
+  $effect(() => {
+    const dirs = excludedDirs.join("\n");
+    if (!instance || dirs === marked) return;
+    marked = dirs;
+    instance.refill();
   });
 </script>
 
