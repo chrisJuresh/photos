@@ -170,6 +170,21 @@ volume. Run it after every triage session.
 python -m photolib.backup_state
 ```
 
+To export `<vault_root>\origins.jsonl`, the only content-hash → original-path map and the thing
+`G:\photos` is deleted behind. **All 787,798 distinct files, including the 749,422 triage
+excluded** — the file exists so a *wrong exclusion* can be undone, and a wrongly excluded file is
+by definition not in the kept set. One self-contained JSON object per line, UTF-8, no header, no
+compression, readable with nothing but a text editor. **Append-only**: the first export is sorted
+by `sha256`, later runs append at the end and never rewrite, so a reader takes the union of every
+`paths` array for a hash and the scalars from its last line. 2m54s, 300 MB, pure DB. A first
+export goes to `origins.jsonl.partial` and is renamed in, so an interrupted run leaves nothing to
+append to. `--verify` reconstructs `origin` from the JSONL alone into a scratch database, sharing
+no code with the export, and diffs the path sets both directions — 5m12s.
+
+```bash
+python -m photolib.origins --verify
+```
+
 The Phase 0 inventory: five phases as separate subcommands, all resumable, sharing a work
 database at `E:\photolib\phase0.sqlite3` that is regenerable and never committed. **It ran to
 completion on 2026-08-02 and does not need re-running** — `origin` holds all 1,374,328 rows and

@@ -249,7 +249,7 @@ this purpose.
 | Grid thumbnail 384px | `E:\photolib\thumb\<aa>\<sha256>.webp` | **NVMe.** Read on every scroll. Adopted from MediaVault, not regenerated. |
 | `catalog.sqlite3` | `E:\photolib\` | Regenerable. Written only by the pipeline. |
 | `state.sqlite3` | `E:\photolib\` | **Irreplaceable.** Written only by the app. Snapshotted to `backup_root` on `C:` by `photolib.backup_state`, and part of Phase 13b's upload set. |
-| `origins.jsonl` | `G:\vault\` | Export of the path mapping. Goes in the backup. |
+| `origins.jsonl` | `G:\vault\` | The one content-hash → original-path map, all 787,798 distinct files. Append-only JSONL, no schema, no compression. Written by `photolib.origins`. Goes in the backup. |
 
 Two databases, joined by `ATTACH`. The split buys two things: the pipeline never contends
 with the UI for a write lock, and the entire catalog can be dropped and rebuilt without
@@ -1275,6 +1275,192 @@ it cannot be edited in place and still be correct — the name/hash check catche
 reading the backup at all. Whatever the vault's backup turns out to be, `--force` is not part of
 it, and scrubbing is a local re-hash rather than a restore.
 
+### Step 11 — `origins.jsonl`, and the off-site upload — ✅ **EXPORTED AND VERIFIED 2026-08-06**
+
+`origins.jsonl` now exists at `G:\vault\origins.jsonl`: **787,798 lines, 300,300,043 bytes**,
+SHA-256 `1086e5eb…5eaee2e9`. `python -m photolib.origins` writes it,
+`python -m photolib.origins --verify` checks it.
+
+**All 787,798 distinct files, not the 38,376 triage keeps.** This is the one thing about the
+export that is easy to get backwards and expensive to get wrong. The file exists so that a
+*wrong exclusion* can be undone, and a wrongly excluded file is by definition not in the kept
+set — if its content key is absent from `origins.jsonl` there is no route from the hash back to
+a path restic can be asked for. Exporting only the kept set would throw away 95% of the map and
+throw away exactly the rows the map is for.
+
+One JSON object per line, no header, no compression, no schema to look up:
+
+```
+{"sha256":"ffffb840…","ext":".rw2","size":19620864,"taken_at":"2025-06-15T16:40:37",
+ "taken_src":"exif:DateTimeOriginal","paths":["G:\\photos\\lumix f 7-15-26 sd\\DCIM\\111_PANA\\P1110460.RW2"]}
+```
+
+UTF-8, `ensure_ascii=False`, so the 895 non-ASCII paths read as characters rather than as
+`\u00e9`. A text editor and `grep` are the only tools the recovery path needs; it must not
+depend on this repository still existing.
+
+**Append-only, sorted by `sha256` on the first export only.** Later runs append at the end and
+never rewrite. That makes the read contract a log rather than a table: a `sha256` may appear on
+more than one line, a reader takes the **union** of every `paths` array for it and the scalars
+from its **last** line, and there is no way to express a deletion. A path that existed once
+stays in the map, which is the correct bias for a recovery index. This is the property that
+matters after the build ends — `G:\photos` is deleted at the Gate, so a format regenerable only
+in one shot from the source goes stale the first time a card is imported. Retrofitting append
+onto a one-shot dump costs more than writing it this way now.
+
+A first export goes to `origins.jsonl.partial` and is renamed in, so an interrupted run leaves
+nothing a later run would append to. An extending run appends in place, because rewriting is the
+one thing this format may not do.
+
+**Verification, run and clean.** `--verify` reconstructs `origin` from the JSONL alone into a
+scratch SQLite database — `json.loads` per line, one row per path entry, sharing no code with
+the export — and diffs it against the live catalog:
+
+| | |
+|---|---|
+| reconstructed | 787,798 lines → **1,374,328 paths**, 787,798 distinct `sha256` |
+| live `origin` | **1,374,328 paths**, 787,798 distinct `sha256` |
+| in `origin`, absent from the JSONL | **0** |
+| in the JSONL, absent from `origin` | **0** |
+| same path, different `sha256` | **0** |
+
+The path sets match exactly, both directions. 2m54s to export, 5m12s to verify.
+
+`ext` is one *representative* extension per byte sequence, not the only one. 15,492 `origin`
+rows disagree with the `file` row's choice, almost all of them zero-byte files — one byte
+sequence appearing under `.py`, `.pyi`, `.lock`, `.log` and 200 other names, with `.png` winning
+the tie. The `paths` array is where the truth about extensions lives, and the reversal procedure
+reads paths, not `ext`.
+
+#### The upload set is three things
+
+Not two. The third is a few MB next to 436 GB and is the only one of the three that **cannot be
+rebuilt from the others**.
+
+| # | What | Where it is now | Size | Status |
+|---|---|---|---|---|
+| 1 | restic repo | `G:\ResticPhotos` | 436 GB | **Uploaded 2026-08-01, verified 2026-08-06.** 4 files behind |
+| 2 | `origins.jsonl` | `G:\vault\origins.jsonl` | 300 MB | **Never uploaded.** Created today |
+| 3 | `state.sqlite3` snapshots | `C:\photolib-backups\` | 8 files, ~370 KB | **Never uploaded.** Holds every triage decision |
+| — | `catalog.sqlite3` | `E:\photolib\catalog.sqlite3` | 1.60 GB | Off-site copy is **schema-older**, not merely stale |
+
+(3) is the one that gets forgotten. `catalog.sqlite3` rebuilds from a re-scan; derivatives
+regenerate from the 1536px substrate; the vault restores through the repo and `origins.jsonl`.
+The 391 triage rules and 31 overrides do not — they are the output of a human looking at 1.37M
+files. A fresh snapshot was taken as part of this step: `state-20260806T211847Z.sqlite3`,
+73,728 bytes, SHA-256 `24f5fd0a…6530117a`, `schema_version=5`, 391 rules, 31 overrides.
+
+#### Two facts to build the instruction around
+
+**The link is asymmetric, and the slow direction is the restore direction.** 11.7 MB/s down,
+3 MB/s up, measured from this machine. Up: `origins.jsonl` is ~100 s, the state snapshots are
+instant, `catalog.sqlite3` is ~9 minutes. Down, in the event that matters: 436 GB at 11.7 MB/s
+is **~10.4 hours of pure transfer** before restic decrypts and reassembles anything. A full
+restore from off-site is a multi-day operation, not an afternoon. Plan the recovery story
+accordingly — this is the argument for keeping `origins.jsonl` and the state snapshots small,
+local, and separately copyable, so that the common case (recover *one* wrongly excluded file)
+never touches the 436 GB.
+
+**The repo is owned by `mark`, not `chris`.** Writes into `/mnt/bay6/ResticPhotos` need `sudo`;
+`/mnt/bay6/photolib-backup/` is chris-owned and does not. All three of the *new* uploads land in
+the chris-owned directory, so only the optional 4-file repo top-up needs elevation.
+
+#### Why the upload is the only thing that changes the risk
+
+**The restic repo and the photos root are on the same physical disk.** Not "the same machine" —
+volume serial `0xb42554ea`, **partition 2 of disk 3**, one WD Elements USB enclosure, the same
+enclosure `G:\photos`, `G:\MediaVault` and `G:\vault` live in. Two copies there is one hardware
+failure from zero, and no amount of local verification changes that. Every `check --read-data`
+that has passed, and the whole-corpus per-file hash agreement Phase 0 established, are
+statements about *corruption*, not about the enclosure dying. The off-site copy is the only
+thing standing between this library and a single dead USB disk, which is why deletion is gated
+on the upload and not on the repo existing.
+
+#### Reversal of a wrong exclusion, in full
+
+Not one `restic dump`. Four steps, and the middle two are where it goes wrong:
+
+1. Find the content key's line: `grep <sha256> origins.jsonl`.
+2. Take any entry from its `paths` array — the original `G:\photos\…` path.
+3. Translate it to restic's snapshot form: drop the colon, backslashes → forward slashes.
+   `G:\photos\a\b.jpg` → `G/photos/a/b.jpg`.
+4. `restic --no-lock dump <snapshot> G/photos/a/b.jpg > b.jpg`.
+
+**It is not addressable by content hash at all.** restic chunks anything over 512 KiB, so
+`restic find --blob <sha256>` returns nothing for any real photo or video. Step 1 is a `grep`
+over a text file precisely because there is no repo-side lookup to replace it — which is the
+whole reason `origins.jsonl` has to be uploaded before anything is deleted.
+
+Verified end to end today against restic 0.19.1 and snapshot `ce88f697`; see the corrected note
+under Phase 4 for what the earlier "no leading slash" rule actually got wrong.
+
+#### The instruction: what to upload, in what order, what to confirm
+
+The order is chosen so that the cheap, irreplaceable, currently-unbacked things go first. If the
+link drops after item 2, the position is already strictly better than it is now.
+
+`/mnt/bay6/photolib-backup/` is chris-owned, so items 1–3 need no `sudo`. Run each from this
+machine. Windows drive-letter sources are fine — this machine's `scp` parses `C:/…` as a path
+and not as a hostname, checked locally. Wildcards are **not** fine: PowerShell does not expand
+globs for native executables and `scp` does not glob its own local arguments, so the state
+snapshots go up as a directory.
+
+**1 — the triage decisions.** The smallest, the most irreplaceable, and the one with no copy
+off this machine at all. All 8 snapshots, into their own directory beside the rest.
+
+```bash
+scp -P 22222 -r C:/photolib-backups chris@82.14.247.27:/mnt/bay6/photolib-backup/state-snapshots
+```
+
+**2 — the map.** ~100 s at 3 MB/s. After this the reversal story is off-device for the first
+time.
+
+```bash
+scp -P 22222 G:/vault/origins.jsonl chris@82.14.247.27:/mnt/bay6/photolib-backup/origins.jsonl
+```
+
+**3 — the catalog.** ~9 minutes. Overwrites a copy that is schema-older, not merely stale.
+
+```bash
+scp -P 22222 E:/photolib/catalog.sqlite3 chris@82.14.247.27:/mnt/bay6/photolib-backup/catalog.sqlite3
+```
+
+**4 — optional, and the only one needing `sudo` on the far side:** the 4 repo files the
+2026-08-02 top-up created after the upload — 2 packs, 1 index, 1 snapshot, ~11 MB total.
+Advisory, not blocking: all 39 files they carry are git internals and none is media. But it is
+11 MB and it makes the remote repo byte-for-byte equal to the local one.
+
+```bash
+scp -P 22222 G:/ResticPhotos/data/61/6116646c25a7e63f15a80c5ac98fe12efde4e9331e226ed06882ee04eb8dceb7 G:/ResticPhotos/data/d1/d1a19dabe29a01890acdb951fb2afdfacab6e94775a27ace2f4b248e170df95f G:/ResticPhotos/index/de07667e441057cfc874555835b7259de68178d22a8f2a7b364bc7b97b7b0a6c G:/ResticPhotos/snapshots/1e80c50e88c52a0a8592bb1745f6c610c257cad9c63ef7979af2678ad9a436e2 chris@82.14.247.27:~/restic-topup/
+```
+
+Then, on the server, `sudo cp` each into the matching directory under
+`/mnt/bay6/ResticPhotos` — `data/61/`, `data/d1/`, `index/`, `snapshots/` — keeping the
+filenames exactly as they are, because in restic a filename *is* the content hash and renaming
+one silently corrupts the repository. Create `~/restic-topup/` first; `scp` will not make it.
+
+**Confirm all four of these before step 14, and before deleting anything local.** Each is a
+server-side check, not a local one, because the failure being guarded against is "the upload
+reported success and the bytes are not there". Hash on the server and compare against the
+values recorded above:
+
+| | Confirm | Expected |
+|---|---|---|
+| 1 | `sha256sum /mnt/bay6/photolib-backup/origins.jsonl` | `1086e5ebf5e83672ab01f9afc53e5463d3db1435ca431774b9aea2905eaee2e9`, 300,300,043 bytes |
+| 2 | `sha256sum /mnt/bay6/photolib-backup/state-snapshots/state-20260806T211847Z.sqlite3` | `24f5fd0ad51cc983167fe57198345e2eb72bfb5039f0fa2bdd49f0de6530117a`, 73,728 bytes — **and `ls` shows all 8 snapshots**, the newest being that one |
+| 3 | `sha256sum /mnt/bay6/photolib-backup/catalog.sqlite3` | `085e18e320948b9fea50be0c2a6e27a67288025b8afe8b5a0937e838f93d821f`, 1,600,004,096 bytes. Must **differ** from the file that was there before — the old one is schema-older, reporting `schema_version` 1–3 against 5, with no `triage_*` table at all |
+| 4 | One real reversal, executed off the uploaded copy | `grep` a known excluded `sha256` out of the *server's* `origins.jsonl`, translate a path, and confirm the line is there. The 436 GB repo does not need re-verifying — 2026-08-06 hashed all 24,840 remote files against their own filenames, 24,839/24,840 self-verifying, the exception being `config`, which is not content-addressed |
+
+Do **not** treat `scp` exiting 0 as confirmation. It reports the transfer, not the contents, and
+this is the last checkpoint before an irreversible delete.
+
+What is *not* on this list, deliberately: **`G:\MediaVault`'s object tree and `G:\vault` are
+backed up nowhere, and this upload does not change that.** Every snapshot in the repository is
+scoped to `G:\photos`, so what is off-site is the *source bytes* of the 146,034 objects, not the
+objects. Restoring them is a full preprocessing re-run, not a copy. That gap is the Gate
+section's second structural gap and "Open decisions" 5; it is not closed here and must not be
+read as closed.
+
 ### Phase 3 — Triage
 
 Interactive, offline from the source, no deadline. Details below.
@@ -1302,11 +1488,18 @@ Interactive, offline from the source, no deadline. Details below.
 > the 146,034 media files is in the uploaded snapshot. The owner's stated priority is that all
 > real photos are included, not that the copies match byte for byte, so (b) no longer blocks.
 >
-> **(a) and (c) still block, and they are the real ones.** `origins.jsonl` does not exist. It
+> **(a) and (c) still block, and they are the real ones.** ~~`origins.jsonl` does not exist.~~ It
 > is the only content-hash → original-path map, so without it the off-site repo holds every
 > photo and cannot be navigated back from a vault object to where it came from. Under the
 > owner's own criterion this matters far more than 39 git objects: it is the difference between
 > "the photos are backed up" and "the photos can be got back".
+>
+> **Status 2026-08-06.** **(c) is discharged** — `origins.jsonl` exists at `G:\vault`, 787,798
+> lines, verified against the live `origin` with a zero diff both directions. **(a) still
+> blocks**: nothing has been uploaded. `origins.jsonl` and the `state.sqlite3` snapshots have no
+> off-device copy at all, and the off-site `catalog.sqlite3` is schema-older. The upload
+> instruction and its four confirmations are in "Step 11" above; until those four are confirmed
+> **server-side**, Phase 4 must not run and nothing local may be deleted.
 >
 > `--force` is **not** now mandatory for every future pass — see the corrected rule in Phase 0.
 > It applies to in-place edits at constant size and mtime, which cannot happen to a
@@ -1450,12 +1643,28 @@ wrong.)
 
 **Reversal of an exclusion is not one `restic dump`.** It is: look the content key up in
 `origins.jsonl` to recover the original `G:\photos` path, translate that path to restic's
-snapshot form, then `restic dump <snapshot> <path>`. The path argument is a **bare root-entry
-name with no leading slash** — `G/photos/x.jpg`, not `/G/photos/x.jpg` and not the Windows form;
-`/`, `.` and `/photos` all fail with the misleading `path "\\C:" not found in snapshot`. It is
-**not addressable by content hash** — restic chunks anything over 512 KiB, so
-`restic find --blob <sha256>` returns nothing for any real photo or video (verified: 20 MiB no
-match, 97 KiB match).
+snapshot form, then `restic --no-lock dump <snapshot> <path>`. The path argument is a
+**root-entry-relative POSIX path**, derived from the Windows one by dropping the colon and
+turning every backslash into a forward slash: `G:\photos\x.jpg` → `G/photos/x.jpg`. The Windows
+form itself fails, with or without the colon. It is **not addressable by content hash** — restic
+chunks anything over 512 KiB, so `restic find --blob <sha256>` returns nothing for any real photo
+or video (verified: 20 MiB no match, 97 KiB match).
+
+> **⚠ CORRECTED 2026-08-06, by measuring it rather than quoting this file.** The sentence above
+> read "a bare root-entry name with **no leading slash** — `G/photos/x.jpg`, not
+> `/G/photos/x.jpg`". Against restic **0.19.1** and snapshot `ce88f697`, both forms work and
+> both return the correct bytes: `G/photos/…` and `/G/photos/…` each dumped
+> `10tb arch backup\PHONE BACKUP\DCIM\Snapchat\Snapchat-1103714634.jpg` at 176,531 bytes with a
+> matching SHA-256. Three non-ASCII paths round-tripped too, `×` in the filename included, which
+> matters because 895 of the corpus's paths are non-ASCII and the ANSI codepage is the standing
+> hazard there. So the leading slash is **not** the failure mode; the *backslash* is. The rule
+> worth carrying is "translate to POSIX separators", and "no leading slash" is a safe habit
+> rather than a requirement.
+>
+> Scope of the correction, stated because it is narrow: this was measured for
+> `dump <snapshot> <one file>`, which is the reversal path. It says nothing about the subtree
+> arguments `/`, `.` and `/photos` under `dump --archive tar`, which Phase 0 measured failing and
+> which `photolib/restic_repo.py:107` still documents. Those were not retested.
 
 It only works for files the repo actually contains. **As of the 2026-08-02 top-up that is all
 1,374,328 of them, verified per file**, so this reversal path is now backed by measurement
@@ -1806,7 +2015,7 @@ later.**
 | ~~8~~ | ~~Phase 2a verification read + ARW repair~~ | **Done 2026-08-03.** |
 | 9 | Triage UI | **Built 2026-08-03** — engine, survey, eight screens, probe and write API, all verified against the real catalog. See "Triage". **The remaining work is not code: it is looking at the corpus and saving rules.** Nothing downstream can start until that lands a kept set — step 10 gap-fills only what triage keeps, and step 12 unlinks only what it excludes |
 | ~~10~~ | ~~Phase 2b gap fill~~ | **Done 2026-08-04 in 3m22s.** 1,252 of 1,659 decoded. **Population 2 is empty** — at the 391-rule set every surviving file is already a MediaVault object. Benchmarked on 500 first, which projected 5m38s |
-| 11 | **`origins.jsonl` export + server upload** | **Moved ahead of Phase 4. `G:\photos` deletable; Phase 4 unblocked** |
+| 11 | **`origins.jsonl` export + server upload** | **Export done 2026-08-06** — 787,798 lines / 1,374,328 paths, verified against the live `origin` in both directions with a zero diff. Moved ahead of Phase 4. **The upload has not been performed**; the instruction, and the four things to confirm before step 14, are in "Step 11" above |
 | 12 | Phase 4 promote + Phase 5 group | Gated on step 11 completing and verifying |
 | 13 | Post-Phase-4 re-hash sweep | Phase 4 is not complete without it. Shape is `phase2a` pass `a`, one reader; the difficulty is scope, not code, and it depends on what step 12's classifier persists — see "Phase 4" |
 
