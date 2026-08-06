@@ -1664,7 +1664,16 @@ or video (verified: 20 MiB no match, 97 KiB match).
 > Scope of the correction, stated because it is narrow: this was measured for
 > `dump <snapshot> <one file>`, which is the reversal path. It says nothing about the subtree
 > arguments `/`, `.` and `/photos` under `dump --archive tar`, which Phase 0 measured failing and
-> which `photolib/restic_repo.py:107` still documents. Those were not retested.
+> which `photolib/restic_repo.py:107` still documents.
+>
+> **Except for `/`, which was measured by accident and is worse than documented.**
+> `restic --no-lock dump ce88f697 /` does **not** fail with `path "\\C:" not found in snapshot`.
+> restic's `dump` defaults to a tar archive when the argument is a directory, so a bare `/`
+> resolves to the snapshot root and begins streaming the entire 436 GB. It ran **2h20m** and had
+> buffered 16 GB before it was killed. The dangerous property is that it looks like a typo and
+> behaves like a full restore: no error, no prompt, and a sustained read of the disk everything
+> else on this project also lives on. Do not probe path forms against a real snapshot with a
+> directory-shaped argument; probe with a known file, where a wrong form fails in milliseconds.
 
 It only works for files the repo actually contains. **As of the 2026-08-02 top-up that is all
 1,374,328 of them, verified per file**, so this reversal path is now backed by measurement
