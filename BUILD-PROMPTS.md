@@ -24,7 +24,13 @@ verdicts.
 >   every pass**: it defeats change detection, which only applies to files already in a parent
 >   snapshot. **Adding new photos never needs it.** See PLAN.md "Phase 0" for the table.
 >
-> Numbering is otherwise unchanged, so every "step N" reference elsewhere still resolves.
+> Numbering is otherwise unchanged, so every "step N" reference elsewhere still resolves — but
+> **only within this file.** `PLAN.md`'s build-order table numbers independently and is offset:
+> its row 11 is this file's step 13b, row 12 is step 14, and **row 13 is step 16**, the
+> post-promotion sweep. This file's step 13 — the deletion gate — is not a row in that table at
+> all; it is `PLAN.md`'s "Gate" section. On 2026-08-04 a question about "step 13" was answered
+> against `PLAN.md` row 13, and the answer was recorded there, leaving this file's step 13
+> untouched. Say which document you mean.
 
 ---
 
@@ -35,12 +41,16 @@ Set the effort level in your client before sending. The ladder used here:
 | Level | When | Steps |
 |---|---|---|
 | `low` | Mechanical, fully specified, nothing to decide | 0 ✅, 8 ✅ |
-| `medium` | Normal implementation against a clear spec | 1 ✅, 2 ✅, 3 ✅, 5, 11, 13b |
-| `high` | Correctness-critical, or a design decision inside it | 4 ✅, 6, 7 ✅, 9, 10, 12, 13, 15, 16 |
+| `medium` | Normal implementation against a clear spec | 1 ✅, 2 ✅, 3 ✅, 5, 11, 13b, 16 |
+| `high` | Correctness-critical, or a design decision inside it | 4 ✅, 6, 7 ✅, 9, 10, 12, 13, 15 |
 | `xhigh` | Irreversible, operating on data with no second copy | 14 |
 
 Effort is how hard one pass thinks. Plan mode, background and **ultracode** are execution
 modes, orthogonal to it — any of them composes with any level.
+
+**Step 16 moved from `high` to `medium` on 2026-08-05**, following the 2026-08-04 verdict: its code
+has a working template, so the build is a `medium` job and only its scoping choice wants `high`.
+That is the one place in this table where a step is split across two levels; see the step.
 
 Run steps **6, 10, 11 and 14 in plan mode first** — approve the approach, then let it build.
 Step 14 is the only one that deletes anything; it is written to be dry-run by default.
@@ -58,6 +68,23 @@ check costs only tokens.
   demonstrated the value: every one of its three spikes produced a verdict that survived its
   own author and died to an independent reader.
 
+  **Re-examined 2026-08-05 and kept, with one constraint the step did not originally carry.**
+  After the 2026-08-04 corrections, three of its four checks are *re-reads of numbers recorded by
+  steps 7, 9 and 12* rather than fresh work. A fan-out whose refuters read `PLAN.md` and this file
+  will agree with the summary and report convergence — the same false-convergence failure that
+  took step 4 off this list, and the worst available disguise for "a check that looks clean". So
+  the fan-out is bound to primary evidence: `E:\photolib\phase0.sqlite3`'s per-subtree Phase D
+  checkpoint rows, Phase 2a's per-object hash records, `file.state` / `file.quality` in
+  `catalog.sqlite3`, the a3server file listing. Quoting a summary back is not evidence of a pass.
+  Every agent reads; the main session stays the only writer.
+
+**What has actually run, as of 2026-08-05.** Ultracode has been used **exactly once** in this
+build: step 1's three spikes, as one `Workflow` with per-spike refuters. Two other steps spawned
+agents without it — step 4's single independent coverage recompute, and three Explore/Plan agents
+while step 6 was in plan mode, which is exploration rather than a fan-out over its build. Every
+other completed step ran solo. That is the calibration this ladder exists to preserve — the
+ultracode list is short because it has stayed short.
+
 **Step 4 was on this list and came off it.** Its filename-pattern space reads as an unknown-size
 search, which is ultracode's best case — but masking digit runs and grouping enumerates that
 space exhaustively in one pass, and the bucket counts summing to the row total is the proof.
@@ -66,9 +93,22 @@ its own slice, and the round then reports convergence. Enumerating beat sampling
 and on cost at the same time. Step 4 keeps one independent reader for its coverage number, which
 is a claim rather than a space.
 
-Never run steps **3, 5, 7, 9, 12 or 14** under ultracode. Each is a single process holding one
-lock file by invariant 6 — a fan-out of writers is precisely the job ledger `PLAN.md` refuses to
-build — and each is disk-bound on one USB HDD head, so parallel agents buy no throughput at all.
+**Step 16 was asked about on 2026-08-04 and ruled out.** The re-hash sweep reads as expensive and
+irreversible-adjacent, but it is neither a search nor a design space: the shape is `phase2a` pass
+`a` with the vault name substituted for the object path and the expected digest read from the
+promotion record, and `photolib/phase2a.py:317-368` already runs one reader, resumes off a
+persisted state column, and exits hard on a mismatch. Its ~2 h is disk bandwidth, and `G:`
+exclusivity serialises anything wanting real data, so a fleet would queue behind one reader. Its
+genuine difficulty is a single scoping decision, written out in `PLAN.md` "Phase 4" — one focused
+reviewer against that choice, not a fan-out. **Put the review effort on step 14, the thing being
+checked, rather than on the check**: Phase 4 is where `PLAN.md` records two runs that permanently
+destroyed data, and step 14 already runs in plan mode first, which is where that effort belongs.
+
+Never run steps **3, 5, 7, 9, 12, 14 or 16** under ultracode. All but 16 are a single process
+holding one lock file by invariant 6 — a fan-out of writers is precisely the job ledger `PLAN.md`
+refuses to build — and every one of them is disk-bound on one USB HDD head, so parallel agents buy
+no throughput at all. Step 16 writes nothing but is exclusive on `G:` and bandwidth-bound for the
+same reason; see the paragraph above for why its difficulty is not the kind a fan-out addresses.
 Where a fan-out is used at all, it reads; the main session stays the only writer.
 
 Steps **0, 2, 6, 8, 10, 11, 15 and 16** are fully specified by `PLAN.md`. Extra agents on those
@@ -1760,21 +1800,79 @@ anything uncommitted on purpose, say which and why.
 
 ---
 
-# Step 13 — Deletion gate
+# Step 13 — Deletion gate — ✅ **DONE 2026-08-06**
 
-**Effort:** `high` · run under ultracode · ~30 min
+**Effort:** `high` · run under ultracode · ~~~30 min~~ **~1h15m**, of which 51 min was one
+server-side re-hash of the whole off-site repo running in the background.
+
+**All four checks pass. `G:\photos` is deletable; steps 13b and 14 are unblocked.** Twelve
+refuters, one per lens, all bound to primary artifacts; eleven found nothing, one refuted a check
+without touching its conclusion. What the fan-out was worth is in the four corrections below —
+none of them visible from either planning document, and three of them found by attacking rather
+than by re-reading.
+
+- **Check 2's third clause is a tautology and always was.** `origin.path` is declared
+  `TEXT NOT NULL UNIQUE`, so `count(DISTINCT path) == count(*)` holds for every possible
+  database state and the assert at `photolib/inventory.py:1048` has no failure mode. The
+  property it stands for — no two real files collapsed onto one row — is true, but on four
+  substituted measurements: the unconstrained `note['walk']` counter matching `disk` row for
+  row (1,382,380), 1,374,328 **distinct NTFS file IDs** over 1,374,328 rows, zero rows with
+  `nlink > 1`, and two independent producers spelling all 251,087 adopted paths identically.
+  Unicode is clean and not merely absent: 895 non-ASCII paths, all NFC, zero casefold or
+  normalisation collisions. **Rewrite the check to assert the file-ID count.**
+- **`subtree.state = 'verified'` means "saw no hard stop", not "dumped everything".**
+  `inventory.py:1139` computes `missing` one line earlier and never consults it. Phase D's
+  completeness is real, but it rests on the per-subtree `repo_hash` cross-check closing to the
+  file and on **Phase E's gate** — which refuses to back up unless every top-level subtree is
+  verified *and* zero snapshot rows lack a `repo_hash` row, and which passed, since snapshot
+  `1e80c50e` exists. That is machine-checked. The label is not.
+- **The full `--read-data` has a primary artifact, and it is a temp file.** `phase_d()` streams
+  `restic check` to stdout and persists nothing; `phase0.sqlite3`'s `note` table has no key for
+  it. The evidence is restic's own captured output in a previous session's scratchpad —
+  `phase-d2.log`, 2,037 bytes, `[1:56:07] 100.00%  24785 / 24785 packs`, `no errors were found`,
+  with `phase-d.log` beside it showing the earlier default `--read-data-subset=1/8` run for
+  contrast. Corroborated independently by NTFS mtimes: of today's 24,787 packs, exactly two were
+  written 2026-08-02 14:25:53 and every other predates the check. **One `note` row would have
+  made this durable.** Scope, stated honestly: 24,785 of the current 24,787 packs, and snapshot
+  `1e80c50e` has never been inside any `restic check` — its 39 files were instead dumped back
+  out and re-hashed against `disk.sha256`, 39/39.
+- **The off-site copy holds zero of the 146,034 media files, and that is fine.** Every snapshot
+  is scoped to `G:\photos`; `G:\MediaVault` is in none of them, so the vault objects themselves
+  are backed up nowhere. What is off-site is their **source bytes**: all 146,034 object hashes
+  appear in `phase0.repo_hash`, as do all 38,376 triage-kept hashes. The only content the repo
+  lacks is 38 distinct hashes — the 39 top-up files, two of which share 41 bytes — all
+  extensionless, none media, none kept. Say "holds the source bytes of every media file". The
+  difference on restore is a full preprocessing re-run.
+
+Two things the fan-out established that were not asked for. Seven of the 30 git loose objects in
+the top-up **decompress to images** (6 PNG, 1 JPEG) — extension and directory say nothing about a
+zlib stream — but all 26 blobs resolve to byte-identical working-tree twins already in the
+pre-top-up snapshot, so no pixel is uniquely at risk; only 1,604 bytes of git metadata (3 trees
+and a commit) have no off-site copy in any form. And the **triage screens do not apply
+overrides**: `triage_screens.page` and every `_AGGREGATES` entry omit them, so all 31 override
+`sha256` (55 paths) still list as kept while the count above them says 38,376. That is a UI
+defect, not a gate finding, and it is filed for step 11's owner rather than fixed here.
 
 Verification only. Nothing is deleted, published, or uploaded — which is exactly why a fan-out
 is safe here and worth paying for. This report is what authorises step 14, and the failure mode
 is a check that looks clean.
+
+⚠ REVISED 2026-08-05, two things. Check 4 used to instruct a re-copy of the catalogue databases to
+a3server, which made the sentence above false and handed a fan-out an external write to race on;
+that re-copy is step 13b's job and 13b already carries it, so check 4 now only establishes *whether*
+they are stale. And because three of the four checks re-read earlier steps' recorded numbers, the
+refutation pass is bound to primary evidence rather than to this file or `PLAN.md` — see the
+"Effort ladder" section for why that is the difference between a fan-out that verifies and one that
+merely agrees.
 
 ```text
 Run this step under ultracode.
 
 Read PLAN.md "Gate: G:\photos becomes deletable".
 
-Run all FOUR checks and give me a report I can sign off on. This step changes no files, and
-neither does anything you spawn: every agent in this step is a reader. Do not parallelise any
+Run all FOUR checks and give me a report I can sign off on. This step changes no files — locally
+or on a3server — and neither does anything you spawn: every agent in this step is a reader. Its
+only output is the report. Do not parallelise any
 walk of the photos root — it is 1.38M files on a USB HDD and splitting it thrashes the head. The
 fan-out is for attacking the results, not for producing them.
 
@@ -1873,21 +1971,54 @@ fan-out is for attacking the results, not for producing them.
    no password on the remote and no bulk transfer. `check --read-data` over SFTP would pull
    436 GB at the measured 11.7 MB/s: ~10.4 hours.
 
-   Also verify, because it is NOT yet done: that the three catalogue databases under
+   Also establish, because it is NOT yet done: whether the three catalogue databases under
    /mnt/bay6/photolib-backup/ are current. They were copied 2026-08-02 and every later step
-   writes to catalog.sqlite3, so by the time you run this they are stale by definition. Re-copy
-   and re-verify by SHA-256. manifest.sqlite3 does not change and does not need re-copying, but
-   note it is not in the restic repo and is not regenerable, so that copy is its only backup.
+   writes to catalog.sqlite3, so by the time you run this they are stale by definition. Report the
+   staleness — local against remote SHA-256 per file, and which steps have written since — and
+   stop there.
 
-   If any file in the stale set turns out to be media, the acceptance above does not cover it
-   and the re-sync becomes blocking again.
+   ⚠ CORRECTED 2026-08-05: do NOT re-copy them in this step. It is a write to an external host in
+   a step whose entire safety argument is that it makes none, it is what would make a reader
+   fan-out unsafe, and it is duplicated work — step 13b already re-copies catalog.sqlite3 for
+   exactly this reason. Nothing this step spawns uploads anything.
+
+   manifest.sqlite3 does not change and does not need re-copying, but note it is not in the restic
+   repo and is not regenerable, so that copy is its only backup.
+
+   If any file in the stale set turns out to be media, the acceptance above does not cover it, and
+   step 13b's re-sync becomes blocking rather than housekeeping. Say so; do not fix it here.
 
 Then attack each result before reporting. Send independent readers to REFUTE the claim that the
 check passed, each with a different lens — does the query measure what the sentence claims, does
 the number survive a differently written query, does a clean result here depend on an earlier
 step's number that was itself never re-verified — and have them default to "refuted" when
-uncertain. Attack check 1 hardest: it re-reads step 9's recorded result rather than repeating
-420 GB, so a stale, partial or mis-joined read of that result would look exactly like a pass.
+uncertain.
+
+⚠ REVISED 2026-08-05. This is the part that decides whether the fan-out is worth its tokens.
+Checks 1, 3 and 4 re-read results recorded by steps 9, 7 and 7 rather than producing new evidence.
+A refuter that reads PLAN.md or BUILD-PROMPTS.md will agree with the summary and report
+convergence — which is this gate's own failure mode wearing the costume of a pass. So:
+
+  - NO REFUTER MAY ESTABLISH A PASS FROM A SUMMARY in either markdown file. Bind each one to the
+    primary artifact: E:\photolib\phase0.sqlite3's per-subtree Phase D checkpoint rows for check 3,
+    Phase 2a's per-object hash records for check 1, file.state and file.quality in catalog.sqlite3
+    for checks 1 and 2, the a3server file listing for check 4. A number quoted back out of this
+    file is not evidence that the number is still true.
+
+  - ATTACK CHECKS 3 AND 4 AT LEAST AS HARD AS CHECK 1. Check 3 is what makes the deletion
+    reversible at all, and it carries a BLOCK on a partial Phase D that a summary reports as
+    complete. Check 4's off-site coverage is called out above as the single largest assumption
+    between this plan and an irreversible deletion. Check 1's exposure is real — a stale, partial
+    or mis-joined read of step 9's result looks exactly like a pass — but it is not uniquely the
+    worst of the four, and an earlier draft of this step said it was.
+
+  - DO NOT FAN OUT OVER THE ARITHMETIC. count(distinct origin.path) == count(origin rows), the
+    snapshot-versus-disk counters reconciling to the enumerated 30 git objects, and the Phase D
+    per-subtree checkpoint rows are single-query facts that one pass proves, the way step 4's
+    bucket sum proved its coverage — read them once, from the artifact named above, rather than
+    having three agents re-derive them. Extra readers there buy a differently written query, not
+    coverage. Point the fan-out at the interpretive claims instead: does the query measure the
+    sentence it is filed under, and is the recorded number still current.
 
 State plainly, in one sentence, whether all four passed. Any check that is not clean BLOCKS
 steps 13b and 14 — say so rather than qualifying it. A check that passed only weakly under
@@ -2245,7 +2376,20 @@ regenerable id, and a reload is the whole fix.
 
 # Step 16 — Post-promotion verification sweep
 
-**Effort:** `high` · run in the background · **4–5 h**
+**Effort:** ~~`high`~~ `medium` for the build, `high` for the scoping review below · run in the
+background · ~~4–5 h~~ **~2 h** · **not ultracode**
+
+**Asked and answered 2026-08-04: ultracode is the wrong setting here, and normal effort plus one
+focused reviewer is the right one.** There is no search and no design space — the shape is
+`phase2a` pass `a` with the vault name substituted for the object path and the expected digest read
+from the promotion record. The hours are disk bandwidth. The whole of the difficulty is a scoping
+decision, and `PLAN.md` "Phase 4" now carries it: in-flight scoping is sound only if promotion
+persists intent for every state including COLLISION and the half-linked case; missing, mismatched
+and not-yet-promoted are three distinct exit conditions; and this sweep opens names step 14 has
+just set read-only, while CPython passes no `FILE_SHARE_DELETE`, so it must never run concurrently
+with promotion or repair. Review that scoping choice adversarially and leave the rest at normal
+effort. Note this step is `PLAN.md` build-order **row 13**, not this file's step 13 — that
+collision is what sent the 2026-08-04 answer into the wrong document.
 
 Step 14 destroys directory entries and verifies nothing. A wrong-bytes survivor is
 indistinguishable from success by existence, size, `nlink`, file count, or free space. This is
@@ -2284,8 +2428,8 @@ Verify what step 14 actually did. This step writes nothing except its own report
 
 Budget: ⚠ corrected 2026-08-04 — check 1 re-hashes PROMOTED names, which is the triage-kept
 435.6 GB and not MediaVault's whole 451.2 GB, so it is **~1h57m** at step 5's measured 62.0 MB/s
-with one reader. (The "4-5 h" in this step's effort header is older still, costed against
-22-35 MB/s; ~2 h is the current figure.) If that is too long to accept, scope check 1 to rows the
+with one reader. (The effort header now carries ~2 h; the "4-5 h" it used to read was costed
+against 22-35 MB/s and is struck through there.) If that is too long to accept, scope check 1 to rows the
 DB marks in-flight plus a random sample of the rest — and say explicitly which you did, because a
 scoped sweep is a weaker claim than a full one.
 

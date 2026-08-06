@@ -1122,6 +1122,32 @@ blocking task.**
 > (`1e80c50e`) and re-verified out of the new snapshot. Conditions 1 and 2 remain open and
 > belong to Phase 2a/2b.
 
+> **The gate was run and passed, 2026-08-06.** All four checks clean, each re-derived from a
+> primary artifact rather than from this file. `G:\photos` is deletable; steps 13b and 14 are
+> unblocked. Measured, not quoted:
+>
+> | | |
+> |---|---|
+> | 1 | 146,034 objects on disk, 146,034 `file` rows in state `'read'`, set-equal both ways, 0 size disagreements. `'read'` is written by exactly one statement in the tree and only after both the digest and the byte count match the object's own filename. Gap-filled set **positively** empty: 0 rows in `'staged'`, `'staged'` absent from the state enumeration, `G:\vault\.staging` absent, 0 `vault_relpath` under staging |
+> | 2 | 38,376 triage-kept content hashes / 107,414 origin rows, **all** in state `'read'`, shortfall 0. Confirmed by four derivations sharing progressively less code, one of which never opens a survey table. `triage_path` covers `origin` exactly: 1,374,328 rows, 1,374,328 distinct `origin_id`, both anti-joins empty |
+> | 3 | Phase D complete: all 9 top-level units verified, `repo_hash` 1,374,298, per-file agreement **recomputed from the raw hash columns** at 1,374,289 agree / 9 differ / 0 unhashed. The 251,087 adopted hashes re-asserted against the fresh disk hashes: 251,087 agreed, 0 disagreed |
+> | 4 | Off-site **re-measured today**, not re-read: 24,840 files hashed server-side, 24,839 self-verify against their own filenames, the single exception `config`, which is not content-addressed. 0 files on the server that are not local; 4 local-only, exactly the top-up's 2 packs + 1 index + snapshot `1e80c50e`. All 39 top-up files dumped back out of that snapshot and re-hashed, 39/39 |
+>
+> **Four corrections the run produced, in `BUILD-PROMPTS.md` step 13 in full.** Check 2's third
+> clause is a tautology forced by `origin.path`'s `UNIQUE` constraint and passes only on
+> substituted evidence. `subtree.state = 'verified'` means "no hard stop", not "dumped
+> everything" — Phase E's gate is what actually establishes completeness. The full `--read-data`
+> is attested by restic's own captured stdout in a **temp file**, not by anything durable, and
+> its scope is 24,785 of today's 24,787 packs. And the sentence below about media is wrong in a
+> way worth keeping: see the correction on it.
+>
+> Catalogue databases off-site: `phase0.sqlite3` and `manifest.sqlite3` hash **identically** to
+> their local copies. `catalog.sqlite3` is not merely stale but **schema-older** — it reports
+> `schema_version` 1–3 against the local 1–5, holds no `triage_*` table at all, and its `file`
+> table lacks `deriv_w`, `deriv_h`, `deriv_rot` and `dims_src`; migrations 004 and 005 both
+> post-date it. Restoring from it means `migrate` plus a pipeline re-run, not a drop-in. Nothing
+> in the stale set is media. Re-copying it is step 13b's job and was deliberately not done here.
+
 Verification, all three:
 1. Every MediaVault object re-hashed and matching its filename (Phase 2a — ~4–5 h, not free),
    and every gap-filled object matching its recorded SHA-256.
@@ -1142,6 +1168,18 @@ Verification, all three:
    sentence above implies for the *remedy* as well as the detection: the top-up set has to be
    derived from the hash comparison, because a size-based derivation is blind to the same case
    the check is designed to find. It missed three real files.
+
+   **What the 39 turned out to be, established 2026-08-06.** One git commit's worth of state in a
+   LaTeX report repository: a commit, its root tree and two subtrees, 26 blobs, two `.git\index`
+   files, a config, three reflogs and two refs. **Seven of the 30 loose objects decompress to
+   images** — 6 PNG and 1 JPEG, confirmed by brute-forcing all 30 payloads through PIL rather
+   than by trusting magic bytes, because a zlib stream's extension and directory say nothing
+   about its contents. That does not break the "zero media" acceptance: every one of the 26 blobs
+   is byte-identical to a working-tree file already in the pre-top-up snapshot, so no pixel is
+   uniquely carried by the lag. Only the 1,604 bytes of git metadata — the 3 trees and the commit
+   — exist off-site in no form at all. The rule this earns: **a file-level media classification
+   cannot see inside a container**, and the thing that closed it was hashing the payloads and
+   looking them up in `origin`, not classifying the files.
 
 **Deletion is still gated on the server upload completing, not on restic existing.** The
 repo and `G:\photos` are on the *same physical disk* — confirmed to the device: volume serial
@@ -1167,8 +1205,20 @@ hardware failure from zero. Upload the restic repo (406 GB, encrypted, deduped) 
 >
 > Completeness: local holds 24,844 files, the server 24,840, and the difference is exactly the
 > four the 2026-08-02 top-up created after the upload — two packs, one index, snapshot
-> `1e80c50e`. **Zero files on the server that are not local.** Every one of the 146,034 media
-> files was already there.
+> `1e80c50e`. **Zero files on the server that are not local.** ~~Every one of the 146,034 media
+> files was already there.~~
+>
+> **⚠ CORRECTED 2026-08-06 by the gate run.** That last sentence describes the wrong population.
+> Every snapshot in this repository is scoped to `G:\photos`; `G:\MediaVault` is in none of them,
+> so the off-site copy holds **zero** of the 146,034 media files *as files*, and neither does the
+> local repo. What it holds is their **source bytes** — all 146,034 object `sha256` appear in
+> `phase0.repo_hash`, as do all 38,376 triage-kept hashes, measured both from the catalog's
+> `'read'` rows and independently from v1's manifest. The only content the repo lacks is 38
+> distinct hashes: the 39 top-up files, two of which are the same 41 bytes. So the correct
+> sentence is *"the source bytes of every one of the 146,034 media files were already there"*,
+> and the difference on restore is a full preprocessing re-run rather than a copy. This is the
+> same gap as "no backup of `G:\vault`" two sections down, one phase earlier: **MediaVault's
+> object tree is not backed up either.**
 >
 > Prefer this shape of check over `check --read-data` against a remote whenever a verified
 > local copy exists: it is strictly stronger. `check` on a copy missing an entire snapshot file
@@ -1353,6 +1403,31 @@ re-hashed against its recorded SHA-256, non-zero exit and an explicit count of m
 missing names. A wrong-bytes survivor is indistinguishable from success by existence, size,
 `nlink`, file count or free space. Budget it — a full 420 GB pass is another ~4–5 h, so either
 scope it to rows the DB marks in-flight or schedule the full pass explicitly.
+
+Structurally it is `phase2a` pass `a` with the object path swapped for the vault name and the
+expected digest read from the promotion record rather than parsed out of the filename;
+`photolib/phase2a.py:317-368` is already single-reader, resumes off a persisted state column,
+accumulates `mismatched`, and exits hard. One reader again — same volume, same bandwidth bound.
+Three decisions are *not* inherited from that template, and they are the whole of the difficulty.
+
+- **In-flight scoping is only sound if promotion persists intent for every state**, including
+  COLLISION and the half-linked object left behind when the unlink stays blocked. A promotion
+  that completes step 5 and dies before step 7 leaves no row to select, so a scoped sweep skips
+  precisely the object it exists to catch. If the classifier cannot guarantee a durable marker
+  per attempt, the full pass is the only correct scope.
+- **Missing, mismatched, and not-yet-promoted are three separate exit conditions.** An unstarted
+  row and a vanished survivor are identical to a name-existence check — the trap under
+  *Identity, never name existence* above. Collapsing them reports a destroyed object as work
+  still to do.
+- **It opens names Phase 4 has just set read-only, and CPython does not pass
+  `FILE_SHARE_DELETE`** (see step 5), so it blocks the repair pass's unlink for as long as it
+  holds a handle. Never concurrent with promotion or with repair.
+
+This is the cheap check on the dangerous step, not itself the dangerous step: the code has a
+working template and no design space, and the ~4–5 h is disk bandwidth rather than thinking.
+Review effort belongs on Phase 4's classifier and its seven-step sequence, which have already
+destroyed data twice; what needs adversarial review *here* is only the scoping choice in the
+first bullet.
 
 Vault target names must be collision-free **by construction, including case-insensitively**.
 Path lengths are bounded (real object paths max 148 chars) and 369-char paths work unprefixed
@@ -1733,7 +1808,7 @@ later.**
 | ~~10~~ | ~~Phase 2b gap fill~~ | **Done 2026-08-04 in 3m22s.** 1,252 of 1,659 decoded. **Population 2 is empty** — at the 391-rule set every surviving file is already a MediaVault object. Benchmarked on 500 first, which projected 5m38s |
 | 11 | **`origins.jsonl` export + server upload** | **Moved ahead of Phase 4. `G:\photos` deletable; Phase 4 unblocked** |
 | 12 | Phase 4 promote + Phase 5 group | Gated on step 11 completing and verifying |
-| 13 | Post-Phase-4 re-hash sweep | Phase 4 is not complete without it |
+| 13 | Post-Phase-4 re-hash sweep | Phase 4 is not complete without it. Shape is `phase2a` pass `a`, one reader; the difficulty is scope, not code, and it depends on what step 12's classifier persists — see "Phase 4" |
 
 **Step 4 measured three things that change later steps.** All on `G:`, 2026-08-01.
 
