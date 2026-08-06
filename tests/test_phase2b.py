@@ -391,6 +391,22 @@ def test_stage_copies_verifies_and_moves_the_row(conn, config: Config, tmp_path:
     assert phase2b.worklist(conn, config)[0].source == str(staged)
 
 
+def test_a_promoted_row_is_read_from_the_vault_and_stays_retryable(conn, config: Config):
+    """Step 14 moves the objects and sets `state = 'published'`.
+
+    Both halves matter: a published row that stayed on MediaVault's side of
+    `_source_path` would look for bytes at a name step 14 destroyed, and one left
+    out of the worklist's state list could never be retried at all -- which is 23
+    kept files carrying an error stub on the real corpus.
+    """
+    sha = "b" * 64
+    relpath = f"{sha[:2]}\\{sha[2:4]}\\{sha}.jpg"
+    insert_file(conn, sha, ".jpg", 11, state="published", relpath=relpath)
+    (item,) = phase2b.worklist(conn, config)
+    assert item.source == str(config.vault_root / relpath)
+    assert not item.staged  # it is published, not in staging
+
+
 def test_a_staged_copy_that_does_not_verify_is_refused(conn, config: Config):
     config.photos_root.mkdir(parents=True)
     origin = config.photos_root / "changed.jpg"

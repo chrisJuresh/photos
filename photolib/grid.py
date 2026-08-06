@@ -118,7 +118,12 @@ class Roots:
     catalog_db: Path
     state_db: Path
     thumb_root: Path
-    mediavault_root: Path
+    # What a `file.vault_relpath` is relative to. Step 14 promoted the objects out
+    # of MediaVault, so this is the vault root and `reveal_root` is the vault too;
+    # they are still two fields because the base and the containment root are
+    # different questions, and before the promotion they were different
+    # directories. Moving one without the other 403s every reveal.
+    vault_root: Path
     reveal_root: Path
     # Triage's containment root, and only triage's. A triage subject is an
     # `origin` path under `G:\photos`, which is a different tree from the vault
@@ -134,7 +139,7 @@ class Roots:
             catalog_db=config.catalog_db,
             state_db=config.state_db,
             thumb_root=config.thumb_root,
-            mediavault_root=config.mediavault_root,
+            vault_root=config.vault_root,
             reveal_root=config.reveal_root,
             photos_root=config.photos_root,
         )
@@ -641,7 +646,7 @@ class GridHandler(BaseHTTPRequestHandler):
                 if not row[0]:
                     self._fail(409, "path")
                     return
-                target = reveal_module.resolve(row[0], roots.mediavault_root, roots.reveal_root)
+                target = reveal_module.resolve(row[0], roots.vault_root, roots.reveal_root)
         except reveal_module.RevealRefused:
             # The reason is in the server log. The client gets a field name.
             self._fail(403, "path")
@@ -672,7 +677,7 @@ def main(argv: list[str] | None = None) -> int:
         "catalog",
         "state",
         "thumb-root",
-        "mediavault-root",
+        "vault-root",
         "reveal-root",
         "photos-root",
     ):
@@ -684,7 +689,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog_db=args.catalog or roots.catalog_db,
         state_db=args.state or roots.state_db,
         thumb_root=args.thumb_root or roots.thumb_root,
-        mediavault_root=args.mediavault_root or roots.mediavault_root,
+        vault_root=args.vault_root or roots.vault_root,
         reveal_root=args.reveal_root or roots.reveal_root,
         photos_root=args.photos_root or roots.photos_root,
     )

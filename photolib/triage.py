@@ -636,6 +636,17 @@ class Verdict:
     own, and is the wrong thing to use when it does -- see `probe._worklist_sql`,
     whose `candidate` CTE sits between the two and which bound them as one list
     until it was measured against a rule set holding a directory rule.
+
+    `winner` is the first-match-wins position `counts` already groups by, exposed
+    for a caller that needs *which* rule decided a row and not only whether it
+    survived -- `promote` names it against every object it destroys. It binds
+    `winner_params`, which is **not** `case_params`: a rule set with no `exclude`
+    in it collapses `kept` to the constant 1 and takes its bound values away with
+    it, while `winner` still carries the whole `CASE`. Select `kept` and bind
+    `[*dir_params, *case_params]`, or select `winner` and bind
+    `[*dir_params, *winner_params]`; selecting both pays the `CASE` twice, and
+    `kept_of` exists so that a caller can compute `winner` once into a column and
+    derive the verdict from that column instead.
     """
 
     ctes: list[str]
@@ -643,11 +654,24 @@ class Verdict:
     kept: str
     dir_params: list
     case_params: list
+    winner: str = str(NO_MATCH)
+    winner_params: tuple = ()
+    excluded: tuple[int, ...] = ()
 
     @property
     def params(self) -> list:
         """Both groups, in text order, for a caller that interposes nothing."""
         return [*self.dir_params, *self.case_params]
+
+    def kept_of(self, column: str) -> str:
+        """`kept`, re-expressed over an already-computed `winner` column.
+
+        Binds nothing: rule positions are integers this module generated, and
+        the caller has already paid `case_params` once, for `winner`.
+        """
+        if not self.excluded:
+            return "1"
+        return f"({column} NOT IN ({', '.join(str(position) for position in self.excluded)}))"
 
     def query(self, *ctes: str, tail: str) -> str:
         """`WITH <dir CTE?>, <the caller's CTEs> <tail>`."""
@@ -669,7 +693,17 @@ def verdict_expression(rules: list[Rule], alias: str = "k", restrict: str | None
     kept, case_params = _kept_expression(dirs, rules, alias)
     join = dirs.join.replace("k.dir_id", f"{alias}.dir_id")
     ctes = [dirs.cte] if dirs.cte else []
-    return Verdict(ctes, join, kept, dirs.params, case_params)
+    case_sql, winner_params = _bucket_case(rules, alias)
+    return Verdict(
+        ctes,
+        join,
+        kept,
+        dirs.params,
+        case_params,
+        _winner(dirs, case_sql),
+        tuple(winner_params),
+        tuple(rule.position for rule in rules if rule.decision == "exclude"),
+    )
 
 
 def file_counts(conn: sqlite3.Connection, rules: list[Rule] | None = None) -> dict[str, int]:

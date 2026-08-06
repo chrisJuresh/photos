@@ -34,8 +34,8 @@ def server(tmp_path: Path):
         catalog_db=tmp_path / "catalog.sqlite3",
         state_db=tmp_path / "state.sqlite3",
         thumb_root=tmp_path / "thumb",
-        mediavault_root=tmp_path / "MediaVault",
-        reveal_root=tmp_path / "MediaVault" / "objects",
+        vault_root=tmp_path / "vault",
+        reveal_root=tmp_path / "vault",
         photos_root=tmp_path / "photos",
     )
     roots.reveal_root.mkdir(parents=True)

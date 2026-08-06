@@ -499,8 +499,9 @@ def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
     """PLAN.md lists three catalog tables; the import adds none of its own.
 
     Migration 005 adds the triage survey, which is a derived projection rebuilt
-    by `photolib.triage_survey` and never written by this import -- so it is
-    named here rather than allowed in by a loosened assertion.
+    by `photolib.triage_survey`, and 006 adds Phase 4's promotion ledger. Neither
+    is ever written by this import, so both are named here rather than allowed in
+    by a loosened assertion.
     """
     survey = {
         "triage_dir",
@@ -510,6 +511,7 @@ def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
         "triage_root",
         "triage_bucket",
         "triage_path",
+        "promotion",
     }
     connection = db.connect(*migrated)
     try:

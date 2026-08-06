@@ -61,15 +61,18 @@ def explorer_path() -> str:
     return path
 
 
-def resolve(vault_relpath: str, mediavault_root: Path, reveal_root: Path) -> Path:
+def resolve(vault_relpath: str, base: Path, reveal_root: Path) -> Path:
     """The real, existing file `vault_relpath` names, proven inside `reveal_root`.
 
-    `mediavault_root` is what the relpath is relative to; `reveal_root` is the
-    single root containment is proven against. They are not the same directory
-    today — `vault_relpath` is `objects\\sha256\\...` relative to
-    `G:\\MediaVault`, while the reveal root is `G:\\MediaVault\\objects` — and
-    step 14 moves both together. There is one containment root, not a set: a set
-    is how `F05` and `F13` happen.
+    `base` is what the relpath is relative to; `reveal_root` is the single root
+    containment is proven against. They are not necessarily the same directory,
+    which is why they are two arguments: before step 14 the base was
+    `G:\\MediaVault` and the root `G:\\MediaVault\\objects`, and step 14 moved
+    both together to `G:\\vault` — a promoted `vault_relpath` is
+    `<aa>\\<bb>\\<sha256><ext>` relative to the vault root. Changing one without
+    the other refuses every reveal, by design, rather than revealing the wrong
+    file. There is one containment root, not a set: a set is how `F05` and `F13`
+    happen.
     """
     if not vault_relpath or "\x00" in vault_relpath:
         raise RevealRefused("empty or NUL-bearing relpath")
@@ -92,7 +95,7 @@ def resolve(vault_relpath: str, mediavault_root: Path, reveal_root: Path) -> Pat
     except OSError as exc:
         raise RevealRefused(f"reveal root does not resolve: {reveal_root}") from exc
     try:
-        target = Path(os.path.realpath(Path(mediavault_root) / relative, strict=True))
+        target = Path(os.path.realpath(Path(base) / relative, strict=True))
     except OSError as exc:
         raise RevealRefused(f"cannot resolve: {vault_relpath!r}") from exc
 

@@ -2127,11 +2127,27 @@ from git by the `*.jsonl` rule — it lives in the vault, not the repo.
 
 ---
 
-# Step 14 — Phase 4 promote
+# Step 14 — Phase 4 promote — ⏳ **DRY RUN CLEAN 2026-08-07, destructive pass pending**
 
 **Effort:** `xhigh` · run in plan mode first · dry run before anything executes
 
 The only step in the project that deletes. It operates on 420 GB with one other copy.
+
+**The dry run reproduces the gate's counts exactly**: 38,376 promotions (435.6 GB), 107,658
+excluded unlinks (15.5 GB), 0 staging renames, 146,034 objects, with the object tree set-equal to
+the catalog both directions and every promotion classifying S0. The three preconditions were
+re-derived from artifacts rather than read out of a document: step 13's four checks
+(`PLAN.md` "Gate"), step 13b's four server-side hash confirmations (`PLAN.md` "Step 11"), and
+`G:\vault\origins.jsonl` at 300,300,043 bytes on disk — which `promote.preflight` now re-checks
+itself, so the gate is code and not a habit.
+
+Four things worth carrying, all of them measured (see `PLAN.md` § "Phase 4" for the numbers):
+the orphaned-derivative projection in the prompt below is high — 66,106 tiles, not ~107,658,
+because step 5 only copied derivatives v1 had actually built; the object-tree enumeration is
+917 s cold, so budget ~1.5 h rather than ~1.3 h; 31 of the unlinks are decided by an *override*
+rather than by a rule, so the log's reason field has to express that; and `file.state =
+'published'` silently strands 23 error-stub rows in `phase2b` unless its state filters move with
+it, which they now have.
 
 ```text
 Read PLAN.md "Phase 4" in full — it was rewritten on 2026-08-01 and the current text is the

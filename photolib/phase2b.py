@@ -229,10 +229,12 @@ def _source_path(config: Config, state: str, vault_relpath: str) -> str:
     """Where a `file` row's bytes actually are.
 
     `vault_relpath` is relative to MediaVault for an adopted object and to the
-    vault for a staged copy. The two roots are different directories and stay
-    different until step 14 moves them together.
+    vault for a staged copy or a promoted one. Step 14 moved the objects, so
+    `published` joins `staged` on the vault side while `read` stays on
+    MediaVault's -- and the 23 kept files carrying an `{"error": ...}` quality
+    stub are reachable by `--retry-errors` after promotion only because of this.
     """
-    root = config.vault_root if state == "staged" else config.mediavault_root
+    root = config.mediavault_root if state == "read" else config.vault_root
     return str(root / vault_relpath)
 
 
@@ -245,7 +247,7 @@ def worklist(conn, config: Config, *, exts: frozenset[str] = DECODABLE) -> list[
     rows = conn.execute(
         "SELECT sha256, lower(ext), state, vault_relpath FROM file "
         "WHERE quality IS NULL AND vault_relpath IS NOT NULL "
-        "AND state IN ('read', 'staged') ORDER BY sha256"
+        "AND state IN ('read', 'staged', 'published') ORDER BY sha256"
     ).fetchall()
     return [
         Item(sha256, ext, _source_path(config, state, relpath), state == "staged")
@@ -1153,7 +1155,7 @@ def residue(conn) -> list[tuple[str, int, bool]]:
         (ext, count, ext in DECODABLE)
         for ext, count in conn.execute(
             "SELECT lower(ext), count(*) FROM file WHERE quality IS NULL "
-            "AND state IN ('read', 'staged') GROUP BY 1 ORDER BY 2 DESC"
+            "AND state IN ('read', 'staged', 'published') GROUP BY 1 ORDER BY 2 DESC"
         )
     ]
 
@@ -1170,7 +1172,7 @@ def clear_errors(conn) -> int:
     conn.execute("BEGIN")
     cursor = conn.execute(
         f"UPDATE file SET quality = NULL WHERE quality LIKE '%\"error\"%' "
-        f"AND state IN ('read', 'staged') AND lower(ext) IN ({placeholders})",
+        f"AND state IN ('read', 'staged', 'published') AND lower(ext) IN ({placeholders})",
         sorted(DECODABLE),
     )
     conn.execute("COMMIT")

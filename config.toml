@@ -42,9 +42,11 @@ state_db   = 'E:\photolib\state.sqlite3'
 backup_root = 'C:\photolib-backups'
 
 # The single containment root /api/reveal resolves against. A set of roots is how
-# path-escape bugs happen, so there is exactly one. Step 14 changes this to
-# vault_root once promotion has moved the objects.
-reveal_root = 'G:\MediaVault\objects'
+# path-escape bugs happen, so there is exactly one. Step 14 moved the objects into
+# the vault, so this moved with them -- together with the base `grid` joins a
+# relpath to, which is `vault_root` now and was `mediavault_root` before. Changing
+# one without the other refuses every reveal rather than revealing a wrong file.
+reveal_root = 'G:\vault'
 
 # Not a path. Passed to restic as --password-command; the password itself is a
 # DPAPI blob readable only by this account, and never appears on a command line.

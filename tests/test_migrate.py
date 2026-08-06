@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 5
+LATEST = 6
 
 
 def test_applies_from_empty(pair):
@@ -23,9 +23,10 @@ def test_applies_from_empty(pair):
     # The gate: version 2 in both files, each read on its own.
     assert file_version(catalog) == LATEST
     assert file_version(state) == LATEST
-    # The catalog holds the three product tables plus the triage survey, which
-    # is derived and regenerable and therefore belongs on this side. Decisions
-    # stay in state, and migration 005 adds nothing there.
+    # The catalog holds the three product tables, the triage survey -- derived and
+    # regenerable, so it belongs on this side -- and Phase 4's promotion ledger,
+    # which is machine-produced and would otherwise bloat the one irreplaceable
+    # file. Decisions stay in state, and migrations 005 and 006 add nothing there.
     assert table_names(catalog) == {
         "schema_version",
         "origin",
@@ -38,6 +39,7 @@ def test_applies_from_empty(pair):
         "triage_root",
         "triage_bucket",
         "triage_path",
+        "promotion",
     }
     assert table_names(state) == {"schema_version", "triage_rule", "triage_override"}
 
@@ -61,6 +63,7 @@ def test_creates_every_index(conn):
         "triage_dir_segment_i",
         "triage_bucket_dir",
         "triage_path_bucket",
+        "promotion_status",
     }
 
 

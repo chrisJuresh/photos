@@ -1598,6 +1598,35 @@ Interactive, offline from the source, no deadline. Details below.
 > It applies to in-place edits at constant size and mtime, which cannot happen to a
 > content-addressed vault object without the name/hash check catching it.
 
+> **Status 2026-08-07: the code is in and the dry run is clean. The destructive pass has not
+> run.** `python -m photolib.promote` defaults to the dry run and re-derived all three
+> populations from the live 391-rule / 31-override set, reproducing the 2026-08-04 figures
+> exactly — 38,376 promotions (435,638,494,775 B), 107,658 excluded unlinks (15,514,012,152 B),
+> 0 staging renames, 146,034 objects. The object tree is set-equal to the catalog in both
+> directions at 146,034, all 38,376 targets are absent so every object classifies S0, and a
+> 500-object baseline sample is `nlink 1` / no read-only / no reparse throughout. 107,627 of the
+> unlinks are decided by a rule and **31 by an override** — every override in the set names a
+> MediaVault object the rules alone would keep, so the log has to be able to say `override` where
+> a rule id would go.
+>
+> **Three measurements that correct this section rather than confirm it.**
+>
+> The derivatives that outlive their object are **66,106** thumbnails, not the ~107,658 the step's
+> prompt projected: 41,552 excluded objects never had a tile, because step 5 copied only what v1
+> had already built and left the errored ones alone. Substrates are **874** of the 2,738. Both
+> are still left in place, and step 16 counts them without failing on them.
+>
+> The dry run's object-tree enumeration costs **917 s** on the cold USB HDD — not the tens of
+> seconds `adopt_mediavault.object_index`'s docstring implies from a warm tree — and the
+> destructive pass pays it too, before it touches anything. **Budget ~1.5 h, not ~1.3 h.**
+>
+> The ledger is `promotion` in `catalog.sqlite3` (migration 006), one row per object, committed as
+> `intent` *before* the syscall it describes; the append-only delete log is
+> `E:\photolib\promote-unlink.log`, one JSON object per line, the same self-describing format
+> `origins.jsonl` uses and for the same reason. Setting `file.state = 'published'` also moved
+> `phase2b`'s three state filters and `_source_path` to accept it, or the 23 kept files carrying
+> an `{"error": …}` quality stub would have become unretryable the moment they were promoted.
+
 The mechanism is sound and was verified hard. `CreateHardLinkW` (kernel32) needs **no special
 privilege** — confirmed from a non-elevated token — and creates no reparse point, so
 `SeCreateSymbolicLinkPrivilege` is not involved. Cross-volume fails **loudly** with winerror

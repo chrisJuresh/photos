@@ -86,13 +86,16 @@ def make_grid(tmp_path: Path):
     started: list[GridServer] = []
 
     def factory(*, count: int = 40, tie: int = 0, thumbnails: int = 0) -> Grid:
-        base = tmp_path / "MediaVault"
+        # Step 14 promoted the objects, so the base a relpath joins to and the
+        # containment root are both the vault root now. They stay two fields
+        # because they are two questions -- see `Roots`.
+        base = tmp_path / "vault"
         roots = Roots(
             catalog_db=tmp_path / "catalog.sqlite3",
             state_db=tmp_path / "state.sqlite3",
             thumb_root=tmp_path / "thumb",
-            mediavault_root=base,
-            reveal_root=base / "objects",
+            vault_root=base,
+            reveal_root=base,
             photos_root=tmp_path / "photos",
         )
         (roots.reveal_root).mkdir(parents=True, exist_ok=True)
@@ -529,8 +532,8 @@ def revealable(make_grid):
     names = {1: "a space.jpg", 2: "a,comma.jpg"}
     for photo_id, name in names.items():
         sha = conn.execute("SELECT rep_sha256 FROM photo WHERE id = ?", (photo_id,)).fetchone()[0]
-        relpath = f"objects\\{name}"
-        (grid.roots.mediavault_root / "objects" / name).write_bytes(b"jpg")
+        relpath = name
+        (grid.roots.vault_root / name).write_bytes(b"jpg")
         conn.execute("UPDATE file SET vault_relpath = ? WHERE sha256 = ?", (relpath, sha))
     conn.commit()
     conn.close()
@@ -640,11 +643,11 @@ def test_an_unknown_photo_id_is_404(grid):
 
 def test_an_escaping_vault_relpath_is_refused_without_leaking_it(make_grid):
     grid = make_grid(count=2)
-    (grid.roots.mediavault_root / "outside.txt").write_bytes(b"secret")
+    (grid.roots.vault_root.parent / "outside.txt").write_bytes(b"secret")
     conn = sqlite3.connect(grid.roots.catalog_db)
     sha = conn.execute("SELECT rep_sha256 FROM photo WHERE id = 1").fetchone()[0]
     conn.execute(
-        "UPDATE file SET vault_relpath = ? WHERE sha256 = ?", (r"objects\..\outside.txt", sha)
+        "UPDATE file SET vault_relpath = ? WHERE sha256 = ?", (r"ab\..\..\outside.txt", sha)
     )
     conn.commit()
     conn.close()
@@ -652,7 +655,8 @@ def test_an_escaping_vault_relpath_is_refused_without_leaking_it(make_grid):
     status, _, body = reveal_post(grid, b'{"id": 1}')
     assert status == 403
     assert grid.spawns == []
-    assert b"outside" not in body and b"MediaVault" not in body
+    # The client gets a field name. Neither the path nor any absolute path leaks.
+    assert b"outside" not in body and b"C:" not in body
 
 
 def test_reveal_by_origin_resolves_under_the_photos_root(make_grid):
@@ -690,7 +694,7 @@ def test_an_origin_path_outside_the_photos_root_is_refused(make_grid):
     root.
     """
     grid = make_grid(count=2)
-    outside = grid.roots.mediavault_root / "objects" / "elsewhere.jpg"
+    outside = grid.roots.vault_root / "elsewhere.jpg"
     outside.write_bytes(b"jpg")
     conn = sqlite3.connect(grid.roots.catalog_db)
     conn.execute(
@@ -704,7 +708,7 @@ def test_an_origin_path_outside_the_photos_root_is_refused(make_grid):
     status, _, body = reveal_post(grid, b'{"origin": 7}')
     assert status == 403
     assert grid.spawns == []
-    assert b"elsewhere" not in body and b"MediaVault" not in body
+    assert b"elsewhere" not in body and b"C:" not in body
 
 
 def test_an_unknown_origin_id_is_404(grid):
@@ -744,7 +748,7 @@ def test_the_server_writes_nothing(revealable):
 
     def snapshot() -> dict[str, tuple[int, int]]:
         seen = {}
-        for root in (grid.roots.mediavault_root, grid.roots.thumb_root):
+        for root in (grid.roots.vault_root, grid.roots.thumb_root):
             for path in sorted(root.rglob("*")):
                 if path.is_file():
                     stat = path.stat()

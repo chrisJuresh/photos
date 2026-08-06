@@ -161,6 +161,34 @@ installed. `bench` projects the wall time without writing anything.
 python -m photolib.phase2b bench --n 500
 ```
 
+Phase 4's promotion: hardlink every triage-kept MediaVault object into `G:\vault` under
+`<aa>\<bb>\<sha256><ext>`, unlink the MediaVault name, and unlink the 107,658 excluded objects
+outright. **The only step that deletes.** Default mode is a dry run; `--execute` additionally
+requires a typed phrase carrying the counts derived in that same process. ~1.5 h, of which 917 s
+is the cold object-tree enumeration it does before touching anything. Per object, classified
+immediately before every action — never link-all-then-unlink-all, and never a branch on
+`ERROR_ALREADY_EXISTS(183)`. Resumable off the `promotion` ledger, whose rows are written before
+the syscalls they describe; `--repair` finishes anything a sharing violation left half-linked, and
+`--limit N` bounds each population for a rehearsal. Every delete is appended to
+`E:\photolib\promote-unlink.log` as one JSON object per line, with the rule or override that
+condemned it. Nothing else may touch `G:` while it runs, Explorer windows included — CPython's
+`open()` passes no `FILE_SHARE_DELETE`, so any reader blocks the unlink.
+
+```bash
+python -m photolib.promote
+```
+
+Step 16, the pass that finds out what step 14 actually did — it destroys names and verifies
+nothing itself. Re-hashes every promoted vault name against its recorded SHA-256 (435.6 GB, one
+reader, ~1h57m), asserts `nlink == 1` and read-only and containment per object, asserts that
+nothing survives under MediaVault's objects root and that staging is empty *positively*, and
+reconciles the delete log against the excluded set in both directions. Writes nothing: the
+connection is `mode=ro`. Never run it concurrently with `promote` or `promote --repair`.
+
+```bash
+python -m photolib.promote_verify
+```
+
 To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
 regenerated — onto `C:`, a different physical disk from `E:`. Instant, ~20 KB before triage. Uses
 `VACUUM INTO`, so it is safe against a live WAL, and it refuses to write onto the source's own
