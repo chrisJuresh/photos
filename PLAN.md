@@ -1372,9 +1372,11 @@ accordingly — this is the argument for keeping `origins.jsonl` and the state s
 local, and separately copyable, so that the common case (recover *one* wrongly excluded file)
 never touches the 436 GB.
 
-**The repo is owned by `mark`, not `chris`.** Writes into `/mnt/bay6/ResticPhotos` need `sudo`;
-`/mnt/bay6/photolib-backup/` is chris-owned and does not. All three of the *new* uploads land in
-the chris-owned directory, so only the optional 4-file repo top-up needs elevation.
+~~**The repo is owned by `mark`, not `chris`.** Writes into `/mnt/bay6/ResticPhotos` need
+`sudo`.~~ **False as of 2026-08-06** — it is `chris chris`, writable unelevated, presumably
+re-owned when it was moved out of the qBittorrent tree. `/mnt/bay6/photolib-backup/` is
+chris-owned too. **Nothing in this step needs elevation.** Passwordless `sudo` does work on this
+host if something later does.
 
 #### Why the upload is the only thing that changes the risk
 
@@ -1405,7 +1407,7 @@ whole reason `origins.jsonl` has to be uploaded before anything is deleted.
 Verified end to end today against restic 0.19.1 and snapshot `ce88f697`; see the corrected note
 under Phase 4 for what the earlier "no leading slash" rule actually got wrong.
 
-#### ✅ Items 1–3 uploaded and confirmed server-side, 2026-08-06
+#### ✅ All four items uploaded and confirmed server-side, 2026-08-06
 
 The instruction below was executed. Every hash was re-read **on the server**, not inferred from
 `scp` exiting 0.
@@ -1415,7 +1417,7 @@ The instruction below was executed. Every hash was re-read **on the server**, no
 | 1 | 8 state snapshots, loose in `/mnt/bay6/photolib-backup/` | all 8 `sha256sum` identical to local |
 | 2 | `origins.jsonl`, 300,300,043 bytes | `1086e5eb…5eaee2e9` ✅ — 1m40s, exactly 3.0 MB/s |
 | 3 | `catalog.sqlite3`, 1,600,004,096 bytes | `085e18e3…f93d821f` ✅ — 8m54s. Replaced the 1,050,861,568-byte schema-older copy |
-| 4 | **Not done.** The 4 repo top-up files | Needs `sudo` on the far side; advisory, all git internals |
+| 4 | The 4 repo top-up files, ~11 MB | All 4 self-verify against their own filenames in place. **Remote and local repo file sets are now identical: 24,844 files each, 0 on either side only** |
 
 Items 2 and 3 went up under a `.new` name and were renamed only after the server-side hash
 matched. That is not ceremony: `scp` overwrites in place, and a transfer that dies at minute 7
@@ -1425,6 +1427,24 @@ off-site catalog with garbage. The rename is free; do it this way every time.
 The old remote `catalog.sqlite3` was **not** kept under a second name. It is schema-older and
 strictly superseded, and a stale catalog living in a backup directory is a restore trap, not a
 safety net.
+
+> **⚠ TWO CORRECTIONS from doing item 4 rather than reasoning about it.**
+>
+> **The repo is owned by `chris`, not `mark`, and needs no `sudo`.**
+> `/mnt/bay6/ResticPhotos` is `drwxr-sr-x chris chris`, and an unelevated `touch` in it succeeds.
+> The ownership presumably changed when the directory was moved out of the qBittorrent tree on
+> 2026-08-02, and this document kept asserting the pre-move fact. The four files went in as a
+> plain `cp`, landing `644 chris:chris` like every other file in the repo. (`sudo -n` does work
+> passwordlessly on this host, which is worth knowing and was not needed.)
+>
+> **Comparing two file lists across the two machines tripped exactly the hazard Phase 0 named.**
+> The first comparison reported all 24,844 files differing on both sides while both counts were
+> equal — Python's `pathlib.write_text` translated `\n` to `\r\n` on Windows, so no line matched
+> its LF-terminated remote counterpart. Phase 0's condition 3 warns that "the Windows ANSI
+> default silently mangles the join between the two lists"; this is the same class of defect one
+> layer down, and it produced a **maximally wrong** answer that a smaller bug would not have.
+> Write the file with `newline="\n"`. A cross-machine list comparison that reports *everything*
+> differing is a bug in the comparison, not a finding.
 
 **Confirmation 4 was executed end to end**, on a genuinely triage-excluded photograph, starting
 from the server's copy of the map rather than the local one:
@@ -1441,9 +1461,13 @@ POSIX translation → bytes back, hash-matched. The repo side of that dump was t
 proving it against the remote repo means pulling 436 GB, which is what the 2026-08-06 per-file
 server-side hash check exists to avoid.
 
-**What this does and does not unblock.** (a) and (c) of Phase 4's gate are now discharged for
-`origins.jsonl` and the decisions. The corpus itself has been off-site since 2026-08-01. Item 4
-remains outstanding and is advisory.
+**What this unblocks.** (a), (b) and (c) of Phase 4's gate are all discharged. The off-site copy
+is no longer 39 files behind: **the remote repository is now byte-for-byte the local one**, by
+file-set equality plus the self-verifying-filename property that covers every pack, index and
+snapshot. Nothing in this step is outstanding.
+
+The gap that remains is the one this step never addressed and must not be read as closing:
+`G:\MediaVault`'s object tree and `G:\vault` are still backed up nowhere.
 
 #### The instruction: what to upload, in what order, what to confirm
 
@@ -1476,31 +1500,46 @@ scp -P 22222 G:/vault/origins.jsonl chris@82.14.247.27:/mnt/bay6/photolib-backup
 scp -P 22222 E:/photolib/catalog.sqlite3 chris@82.14.247.27:/mnt/bay6/photolib-backup/catalog.sqlite3
 ```
 
-**4 — optional, and the only one needing `sudo` on the far side:** the 4 repo files the
-2026-08-02 top-up created after the upload — 2 packs, 1 index, 1 snapshot, ~11 MB total.
-Advisory, not blocking: all 39 files they carry are git internals and none is media. But it is
-11 MB and it makes the remote repo byte-for-byte equal to the local one.
+**4 — the repo top-up.** The 4 files the 2026-08-02 top-up created after the upload — 2 packs,
+1 index, 1 snapshot, ~11 MB, 6 seconds. It makes the remote repo byte-for-byte equal to the
+local one. Staged through `~/restic-topup/` rather than copied straight in, so that each file
+can be checked against its own name *before* it enters the repository.
 
 ```bash
 scp -P 22222 G:/ResticPhotos/data/61/6116646c25a7e63f15a80c5ac98fe12efde4e9331e226ed06882ee04eb8dceb7 G:/ResticPhotos/data/d1/d1a19dabe29a01890acdb951fb2afdfacab6e94775a27ace2f4b248e170df95f G:/ResticPhotos/index/de07667e441057cfc874555835b7259de68178d22a8f2a7b364bc7b97b7b0a6c G:/ResticPhotos/snapshots/1e80c50e88c52a0a8592bb1745f6c610c257cad9c63ef7979af2678ad9a436e2 chris@82.14.247.27:~/restic-topup/
 ```
 
-Then, on the server, `sudo cp` each into the matching directory under
-`/mnt/bay6/ResticPhotos` — `data/61/`, `data/d1/`, `index/`, `snapshots/` — keeping the
-filenames exactly as they are, because in restic a filename *is* the content hash and renaming
-one silently corrupts the repository. Create `~/restic-topup/` first; `scp` will not make it.
+Create `~/restic-topup/` first; `scp` will not make it. Then, on the server — **no `sudo`**, the
+repo is chris-owned:
 
-**Confirm all four of these before step 14, and before deleting anything local.** Each is a
+```bash
+ssh -p 22222 chris@82.14.247.27 'cd ~/restic-topup && for f in *; do [ "$(sha256sum "$f" | cut -d" " -f1)" = "$f" ] && echo "SELF-VERIFIES $f" || echo "MISMATCH $f"; done'
+```
+
+Only once all four self-verify, `cp -n` each into the matching directory — `data/61/`,
+`data/d1/`, `index/`, `snapshots/` — keeping the filenames **exactly** as they are, because in
+restic a filename *is* the content hash and renaming one silently corrupts the repository.
+`chmod 644` to match the rest of the repo, re-verify in place, then remove the staging
+directory. `cp -n` rather than `cp`, so a name that unexpectedly already exists is skipped
+rather than overwritten.
+
+The closing check is a file-set comparison, remote against local, which is the technique this
+plan prefers over a remote `check --read-data`: combined with the self-verifying filenames it
+establishes the same property, and unlike `check` it notices a *missing* file. Write the local
+list with `newline="\n"` — see the correction above.
+
+**Confirm all five of these before step 14, and before deleting anything local.** Each is a
 server-side check, not a local one, because the failure being guarded against is "the upload
 reported success and the bytes are not there". Hash on the server and compare against the
-values recorded above:
+values recorded above. **All five passed 2026-08-06.**
 
 | | Confirm | Expected |
 |---|---|---|
 | 1 | `sha256sum /mnt/bay6/photolib-backup/origins.jsonl` | `1086e5ebf5e83672ab01f9afc53e5463d3db1435ca431774b9aea2905eaee2e9`, 300,300,043 bytes |
 | 2 | `sha256sum /mnt/bay6/photolib-backup/state-2*.sqlite3` | `24f5fd0ad51cc983167fe57198345e2eb72bfb5039f0fa2bdd49f0de6530117a` for `state-20260806T211847Z.sqlite3`, 73,728 bytes — **and all 8 snapshots listed** |
 | 3 | `sha256sum /mnt/bay6/photolib-backup/catalog.sqlite3` | `085e18e320948b9fea50be0c2a6e27a67288025b8afe8b5a0937e838f93d821f`, 1,600,004,096 bytes. Must **differ** from the file that was there before — the old one is schema-older, reporting `schema_version` 1–3 against 5, with no `triage_*` table at all |
-| 4 | One real reversal, executed off the uploaded copy | `grep` a known excluded `sha256` out of the *server's* `origins.jsonl`, translate a path, and confirm the line is there. The 436 GB repo does not need re-verifying — 2026-08-06 hashed all 24,840 remote files against their own filenames, 24,839/24,840 self-verifying, the exception being `config`, which is not content-addressed |
+| 4 | The 4 top-up files in place, and the repo file sets equal | Each self-verifies against its own filename; `find . -type f` on both sides gives **24,844 = 24,844, 0 on either side only**. The 436 GB does not need re-reading — 2026-08-06 hashed all remote files against their own names, the one exception being `config`, which is not content-addressed |
+| 5 | One real reversal, executed off the uploaded copy | `grep` a known excluded `sha256` out of the *server's* `origins.jsonl`, translate a path, `restic --no-lock dump` it, and require the bytes to hash back to the key |
 
 Do **not** treat `scp` exiting 0 as confirmation. It reports the transfer, not the contents, and
 this is the last checkpoint before an irreversible delete.
@@ -1551,9 +1590,9 @@ Interactive, offline from the source, no deadline. Details below.
 > `catalog.sqlite3`. A real reversal of a triage-excluded photograph was executed off the
 > uploaded map and returned hash-matching bytes. See "Step 11" for the measurements.
 >
-> What still stands between here and Phase 4 is **step 12's classifier**, not the backup. The
-> one loose end from this step is the 4-file restic top-up, which needs `sudo` on the server and
-> is advisory: all 39 files it carries are git internals and none is media.
+> **(b) is discharged too**, and no longer merely advisory: the 4-file top-up is in the remote
+> repo, and the remote and local file sets are now identical at 24,844 files with zero on either
+> side only. What stands between here and Phase 4 is **step 12's classifier**, not the backup.
 >
 > `--force` is **not** now mandatory for every future pass — see the corrected rule in Phase 0.
 > It applies to in-place edits at constant size and mtime, which cannot happen to a
@@ -2078,7 +2117,7 @@ later.**
 | ~~8~~ | ~~Phase 2a verification read + ARW repair~~ | **Done 2026-08-03.** |
 | 9 | Triage UI | **Built 2026-08-03** — engine, survey, eight screens, probe and write API, all verified against the real catalog. See "Triage". **The remaining work is not code: it is looking at the corpus and saving rules.** Nothing downstream can start until that lands a kept set — step 10 gap-fills only what triage keeps, and step 12 unlinks only what it excludes |
 | ~~10~~ | ~~Phase 2b gap fill~~ | **Done 2026-08-04 in 3m22s.** 1,252 of 1,659 decoded. **Population 2 is empty** — at the 391-rule set every surviving file is already a MediaVault object. Benchmarked on 500 first, which projected 5m38s |
-| ~~11~~ | ~~`origins.jsonl` export + server upload~~ | **Done 2026-08-06.** 787,798 lines / 1,374,328 paths, zero diff against the live `origin` both directions. Uploaded with `origins.jsonl`, 8 state snapshots and a current `catalog.sqlite3`, every hash re-read server-side; one real reversal executed off the uploaded map. Outstanding: the 4-file restic top-up, which needs `sudo` and is advisory |
+| ~~11~~ | ~~`origins.jsonl` export + server upload~~ | **Done 2026-08-06.** 787,798 lines / 1,374,328 paths, zero diff against the live `origin` both directions. Uploaded with 8 state snapshots, a current `catalog.sqlite3` and the 4-file repo top-up, every hash re-read server-side; the remote repo is now file-set-identical to the local one, and one real reversal was executed off the uploaded map. Nothing outstanding |
 | 12 | Phase 4 promote + Phase 5 group | Gated on step 11 completing and verifying |
 | 13 | Post-Phase-4 re-hash sweep | Phase 4 is not complete without it. Shape is `phase2a` pass `a`, one reader; the difficulty is scope, not code, and it depends on what step 12's classifier persists — see "Phase 4" |
 
