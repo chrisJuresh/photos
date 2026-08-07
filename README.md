@@ -1,68 +1,67 @@
 # photos
 
-A local-first photo and video vault. The whole previous implementation now lives in
-[`v1/`](v1/) as a read-only reference. The repository root is empty so the next version can
-be built one feature at a time.
+A local-first photo and video vault. The build is finished: 1,374,328 discovered paths were
+reduced to a triage-kept set, published into a content-addressed vault at `G:\vault`, and are
+browsed through a local website.
 
-## What happened
+Nothing in this repository is a photo. Media, the SQLite catalog, derivatives and run logs live
+on the vault disks and are excluded by `.gitignore`. GitHub is not a backup for any of it.
 
-`v1/` is a working but unreleased implementation: a Python CLI, a background worker, a
-FastAPI review API, a SvelteKit review UI, and a schema-12 SQLite catalog. It passes its own
-test suite (84 Python tests, 39 frontend tests) but a full review on 2026-07-22 recorded 83
-findings, 19 of them release-critical, and put the whole thing under a safety hold against
-real data. See [`v1/docs/SAFETY_HOLD.md`](v1/docs/SAFETY_HOLD.md).
+## Opening it
 
-Rather than fix 83 findings in place, the plan is to rebuild feature by feature and lift the
-parts of `v1/` that are already correct.
+Double-click **`Open Photo Vault.cmd`**.
 
-## The docs in this folder
+It starts the grid server on `http://127.0.0.1:8770/` and opens a browser tab. The server binds
+to loopback only. Closing the console window stops it. The equivalent from a shell is:
 
-[`docs/`](docs/) describes **what `v1/` already contains** — not what to build next. One file
-per feature, so that when you pick up a feature you can read only that file, see which `v1/`
-files implement it, which tables and endpoints it owns, and which findings apply to it.
+```bash
+python -m photolib.grid --open
+```
 
-Start at [`docs/INDEX.md`](docs/INDEX.md).
+The one client has two modes: the grid, and the nine triage screens. Everything is read-only
+except `/api/triage/*`, which writes the rule set to `state.sqlite3`.
 
-| Read this | When |
+## What is where
+
+| Path | What it is |
 |---|---|
-| [`docs/INDEX.md`](docs/INDEX.md) | Choosing what to work on; seeing how features depend on each other |
-| [`docs/invariants.md`](docs/invariants.md) | Before writing any code that touches media, paths, or the database |
-| [`docs/known-defects.md`](docs/known-defects.md) | Deciding whether to lift `v1/` code or rewrite it |
-| Any other `docs/*.md` | Rebuilding that one feature |
+| `photolib/` | The website. `grid` serves it; `triage_api`, `triage_screens`, `triage` and `probe` are the triage half; `config`, `db` and `migrate` are shared infrastructure. |
+| `ui/` | Svelte 5 source for the client. `npm run build` emits `photolib/static/bundle.{js,css}`, which are committed so the server runs from a clean checkout with no node toolchain. |
+| `migrations/` | The seven SQL migrations behind the catalog and state databases. |
+| `tests/` | One suite over both the website and the archived pipeline. |
+| `archive/pipeline/` | The one-shot build pipeline that produced the vault — 16 modules, run to completion between 2026-08-01 and 2026-08-07. Still importable, still tested, not needed to serve the website. |
+| `archive/v1/` | The previous implementation, read-only reference, under a safety hold. |
+| `archive/v1-docs/` | One file per `archive/v1/` feature. Start at `archive/v1-docs/INDEX.md`. |
+| `PLAN.md`, `BUILD-PROMPTS.md` | Dated records of how the build actually went. The commands quoted inside them are as they were run at the time, under the pre-archive module paths. |
 
-[`CLAUDE.md`](CLAUDE.md) holds the working rules for Claude Code sessions in this repository.
+`archive/pipeline/` depends on `photolib` for `config`, `db`, `migrate`, `triage` and `reveal`.
+The arrow never points the other way: `photolib.grid` imports nothing from `archive`.
 
-## Rules that carry over
+## Verifying
 
-Three rules are non-negotiable regardless of how the rebuild is designed. They are the reason
-the vault is worth having.
+```bash
+python -m pytest tests -q
+```
+
+563 tests, temporary databases only — none of them opens a path from `config.toml`. Tests that
+need `ffmpeg`, `exiftool` or `rawpy` skip when the binary is absent rather than failing.
+
+[`CLAUDE.md`](CLAUDE.md) documents every command, what each one touches, and what it costs.
+
+## Rules that still hold
 
 1. **Source media and published canonical objects are permanently immutable.** No operation
    deletes, moves, renames, or overwrites them.
 2. **Reject, favourite, rate, exclude, stack, and junk are metadata.** They never become
    destructive file operations.
 3. **No media work inside an HTTP request.** Handlers query persisted state, serve existing
-   derivatives, update metadata, or enqueue a job. Decoding, hashing, copying, and ranking
-   happen in background processes.
+   derivatives, update metadata, or enqueue a job.
 
-[`docs/invariants.md`](docs/invariants.md) has the complete list with the reasoning.
+[`archive/v1-docs/invariants.md`](archive/v1-docs/invariants.md) has the complete list with the
+reasoning, and what broke in `archive/v1/` when each was only a convention.
 
-## Running the v1 archive
+## Two known gaps
 
-`v1/` is reference material and is not expected to run against real data. Its own README
-documents the setup; the short version, verified after the move:
-
-```bash
-cd v1 && ./.venv/Scripts/python.exe -m pytest -q
-```
-
-The existing virtualenv at `v1/.venv` still works. Do not point any `v1/` command at
-`G:\photos`, `G:\MediaVault`, or `G:\MediaVaultImports` — the safety hold is still in force
-and `v1/Resume Live Vault Backfill.cmd` in particular is quarantined, not supported.
-
-## Real photos are not in here
-
-This repository holds code and documentation only. Photos, canonical objects, the SQLite
-catalog, derivatives, and run logs live on the vault disk and are excluded by `.gitignore`.
-GitHub is not a backup for any of that — see
-[`v1/docs/MANUAL_REMOTE_BACKUP.md`](v1/docs/MANUAL_REMOTE_BACKUP.md).
+There is no procedure yet for adding photos after the build, and no backup of `G:\vault`.
+Both are deferred on purpose — `PLAN.md` "Open decisions" 5. The architecture was audited
+against future import on 2026-08-02 and needs no change to support it.

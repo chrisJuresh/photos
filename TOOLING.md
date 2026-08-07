@@ -17,5 +17,5 @@ Notes:
 
 - Python 3.14 has `tomllib` in the standard library, which is what `photolib/config.py`
   uses. No dependency is required to read `config.toml`.
-- `v1/.venv` is a separate Python 3.14 environment and is not this build's interpreter.
+- `archive/v1/.venv` is a separate Python 3.14 environment and is not this build's interpreter.
 - exiftool is invoked with `-stay_open` in step 10, not once per file.

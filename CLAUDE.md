@@ -1,18 +1,26 @@
 # photos
 
-A local-first photo and video vault, being rebuilt feature by feature.
+A local-first photo and video vault. **The rebuild is complete.** What is left at the
+repository root is the thing that runs: the grid and triage website, and the schema it reads.
 
-- `v1/` is the previous implementation, kept as **read-only reference**. Read it freely; do
-  not edit it, refactor it, or fix its bugs.
-- The repository root is where the new version gets built.
-- `docs/` describes what `v1/` already contains, one file per feature. Read only the file for
-  the feature at hand.
+- `photolib/` is the website — `grid`, `triage_api`, `triage_screens`, `triage`, `probe`, and
+  the `config`/`db`/`migrate` infrastructure under them. `ui/` is its Svelte source.
+- `archive/pipeline/` is the one-shot build pipeline that produced the vault: 16 modules that
+  ran to completion between 2026-08-01 and 2026-08-07. It is still importable and still
+  tested, but nothing it holds is needed to serve the website. It imports `config`, `db`,
+  `migrate`, `triage` and `reveal` from `photolib`; the arrow never points the other way.
+- `archive/v1/` is the previous implementation, kept as **read-only reference**. Read it
+  freely; do not edit it, refactor it, or fix its bugs.
+- `archive/v1-docs/` describes what `archive/v1/` contains, one file per feature. Read only
+  the file for the feature at hand.
+- **`Open Photo Vault.cmd`** at the root is the double-click launcher for the website.
 
 ## Hard rules
 
-1. **Never run `v1/` code against `G:\photos`, `G:\MediaVault`, or `G:\MediaVaultImports`.**
-   `v1/` is under a safety hold with 19 release-critical findings. Use synthetic temporary
-   corpora. `v1/Resume Live Vault Backfill.cmd` is quarantined — never invoke it.
+1. **Never run `archive/v1/` code against `G:\photos`, `G:\MediaVault`, or
+   `G:\MediaVaultImports`.** It is under a safety hold with 19 release-critical findings. Use
+   synthetic temporary corpora. `archive/v1/Resume Live Vault Backfill.cmd` is quarantined —
+   never invoke it.
 2. **Source media and published canonical objects are permanently immutable.** Nothing
    deletes, moves, renames, or overwrites them.
 3. **Reject, favourite, rate, exclude, stack, and junk are metadata only.** They never become
@@ -25,8 +33,8 @@ A local-first photo and video vault, being rebuilt feature by feature.
 6. **Schema migration and other exclusive maintenance must refuse to run while any writer is
    active.** Test migrations on a copied database first.
 
-`docs/invariants.md` explains why each of these exists and what broke in `v1/` when it was
-only a convention rather than an enforced boundary.
+`archive/v1-docs/invariants.md` explains why each of these exists and what broke in `archive/v1/`
+when it was only a convention rather than an enforced boundary.
 
 ## Scope discipline
 
@@ -37,8 +45,9 @@ This project failed once by building everything at once. Keep changes small enou
 - Do not add error handling, fallbacks, or validation for situations that cannot happen.
   Validate at system boundaries: user input, filesystem, subprocess, HTTP.
 - Do not design for hypothetical future requirements. Prefer the simplest thing that works.
-- Do not lift a `v1/` module wholesale because it exists. Check `docs/known-defects.md` for
-  that feature first — several `v1/` modules are correct in shape and unsafe in detail.
+- Do not lift an `archive/v1/` module wholesale because it exists. Check
+  `archive/v1-docs/known-defects.md` for that feature first — several `archive/v1/` modules are
+  correct in shape and unsafe in detail.
 - One safety invariant per commit where possible.
 
 Match written deliverables to the task. A bug fix does not need a summary document.
@@ -67,17 +76,18 @@ safe: it inserts nothing twice, but it does re-read the 146,034 sidecars, so all
 USB-HDD head time and is off by default.
 
 ```bash
-python -m photolib.adopt_mediavault
+python -m archive.pipeline.adopt_mediavault
 ```
 
 To resolve capture time for every adopted file. Seconds, pure DB plus one read-only manifest
 scan. Re-running is safe and lands on the same answer. `--validate` additionally prints the
 masked-shape enumeration and the per-rule EXIF agreement that decided which filename patterns
 are adopted. It **does not write `photo`** and used to — that is Phase 5's, below; run
-`python -m photolib.group` after this or the grid keeps the previous grouping's sort keys.
+`python -m archive.pipeline.group` after this or the grid keeps the previous grouping's sort
+keys.
 
 ```bash
-python -m photolib.capture_time
+python -m archive.pipeline.capture_time
 ```
 
 To copy MediaVault's existing 384px WebP derivatives onto the NVMe as grid thumbnails,
@@ -86,7 +96,7 @@ derivative errored in v1 stay without one. Re-running copies only what is absent
 interrupted pass resumes. `--limit N` stops after N for a throughput measurement.
 
 ```bash
-python -m photolib.thumbnails
+python -m archive.pipeline.thumbnails
 ```
 
 To write the Phase 1 categorical prefilter — nine `exclude` rules on extension at `seq` 0–8 in
@@ -97,7 +107,7 @@ their `created_at`; a rule set that is not exactly the prefilter is refused rath
 overwritten. Deleting a rule row reverses it.
 
 ```bash
-python -m photolib.prefilter
+python -m archive.pipeline.prefilter
 ```
 
 Phase 2a's verification read, in three passes that each resume on their own: `a` re-hashes all
@@ -114,7 +124,7 @@ partitions of disk 3, the WD Elements USB HDD. A concurrent 15 MB/s write to `F:
 `a` at 27.4 MB/s against the 62.0 the volume does when idle.
 
 ```bash
-python -m photolib.phase2a
+python -m archive.pipeline.phase2a
 ```
 
 The repaired ARW derivatives are **written to the new build's own trees, never over v1's**:
@@ -131,7 +141,7 @@ of ~2.9 s. Re-run it after anything that changes the catalog — `capture_time`,
 no decisions, so dropping every row loses nothing.
 
 ```bash
-python -m photolib.triage_survey
+python -m archive.pipeline.triage_survey
 ```
 
 To fill `file.width`/`height` for triage screen 3 by reading image **headers**, never decoding.
@@ -159,7 +169,7 @@ for ever, and `--retry-errors` clears them. Needs `ffmpeg` and `exiftool` on PAT
 installed. `bench` projects the wall time without writing anything.
 
 ```bash
-python -m photolib.phase2b bench --n 500
+python -m archive.pipeline.phase2b bench --n 500
 ```
 
 Phase 4's promotion: hardlink every triage-kept MediaVault object into `G:\vault` under
@@ -176,7 +186,7 @@ condemned it. Nothing else may touch `G:` while it runs, Explorer windows includ
 `open()` passes no `FILE_SHARE_DELETE`, so any reader blocks the unlink.
 
 ```bash
-python -m photolib.promote
+python -m archive.pipeline.promote
 ```
 
 Step 16, the pass that finds out what step 14 actually did — it destroys names and verifies
@@ -188,7 +198,7 @@ reconciles the delete log against the excluded set in both directions. Writes no
 connection is `mode=ro`. Never run it concurrently with `promote` or `promote --repair`.
 
 ```bash
-python -m photolib.promote_verify
+python -m archive.pipeline.promote_verify
 ```
 
 Phase 5's grouping, and **the only thing that builds `photo`**. 12 s, pure DB, no media root is
@@ -204,7 +214,7 @@ larger. Perceptual near-duplicates are computed and stored in `near_dup` (10,717
 regardless of corpus size. Re-run it after anything that changes the kept set or `capture_time`.
 
 ```bash
-python -m photolib.group
+python -m archive.pipeline.group
 ```
 
 To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
@@ -213,7 +223,7 @@ regenerated — onto `C:`, a different physical disk from `E:`. Instant, ~20 KB 
 volume. Run it after every triage session.
 
 ```bash
-python -m photolib.backup_state
+python -m archive.pipeline.backup_state
 ```
 
 To export `<vault_root>\origins.jsonl`, the only content-hash → original-path map and the thing
@@ -228,7 +238,7 @@ append to. `--verify` reconstructs `origin` from the JSONL alone into a scratch 
 no code with the export, and diffs the path sets both directions — 5m12s.
 
 ```bash
-python -m photolib.origins --verify
+python -m archive.pipeline.origins --verify
 ```
 
 The Phase 0 inventory: five phases as separate subcommands, all resumable, sharing a work
@@ -239,10 +249,10 @@ restic, `b` is the fail-fast sample, `c` hashes everything and writes `origin`, 
 file against the repo, `e` is the top-up backup and the **only** write to `G:\ResticPhotos`.
 
 ```bash
-python -m photolib.inventory a
+python -m archive.pipeline.inventory a
 ```
 
-Every restic read command in `photolib/restic_repo.py` carries `--no-lock`, because the default
+Every restic read command in `archive/pipeline/restic_repo.py` carries `--no-lock`, because the default
 writes a lock file into the repository being verified. The password is never handled here: it is
 a DPAPI blob reached by passing `config.toml`'s `restic_password_command` to restic's
 `--password-command`. Never echo it, never write it to a file, never put it on a command line.
@@ -304,8 +314,8 @@ To run the archived test suite as a reference oracle:
 cd v1 && ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-`v1/.venv` is a Python 3.14 environment and still works after the move. Frontend checks are
-`npm test`, `npm run check`, `npm run build` inside `v1/review_ui`. Playwright screenshot,
+`archive/v1/.venv` is a Python 3.14 environment and still works after the move. Frontend checks
+are `npm test`, `npm run check`, `npm run build` inside `archive/v1/review_ui`. Playwright screenshot,
 video, and trace capture must stay disabled.
 
 ## Feature documentation
@@ -314,31 +324,32 @@ Read the one file that matches the work. Do not read them all.
 
 | Feature | Doc |
 |---|---|
-| Inventory, dependency graph, status | `docs/INDEX.md` |
-| Safety contract and why it exists | `docs/invariants.md` |
-| Vault layout, content addressing, hashing, exact identity | `docs/storage-and-identity.md` |
-| SQLite schema, 68 tables, migration contract | `docs/database-schema.md` |
-| The 16 CLI commands and what each one touches | `docs/cli.md` |
-| Inbox discovery, manifest, approval, verified copy | `docs/import-pipeline.md` |
-| Job ledger, leases, claim tokens, worker runtime | `docs/jobs-and-workers.md` |
-| Derivatives, extended metadata, quality features | `docs/preprocessing.md` |
-| Visual similarity, RAW+JPEG grouping, exact groups | `docs/relationships.md` |
-| Review HTTP API, security posture, envelopes | `docs/review-api.md` |
-| SvelteKit app shell, routing, theming, build | `docs/review-ui.md` |
-| Logical photo library, facets, filters, inspector | `docs/library.md` |
-| Calendar, folder, equipment, map views | `docs/organize-views.md` |
-| Similarity stacks and cover ranking | `docs/stacks.md` |
-| Junk review, bulk reject, undo | `docs/junk-and-bulk-reject.md` |
-| Read-only legacy dashboard on port 8765 | `docs/legacy-dashboard.md` |
-| Test suites and synthetic corpus rules | `docs/testing.md` |
-| All 83 findings, grouped by feature | `docs/known-defects.md` |
+| Inventory, dependency graph, status | `archive/v1-docs/INDEX.md` |
+| Safety contract and why it exists | `archive/v1-docs/invariants.md` |
+| Vault layout, content addressing, hashing, exact identity | `archive/v1-docs/storage-and-identity.md` |
+| SQLite schema, 68 tables, migration contract | `archive/v1-docs/database-schema.md` |
+| The 16 CLI commands and what each one touches | `archive/v1-docs/cli.md` |
+| Inbox discovery, manifest, approval, verified copy | `archive/v1-docs/import-pipeline.md` |
+| Job ledger, leases, claim tokens, worker runtime | `archive/v1-docs/jobs-and-workers.md` |
+| Derivatives, extended metadata, quality features | `archive/v1-docs/preprocessing.md` |
+| Visual similarity, RAW+JPEG grouping, exact groups | `archive/v1-docs/relationships.md` |
+| Review HTTP API, security posture, envelopes | `archive/v1-docs/review-api.md` |
+| SvelteKit app shell, routing, theming, build | `archive/v1-docs/review-ui.md` |
+| Logical photo library, facets, filters, inspector | `archive/v1-docs/library.md` |
+| Calendar, folder, equipment, map views | `archive/v1-docs/organize-views.md` |
+| Similarity stacks and cover ranking | `archive/v1-docs/stacks.md` |
+| Junk review, bulk reject, undo | `archive/v1-docs/junk-and-bulk-reject.md` |
+| Read-only legacy dashboard on port 8765 | `archive/v1-docs/legacy-dashboard.md` |
+| Test suites and synthetic corpus rules | `archive/v1-docs/testing.md` |
+| All 83 findings, grouped by feature | `archive/v1-docs/known-defects.md` |
 
-The full `v1/` audit is in `v1/docs/` — `ARCHITECTURE_REVIEW.md`, `FINDINGS_REGISTER.md`,
-and `ACTION_PRIORITY_MATRIX.md` are the authoritative long-form versions. `docs/` summarises
-them per feature. Prefer `docs/`; open `v1/docs/` when you need the detail behind a finding.
+The full `archive/v1/` audit is in `archive/v1/docs/` — `ARCHITECTURE_REVIEW.md`,
+`FINDINGS_REGISTER.md` and `ACTION_PRIORITY_MATRIX.md` are the authoritative long-form versions.
+`archive/v1-docs/` summarises them per feature. Prefer `archive/v1-docs/`; open
+`archive/v1/docs/` when you need the detail behind a finding.
 
 ## Repository etiquette
 
 - Default branch is `main`. Branch before committing.
-- Reference `v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
-- `v1/` files are reference material: cite them as `v1/media_vault/db.py:506`.
+- Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
+- `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
