@@ -349,12 +349,13 @@ class GridServer(ThreadingHTTPServer):
 
         The sheet reserves scrollbar height for the pages it has not asked for
         yet, so it needs the size of the whole answer while it still holds only
-        the first page. There is no index on `file.kind`, so this is 146,034
-        index lookups at 1.07 s — but every connection in this process is
-        read-only, so the answer cannot change while the server runs. Counted
-        under the lock rather than around it, so two threads arriving together
-        pay for one query and not two; `main` warms it before the browser opens,
-        which is why no request ever waits on it.
+        the first page. There is no index on `file.kind`, so this is one index
+        lookup per tile — 1.07 s when `photo` held one row per file, and 24,536
+        lookups since Phase 5 made a tile a group. Every connection in this
+        process is read-only, so the answer cannot change while the server runs.
+        Counted under the lock rather than around it, so two threads arriving
+        together pay for one query and not two; `main` warms it before the
+        browser opens, which is why no request ever waits on it.
         """
         with self._totals_lock:
             if self._totals is None:
