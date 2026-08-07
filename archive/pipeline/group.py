@@ -70,7 +70,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from photolib import db, migrate
-from photolib.capture_time import SORT_KEY_UNDATED
+from archive.pipeline.capture_time import SORT_KEY_UNDATED
 
 # The one `file.state` that becomes a tile. See the module docstring.
 TILE_STATE = "published"
@@ -453,7 +453,7 @@ def rebuild(conn: sqlite3.Connection) -> Report:
     if not kept:
         raise GroupRefused(
             f"no file is in state {TILE_STATE!r}, so there is nothing to show. Phase 4 "
-            "(python -m photolib.promote) publishes the kept objects; this step reads what it "
+            "(python -m archive.pipeline.promote) publishes the kept objects; this step reads what it "
             "published rather than emptying the grid"
         )
     report.edited_files = sum(file.edited for file in kept.values())
@@ -752,7 +752,7 @@ def run(top: int = 20, *, catalog_db=None, state_db=None) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="python -m photolib.group", description=__doc__.splitlines()[0]
+        prog="python -m archive.pipeline.group", description=__doc__.splitlines()[0]
     )
     parser.add_argument("--top", type=int, default=20, help="collapsed groups to list")
     args = parser.parse_args()

@@ -44,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 
 from photolib import db, migrate
-from photolib.adopt_mediavault import capture_iso, open_manifest
+from archive.pipeline.adopt_mediavault import capture_iso, open_manifest
 from photolib.config import Config, load
 
 PHOTOS_PREFIX = "G:\\photos\\"
@@ -311,7 +311,7 @@ def resolve(
     146,034 assets, and it is a grid full of `.pyc` files now that `file` holds
     787,798. Phase 5 owns `photo`: a tile is a *group* of triage-kept files, which
     is a shape this function has no way to produce and no business overwriting.
-    Run `python -m photolib.group` after this.
+    Run `python -m archive.pipeline.group` after this.
     """
     ceiling = ceiling or datetime.now()
     offsets = offsets or {}
@@ -505,7 +505,7 @@ def run(
         undated = conn.execute("SELECT count(*) FROM file WHERE taken_at IS NULL").fetchone()[0]
         print(
             f"\nsort_key  {undated:,} files will land on the {SORT_KEY_UNDATED!r} sentinel"
-            "\n          `photo` is not written here -- run python -m photolib.group"
+            "\n          `photo` is not written here -- run python -m archive.pipeline.group"
         )
 
         if validate:

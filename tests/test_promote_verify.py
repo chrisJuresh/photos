@@ -32,7 +32,8 @@ from test_promote import (  # noqa: F401 -- config and corpus are fixtures
     object_relpath,
 )
 
-from photolib import db, promote, promote_verify
+from archive.pipeline import promote, promote_verify
+from photolib import db
 from photolib.config import Config
 
 

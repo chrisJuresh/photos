@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from photolib import features
+from archive.pipeline import features
 
 APP_JS = Path(__file__).resolve().parent.parent / "ui" / "src" / "lib" / "thumbhash.js"
 HARNESS = Path(__file__).resolve().parent / "thumbhash_decode.js"

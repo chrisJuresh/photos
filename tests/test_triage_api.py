@@ -441,7 +441,7 @@ def test_no_triage_code_path_opens_a_file_under_the_photos_root_for_writing(tmp_
 
 def test_the_survey_build_never_opens_a_media_file(tmp_path, monkeypatch):
     """`triage_survey` is pure SQL over the catalog -- the claim, checked."""
-    from photolib import triage_survey
+    from archive.pipeline import triage_survey
 
     catalog, state = tmp_path / "catalog.sqlite3", tmp_path / "state.sqlite3"
     migrate.apply(catalog, state)

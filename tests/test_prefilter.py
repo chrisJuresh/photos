@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from photolib import prefilter
+from archive.pipeline import prefilter
 
 # (sha seed, ext, size, how many origin paths)
 CORPUS = (

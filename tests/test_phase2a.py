@@ -20,9 +20,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from photolib import db, features, phase2a
+from archive.pipeline import features, phase2a
+from photolib import db
 from photolib.config import Config
-from photolib.thumbnails import thumb_path
+from photolib.config import thumb_path
 
 # --- a MediaVault made of six assets -----------------------------------------
 
@@ -177,7 +178,7 @@ def vault(tmp_path: Path, migrated: tuple[Path, Path]) -> tuple[Config, sqlite3.
 
 
 def scanned(config: Config) -> tuple[dict, dict, dict]:
-    from photolib.adopt_mediavault import open_manifest
+    from archive.pipeline.adopt_mediavault import open_manifest
 
     manifest = open_manifest(config.mediavault_manifest_db)
     try:
@@ -536,6 +537,6 @@ def test_assets_width_and_height_are_never_read():
 
 
 def test_no_v1_module_is_imported():
-    for module in (phase2a, features, __import__("photolib.decode", fromlist=["x"])):
+    for module in (phase2a, features, __import__("archive.pipeline.decode", fromlist=["x"])):
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "import v1" not in source and "from v1" not in source

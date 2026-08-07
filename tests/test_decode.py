@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from photolib import decode
+from archive.pipeline import decode
 
 TARGETS = "decode_targets"
 

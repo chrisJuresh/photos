@@ -1,5 +1,5 @@
 // Runs the ThumbHash decoder the client actually ships, so the encoder in
-// photolib/features.py is checked against the code the browser will execute
+// archive/pipeline/features.py is checked against the code the browser will execute
 // rather than against a second implementation written to agree with it.
 //
 // `th` is NULL in every catalog row until step 9, which means that function has

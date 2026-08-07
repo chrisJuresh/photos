@@ -1,4 +1,4 @@
-"""Worker targets for the `photolib.decode` tests.
+"""Worker targets for the `archive.pipeline.decode` tests.
 
 Importable by name from a spawned process, which is what the pool requires: it
 is given a `module:function` string rather than a pickled callable.

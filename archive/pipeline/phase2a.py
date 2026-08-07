@@ -41,7 +41,7 @@ and both regenerate from the repaired 1536 in seconds if they are ever wanted.
 They stay wrong where they are and are reported as such.
 
 **C -- the features, one decode per asset.** pHash, dHash, ThumbHash and the 18
-quality scalars in `photolib.features`, all from the single 1536px decode. v1's
+quality scalars in `archive.pipeline.features`, all from the single 1536px decode. v1's
 `asset_features` values are *not* adopted: they are relative judgements, cover
 ranking compares members within a stack, and a stack holding one v1 value beside
 one of these would rank on incompatible measurements. The objective readings --
@@ -55,7 +55,7 @@ five different quantities, disagrees with the orientation-corrected metadata for
 4,415 assets, and for about 52 has the opposite landscape/portrait polarity to
 the real file.
 
-Every decode runs in `photolib.decode`, under a wall-clock timeout, an output
+Every decode runs in `archive.pipeline.decode`, under a wall-clock timeout, an output
 cap and a memory cap. `F55` is a hang rather than a crash, and the timeout is
 the only one of the three that a hung decoder cannot ignore.
 
@@ -78,10 +78,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from photolib import db, decode, features, migrate
-from photolib.adopt_mediavault import open_manifest, shard_entries
-from photolib.config import Config, load
-from photolib.thumbnails import thumb_path
+from archive.pipeline import decode, features
+from archive.pipeline.adopt_mediavault import open_manifest, shard_entries
+from photolib import db, migrate
+from photolib.config import Config, load, thumb_path
 
 SUBSTRATE_EDGE = 1536  # the working substrate, and the only tier decoded here
 GRID_EDGE = 384  # step 5's grid tile on the NVMe, replaced for the repair set
@@ -373,7 +373,7 @@ def rehash_objects(
 
 # --- the decode workers ------------------------------------------------------
 #
-# Both run inside `photolib.decode`, which enforces the timeout, the output cap
+# Both run inside `archive.pipeline.decode`, which enforces the timeout, the output cap
 # and the memory cap. They are module-level so the spawned workers can import
 # them by name.
 

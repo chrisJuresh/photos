@@ -3038,7 +3038,7 @@ function Aa(e, t) {
 Tt(["click"]);
 var Ma = /* @__PURE__ */ L('<span class="err svelte-uzy12d"> </span>'), Ra = /* @__PURE__ */ L(`<span class="muted svelte-uzy12d">Nothing to probe: every kept file with a readable header already has its
         dimensions. Rows under <code class="svelte-uzy12d">unknown</code> </span>`), Ca = /* @__PURE__ */ L(`<span><strong> </strong> kept files have no dimensions and a
-        readable header. Run <code class="svelte-uzy12d"> </code>, then <code class="svelte-uzy12d">python -m photolib.triage_survey</code>, then reload.</span>`), Na = /* @__PURE__ */ L('<span class="muted svelte-uzy12d"> </span>'), Oa = /* @__PURE__ */ L('<div class="probe svelte-uzy12d"><button> </button> <!></div>');
+        readable header. Run <code class="svelte-uzy12d"> </code>, then <code class="svelte-uzy12d">python -m archive.pipeline.triage_survey</code>, then reload.</span>`), Na = /* @__PURE__ */ L('<span class="muted svelte-uzy12d"> </span>'), Oa = /* @__PURE__ */ L('<div class="probe svelte-uzy12d"><button> </button> <!></div>');
 function Ia(e, t) {
   it(t, !0);
   let n = /* @__PURE__ */ X(null), r = /* @__PURE__ */ X(!1), i = /* @__PURE__ */ X(null);

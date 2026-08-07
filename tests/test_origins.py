@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from photolib import origins
+from archive.pipeline import origins
 
 EXCLUDED = "a" * 64  # a hash triage would drop; it must still be exported
 KEPT = "b" * 64

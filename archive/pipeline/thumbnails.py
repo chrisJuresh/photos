@@ -38,8 +38,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from photolib.adopt_mediavault import open_manifest
-from photolib.config import Config, load
+from archive.pipeline.adopt_mediavault import open_manifest
+from photolib.config import Config, load, thumb_path
 
 LONG_EDGE = 384  # the grid tile. The other four tiers belong to later steps.
 READ_WORKERS = 32
@@ -47,16 +47,6 @@ PROGRESS_SECONDS = 30
 
 # `relative_path_text` is relative to this, not to mediavault_root.
 DERIVATIVE_SUBDIR = "derivatives"
-
-
-def thumb_path(thumb_root: Path, sha256: str) -> Path:
-    """`<thumb_root>\\<aa>\\<sha256>.webp` -- one shard level, not two.
-
-    256 directories of ~400 files. The vault's two-level fan-out exists for
-    hundreds of thousands of objects on a spinning disk; this tree is smaller
-    and lives on NVMe, and `PLAN.md` spells it with one level.
-    """
-    return thumb_root / sha256[:2] / f"{sha256}.webp"
 
 
 # --- what to copy ------------------------------------------------------------

@@ -22,7 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from photolib import db, promote, triage, triage_survey
+from archive.pipeline import promote, triage_survey
+from photolib import db, triage
 from photolib.config import Config
 
 # (origin path, ext, seed, times) -> content is seed * times, so the digest is real

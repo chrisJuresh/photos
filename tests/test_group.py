@@ -24,8 +24,8 @@ import sqlite3
 
 import pytest
 
-from photolib.capture_time import SORT_KEY_UNDATED
-from photolib.group import (
+from archive.pipeline.capture_time import SORT_KEY_UNDATED
+from archive.pipeline.group import (
     NEAR_BAND_BITS,
     NEAR_BANDS,
     NEAR_MAX_DISTANCE,

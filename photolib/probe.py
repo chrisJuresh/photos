@@ -13,7 +13,7 @@ never opens. Run it *after* those decisions are saved, not before.
 **Header only.** `Image.open()` parses the container header and stops; `.size`
 is available without a pixel being decoded, and `load()` is never called. That
 is the difference between reading ~2 KB and reading a 25 MB raw file, and it is
-also why no decode timeout or memory cap is needed here -- `photolib.decode`
+also why no decode timeout or memory cap is needed here -- `archive.pipeline.decode`
 exists for the case where pixels are actually produced.
 
 Two properties are recorded rather than assumed. The dimensions land with
@@ -278,7 +278,7 @@ def run(
             )
         written = store(conn, rows)
         print(f"stored    {written:,} rows, dims_src = 'header'")
-        print("          rebuild the survey: python -m photolib.triage_survey")
+        print("          rebuild the survey: python -m archive.pipeline.triage_survey")
         return 0
     finally:
         conn.close()

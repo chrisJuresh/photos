@@ -37,8 +37,9 @@ import sys
 import time
 from pathlib import Path
 
-from photolib import db, promote, reveal
-from photolib.adopt_mediavault import object_index
+from archive.pipeline import promote
+from archive.pipeline.adopt_mediavault import object_index
+from photolib import db, reveal
 from photolib.config import Config, load
 
 PROGRESS_SECONDS = 60
@@ -281,7 +282,7 @@ def report(config: Config | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m photolib.promote_verify", description=__doc__.splitlines()[0]
+        prog="python -m archive.pipeline.promote_verify", description=__doc__.splitlines()[0]
     )
     parser.parse_args(argv)
     return report(load())

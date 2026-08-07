@@ -42,8 +42,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from photolib import restic_repo
-from photolib.adopt_mediavault import open_manifest, path_root
+from archive.pipeline import restic_repo
+from archive.pipeline.adopt_mediavault import open_manifest, path_root
 from photolib.config import Config, load
 from photolib.db import connect
 

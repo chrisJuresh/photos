@@ -21,10 +21,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from photolib import db, decode, phase2b, triage
+from archive.pipeline import decode, phase2b
+from photolib import db, triage
 from photolib.config import Config
-from photolib.phase2a import deriv_path
-from photolib.thumbnails import thumb_path
+from archive.pipeline.phase2a import deriv_path
+from photolib.config import thumb_path
 
 FFMPEG = shutil.which("ffmpeg")
 EXIFTOOL = shutil.which("exiftool")
@@ -177,7 +178,7 @@ def test_an_oversized_still_is_refused_before_its_pixels_load():
 def test_the_still_cap_is_higher_than_the_inherited_one():
     """The corpus holds 91-147 megapixel panoramas; Phase 2a's cap was sized for
     1536px derivatives and refuses them."""
-    from photolib import decode
+    from archive.pipeline import decode
 
     assert phase2b.STILL_MAX_PIXELS > decode.MAX_PIXELS
     assert phase2b.STILL_MAX_PIXELS > 147_098_760
@@ -214,7 +215,7 @@ def test_scale_precedes_thumbnail_so_the_filter_buffer_is_bounded(tmp_path: Path
     """The regression that failed 101 4K videos: `thumbnail=N` buffers N frames,
     and buffering them at the source resolution exceeded the worker memory cap.
     The order is the fix, so the order is what is asserted."""
-    from photolib.phase2b import POSTER_EDGE, POSTER_FRAMES
+    from archive.pipeline.phase2b import POSTER_EDGE, POSTER_FRAMES
 
     seen: dict[str, list] = {}
     real = subprocess.run

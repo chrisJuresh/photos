@@ -78,9 +78,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from photolib import db, migrate, reveal, triage
-from photolib.adopt_mediavault import object_index
+from archive.pipeline.adopt_mediavault import object_index
 from photolib.config import Config, load
-from photolib.origins import FILENAME as ORIGINS_FILENAME
+from archive.pipeline.origins import FILENAME as ORIGINS_FILENAME
 
 LOCK_NAME = "promote.lock"
 UNLINK_LOG_NAME = "promote-unlink.log"
@@ -1293,9 +1293,9 @@ def run(
         ).fetchall()
         if unfinished:
             print("  unfinished:", ", ".join(f"{status} {count:,}" for status, count in unfinished))
-            print("  run --repair, then python -m photolib.promote_verify")
+            print("  run --repair, then python -m archive.pipeline.promote_verify")
             return 1
-        print("\nNothing is verified by this step. Run python -m photolib.promote_verify next.")
+        print("\nNothing is verified by this step. Run python -m archive.pipeline.promote_verify next.")
         return 0
     finally:
         conn.close()
@@ -1303,7 +1303,7 @@ def run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m photolib.promote", description=__doc__.splitlines()[0]
+        prog="python -m archive.pipeline.promote", description=__doc__.splitlines()[0]
     )
     parser.add_argument(
         "--execute", action="store_true",

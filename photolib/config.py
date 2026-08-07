@@ -68,3 +68,17 @@ def load(config_path: Path = CONFIG_PATH) -> Config:
         values[field.name] = path
 
     return Config(**values)
+
+
+def thumb_path(thumb_root: Path, sha256: str) -> Path:
+    """`<thumb_root>\\<aa>\\<sha256>.webp` -- one shard level, not two.
+
+    256 directories of ~400 files. The vault's two-level fan-out exists for
+    hundreds of thousands of objects on a spinning disk; this tree is smaller
+    and lives on NVMe, and `PLAN.md` spells it with one level.
+
+    It sits beside the root it derives from rather than in the pass that first
+    filled the tree: the grid reads that tree on every request and the pass is
+    archived under `archive/pipeline`.
+    """
+    return thumb_root / sha256[:2] / f"{sha256}.webp"

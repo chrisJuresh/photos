@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from photolib.inventory import (
+from archive.pipeline.inventory import (
     BACKUP_ENDED_NS,
     FILE_ATTRIBUTE_REPARSE_POINT,
     classify_disagreement,

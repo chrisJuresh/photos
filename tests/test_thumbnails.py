@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from photolib.thumbnails import LONG_EDGE, copy_all, present, thumb_path, worklist
+from archive.pipeline.thumbnails import LONG_EDGE, copy_all, present, worklist
+from photolib.config import thumb_path
 
 MANIFEST_SCHEMA = """
 CREATE TABLE assets (

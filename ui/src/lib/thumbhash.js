@@ -4,7 +4,7 @@
 //
 // `tests/thumbhash_decode.js` slices this file from `function
 // thumbHashToDataURL` and evaluates it under node, checking the encoder in
-// photolib/features.py against the code the browser actually runs rather than
+// archive/pipeline/features.py against the code the browser actually runs rather than
 // against a second implementation written to agree with it. So the function
 // stays last in the file and stays free of any ESM syntax after its own `export`
 // keyword.

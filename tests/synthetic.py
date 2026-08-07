@@ -20,7 +20,7 @@ import sqlite3
 from pathlib import Path
 
 from photolib import migrate
-from photolib.thumbnails import thumb_path
+from photolib.config import thumb_path
 
 # A 2x2 lossless WebP. Small enough to write thousands of, real enough that the
 # browser performs an actual decode.

@@ -46,8 +46,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from photolib import db, reveal as reveal_module, triage_api
-from photolib.config import load
-from photolib.thumbnails import thumb_path
+from photolib.config import load, thumb_path
 
 DEFAULT_PORT = 8770  # v1 used 8765 for the dashboard and 8766 for the review API
 

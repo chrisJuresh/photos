@@ -50,7 +50,7 @@
       <span>
         <strong>{count(result.worklist)}</strong> kept files have no dimensions and a
         readable header. Run <code>{result.command}</code>, then
-        <code>python -m photolib.triage_survey</code>, then reload.
+        <code>python -m archive.pipeline.triage_survey</code>, then reload.
       </span>
     {/if}
   {:else}

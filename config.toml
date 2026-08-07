@@ -34,7 +34,7 @@ thumb_root = 'E:\photolib\thumb'
 catalog_db = 'E:\photolib\catalog.sqlite3'
 state_db   = 'E:\photolib\state.sqlite3'
 
-# Where `python -m photolib.backup_state` snapshots state.sqlite3. Must be a
+# Where `python -m archive.pipeline.backup_state` snapshots state.sqlite3. Must be a
 # DIFFERENT physical disk from state_db -- C: is the SATA SSD, E: is the NVMe, so
 # a dead E: does not take the triage decisions with it. The module refuses to
 # write a snapshot onto the source's own volume. This is not an off-site backup:

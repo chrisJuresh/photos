@@ -12,7 +12,7 @@ import pytest
 
 from conftest import table_names
 
-from photolib import backup_state
+from archive.pipeline import backup_state
 
 STAMP = datetime(2026, 8, 1, 22, 30, 15, tzinfo=timezone.utc)
 

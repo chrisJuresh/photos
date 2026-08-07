@@ -20,7 +20,8 @@ import time
 
 import pytest
 
-from photolib import db, probe, triage, triage_screens, triage_survey
+from archive.pipeline import triage_survey
+from photolib import db, probe, triage, triage_screens
 
 # (path, ext, size, sha seed, kind, width, height, camera)
 CORPUS = (
@@ -167,7 +168,7 @@ def test_a_dims_rule_orders_against_the_others(survey):
 
 def test_the_prefilters_stored_predicates_still_compile(conn):
     """Migration-free compatibility: Phase 1's nine rows are valid triage rules."""
-    from photolib import prefilter
+    from archive.pipeline import prefilter
 
     prefilter.install(conn)
     assert [r.decision for r in triage.load_rules(conn)] == ["exclude"] * 9

@@ -17,8 +17,8 @@ from datetime import datetime
 
 import pytest
 
-from photolib.adopt_mediavault import capture_iso
-from photolib.capture_time import (
+from archive.pipeline.adopt_mediavault import capture_iso
+from archive.pipeline.capture_time import (
     FILENAME_RULE,
     coverage,
     filename_date,

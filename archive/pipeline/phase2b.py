@@ -66,7 +66,7 @@ two inside one stack would be comparing incompatible measurements.
 * *still* -- a normal decode, EXIF orientation applied, truncation tolerated and
   flagged.
 
-**Bounds.** Every decode runs inside `photolib.decode`, under the parent's
+**Bounds.** Every decode runs inside `archive.pipeline.decode`, under the parent's
 wall-clock timeout, the output cap and the Windows job-object memory cap. The
 ffmpeg subprocess carries a second, shorter wall-clock timeout of its own, so
 the inner bound normally fires first and the pool's is the backstop for a worker
@@ -99,12 +99,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from photolib import db, decode, features, migrate, triage
-from photolib.adopt_mediavault import open_manifest
-from photolib.config import Config, load
-from photolib.phase2a import LOCK_NAME as PHASE2A_LOCK
-from photolib.phase2a import Progress, RunLock, _hms, deriv_path
-from photolib.thumbnails import thumb_path
+from archive.pipeline import decode, features
+from archive.pipeline.adopt_mediavault import open_manifest
+from archive.pipeline.phase2a import LOCK_NAME as PHASE2A_LOCK
+from archive.pipeline.phase2a import Progress, RunLock, _hms, deriv_path
+from photolib import db, migrate, triage
+from photolib.config import Config, load, thumb_path
 
 SUBSTRATE_EDGE = 1536  # the working substrate, written to deriv_root
 GRID_EDGE = 384  # the grid tile on the NVMe; what /t/<sha>.webp serves
@@ -396,7 +396,7 @@ def _commit_staged(conn, rows: list[tuple]) -> None:
 
 # --- the decode workers ------------------------------------------------------
 #
-# Module level so `photolib.decode`'s spawned workers can import them by name.
+# Module level so `archive.pipeline.decode`'s spawned workers can import them by name.
 # Each returns everything derived from its one pixel array: the two encoded
 # derivatives and every scalar. Returning the array itself would put a 20 MB
 # pickle through the result queue per file and decide nothing.

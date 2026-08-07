@@ -10,7 +10,7 @@ the connection rather than a rule somebody has to keep remembering. The read
 handlers get the ordinary read-only pair and cannot write either.
 
 **No media work in a request.** Handlers evaluate SQL over persisted state and
-return. The survey is built by `photolib.triage_survey`, the dimensions by
+return. The survey is built by `archive.pipeline.triage_survey`, the dimensions by
 `photolib.probe`; both are command-line steps. Nothing here opens a file under
 any media root, for reading or for writing.
 
