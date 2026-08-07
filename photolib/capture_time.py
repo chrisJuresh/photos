@@ -1,4 +1,4 @@
-"""Resolves capture time for every adopted file, then builds the `photo` rows.
+"""Resolves capture time for every adopted file. `photo` is Phase 5's, not this.
 
 `PLAN.md` calls this the highest-risk part of the build. v1 held a
 `DateTimeOriginal` for 38,767 assets, refused every one of them for carrying no
@@ -299,10 +299,19 @@ def resolve(
     recovered: dict[str, tuple[str, str]] | None = None,
     ceiling: datetime | None = None,
 ) -> collections.Counter:
-    """Run the chain over every `file` row and rebuild `photo`. Returns the tally.
+    """Run the chain over every `file` row. Returns the tally.
 
     Rows already carrying an `exif:` source are left exactly as adopted; only
     their offset is filled in, which is additive and cannot unresolve a date.
+
+    **This does not write `photo`, and used to.** It ran `DELETE FROM photo`
+    followed by `INSERT ... SELECT sha256 FROM file` with no `WHERE` clause, so
+    it put one tile in the grid for every distinct byte sequence in the catalog.
+    That was merely wrong-by-a-predicate while `file` held only MediaVault's
+    146,034 assets, and it is a grid full of `.pyc` files now that `file` holds
+    787,798. Phase 5 owns `photo`: a tile is a *group* of triage-kept files, which
+    is a shape this function has no way to produce and no business overwriting.
+    Run `python -m photolib.group` after this.
     """
     ceiling = ceiling or datetime.now()
     offsets = offsets or {}
@@ -331,15 +340,6 @@ def resolve(
             resolved, source, offset = None, "none", None
         counts[source] += 1
         conn.execute(_UPDATE, (resolved, source, offset, sha256))
-
-    # `photo.id` is regenerable output; ordering the insert by sha256 makes it
-    # reproducible rather than merely arbitrary.
-    conn.execute("DELETE FROM photo")
-    conn.execute(
-        "INSERT INTO photo (rep_sha256, sort_key) "
-        "SELECT sha256, coalesce(taken_at, ?) FROM file ORDER BY sha256",
-        (SORT_KEY_UNDATED,),
-    )
     conn.execute("COMMIT")
     return counts
 
@@ -499,17 +499,14 @@ def run(
 
         started = time.perf_counter()
         counts = resolve(conn, offsets=offsets, recovered=recovered, ceiling=ceiling)
-        photos = conn.execute("SELECT count(*) FROM photo").fetchone()[0]
-        print(
-            f"resolve   {sum(counts.values()):,} files in {time.perf_counter() - started:.0f}s, "
-            f"{photos:,} photo rows"
-        )
+        print(f"resolve   {sum(counts.values()):,} files in {time.perf_counter() - started:.0f}s")
         _print_coverage(conn)
 
-        undated = conn.execute(
-            "SELECT count(*) FROM photo WHERE sort_key = ?", (SORT_KEY_UNDATED,)
-        ).fetchone()[0]
-        print(f"\nsort_key  {undated:,} photos on the {SORT_KEY_UNDATED!r} sentinel")
+        undated = conn.execute("SELECT count(*) FROM file WHERE taken_at IS NULL").fetchone()[0]
+        print(
+            f"\nsort_key  {undated:,} files will land on the {SORT_KEY_UNDATED!r} sentinel"
+            "\n          `photo` is not written here -- run python -m photolib.group"
+        )
 
         if validate:
             _print_validation(conn, ceiling, top)

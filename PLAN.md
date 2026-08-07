@@ -1827,6 +1827,41 @@ frames of one scene look near-identical to pHash, and over-grouping *hides* phot
 stacks are recorded as built-but-uncalibrated (`F57`: no labelled-corpus calibration exists).
 Ship exact + RAW/JPEG, look at the result, then decide.
 
+**Built 2026-08-07 as `photolib/group.py` (migration `007`), and what measuring it changed.**
+
+- **Nothing in the build order filtered `photo` to what triage kept, and this section did not
+  notice.** `capture_time.resolve` rebuilt `photo` with `DELETE FROM photo` followed by
+  `INSERT ... SELECT sha256 FROM file` — no `WHERE` clause at all. It produced 146,034 rows only
+  because `file` held 146,034 rows the last time it ran; `file` holds 787,798 now, so re-running
+  it would have put every triage-excluded `.pyc` in the grid. Phase 4 sets `file.state` to
+  `excluded` and no step rebuilt `photo` from it. Resolved by giving `photo` exactly one builder:
+  this step. `capture_time` no longer writes it, which closes the hole by subtraction rather than
+  by a predicate a later caller has to remember. A tile is a group of files in state `published`.
+- **The pairing estimate was right and the corpus is tidier than expected.** 38,376 kept files,
+  68,894 distinct `(directory, stem)`, 25,949 of them holding both a raw and a JPEG, **13,840
+  tiles collapsed into 24,536** — the ceiling measured on 2026-08-04 by name evidence alone, so
+  the EXIF corroboration refused **nothing**. Every collapsed group is exactly one raw and one
+  JPEG: there is no group of three, so no transitive merge across copies happens on this corpus.
+- **The representative rule picks the JPEG in 13,700 of the 13,840 pairs, because
+  `file.width`/`height` for an adopted RAW is the derivative's geometry and not the sensor's.**
+  12,568 `.rw2` rows read 1440×1920 and all 2,346 `.arw` rows read 1616×1080, against 3448×4592
+  for the camera JPEG beside them; only the 146 `.dng` Phase 2b demosaiced itself carry a source
+  raster. So "highest pixel count" compares a 1536px substrate against a full-size JPEG and the
+  RAW loses, where "largest bytes" — the next term — would have picked it. The rule is
+  implemented exactly as written above and the count is printed on every run; inverting it
+  silently would hide the measurement that motivates changing it. It costs the grid nothing
+  today, since both members have a thumbnail and the same aspect ratio; what it decides is which
+  file `/api/reveal` opens.
+- **The pHash band width is set by the incremental guarantee, not by the threshold.** Eight 8-bit
+  bands reach Hamming 7, and a probe then reads 1/256th of the corpus per band — 936 rows per new
+  photo against a 30,000-photo catalog, which is O(corpus) wearing an index. Four 16-bit bands
+  reach Hamming 3 and put average chunk occupancy below one row. Result: 10,717 near-duplicate
+  groups over 28,935 of the 38,353 hashed files, largest 81. Stored, joined by nothing.
+- **Incrementality is asserted in rows read, not seconds.** `pair_key` and `near_band` are
+  materialised so that a new file finds its `(directory, stem)` siblings and its pHash
+  neighbourhood by seek. Measured: 100 new photos into a 30,000-photo catalog read 1,743 rows,
+  17.4 per photo, against 60,000 for the whole-corpus rebuild.
+
 ## Triage
 
 **Model:** an ordered rule list. Each rule is a predicate over survey metadata with a

@@ -20,7 +20,6 @@ import pytest
 from photolib.adopt_mediavault import capture_iso
 from photolib.capture_time import (
     FILENAME_RULE,
-    SORT_KEY_UNDATED,
     coverage,
     filename_date,
     mask,
@@ -204,50 +203,31 @@ def test_min_mtime_across_all_origins(conn: sqlite3.Connection) -> None:
     ).fetchone()[0].startswith("2021-12-06")
 
 
-def test_photo_rows_and_sort_key(conn: sqlite3.Connection) -> None:
-    """One row per file, and the undated sentinel sorts below every real date."""
+def test_resolve_never_writes_photo(conn: sqlite3.Connection) -> None:
+    """The hole this module used to be: an unfiltered `INSERT ... SELECT FROM file`.
+
+    `photo` is Phase 5's, built from the triage-kept set. Re-running the capture
+    chain must not put a tile in the grid for every distinct byte sequence in the
+    catalog -- which is what it did, and why 787,798 `file` rows would have become
+    787,798 tiles. See `tests/test_group.py` for what does build it.
+    """
     corpus(conn)
+    conn.execute(
+        "INSERT INTO photo (id, rep_sha256, sort_key) VALUES (1, ?, '2019-07-04T12:00:00')",
+        (sha_of("a"),),
+    )
     resolve(conn, ceiling=CEILING)
-    files = conn.execute("SELECT count(*) FROM file").fetchone()[0]
-    assert conn.execute("SELECT count(*) FROM photo").fetchone()[0] == files
-
-    keys = [r[0] for r in conn.execute("SELECT sort_key FROM photo ORDER BY sort_key DESC, id DESC")]
-    assert keys[-2:] == [SORT_KEY_UNDATED, SORT_KEY_UNDATED]
-    assert all(key > SORT_KEY_UNDATED for key in keys[:-2])
-
-
-def test_keyset_paging_is_totally_ordered(conn: sqlite3.Connection) -> None:
-    """(sort_key, id) is unique, so a keyset page can never repeat or skip a row."""
-    corpus(conn)
-    resolve(conn, ceiling=CEILING)
-    pairs = conn.execute("SELECT sort_key, id FROM photo").fetchall()
-    assert len(set(pairs)) == len(pairs)
-
-    walked, cursor = [], None
-    while True:
-        page = conn.execute(
-            "SELECT sort_key, id FROM photo "
-            + ("WHERE (sort_key, id) < (?, ?) " if cursor else "")
-            + "ORDER BY sort_key DESC, id DESC LIMIT 2",
-            cursor or (),
-        ).fetchall()
-        if not page:
-            break
-        walked.extend(page)
-        cursor = page[-1]
-    assert walked == sorted(pairs, key=lambda p: (p[0], p[1]), reverse=True)
+    assert conn.execute("SELECT count(*) FROM photo").fetchone()[0] == 1
 
 
 def test_resolve_is_idempotent(conn: sqlite3.Connection) -> None:
     corpus(conn)
     resolve(conn, ceiling=CEILING)
     first = conn.execute("SELECT sha256, taken_at, taken_src FROM file ORDER BY sha256").fetchall()
-    ids = conn.execute("SELECT rep_sha256, sort_key FROM photo ORDER BY id").fetchall()
     resolve(conn, ceiling=CEILING)
     assert conn.execute(
         "SELECT sha256, taken_at, taken_src FROM file ORDER BY sha256"
     ).fetchall() == first
-    assert conn.execute("SELECT rep_sha256, sort_key FROM photo ORDER BY id").fetchall() == ids
 
 
 def test_shape_counts_sum_to_the_row_count(conn: sqlite3.Connection) -> None:

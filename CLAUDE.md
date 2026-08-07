@@ -70,10 +70,11 @@ USB-HDD head time and is off by default.
 python -m photolib.adopt_mediavault
 ```
 
-To resolve capture time for every adopted file and rebuild the `photo` rows. Seconds, pure
-DB plus one read-only manifest scan. Re-running is safe and lands on the same answer.
-`--validate` additionally prints the masked-shape enumeration and the per-rule EXIF
-agreement that decided which filename patterns are adopted.
+To resolve capture time for every adopted file. Seconds, pure DB plus one read-only manifest
+scan. Re-running is safe and lands on the same answer. `--validate` additionally prints the
+masked-shape enumeration and the per-rule EXIF agreement that decided which filename patterns
+are adopted. It **does not write `photo`** and used to — that is Phase 5's, below; run
+`python -m photolib.group` after this or the grid keeps the previous grouping's sort keys.
 
 ```bash
 python -m photolib.capture_time
@@ -187,6 +188,22 @@ connection is `mode=ro`. Never run it concurrently with `promote` or `promote --
 
 ```bash
 python -m photolib.promote_verify
+```
+
+Phase 5's grouping, and **the only thing that builds `photo`**. 12 s, pure DB, no media root is
+opened. Until this existed nothing filtered the grid to what triage kept: `capture_time.resolve`
+rebuilt `photo` with an `INSERT ... SELECT sha256 FROM file` carrying no `WHERE` clause, which was
+one tile per MediaVault asset only because `file` held 146,034 rows at the time — it holds 787,798
+now. `capture_time` no longer writes `photo` at all, and a tile is a group of files in state
+`published`. RAW+JPEG pairing on `(directory, stem)` with a corroborating EXIF timestamp collapses
+**13,840 of 38,376 tiles into 24,536**; every group is exactly one raw and one JPEG, none is
+larger. Perceptual near-duplicates are computed and stored in `near_dup` (10,717 groups over
+28,935 files) and **collapse nothing** — `photo` does not join them. Idempotent, and incremental:
+`group.extend` adds files by index seek off `pair_key` and `near_band` at ~17 rows per photo,
+regardless of corpus size. Re-run it after anything that changes the kept set or `capture_time`.
+
+```bash
+python -m photolib.group
 ```
 
 To snapshot `state.sqlite3` — the triage rules and overrides, the one thing here that cannot be
