@@ -228,7 +228,7 @@ def report(config: Config | None = None) -> int:
             ("MISSING", "missing"),
             ("nlink != 1", "nlink_2"),
             ("not read-only", "not_read_only"),
-            ("outside the vault", "outside_vault"),
+            ("outside vault", "outside_vault"),
         ):
             entries = hashes[key]
             print(f"  {label:<14}{len(entries):,}")

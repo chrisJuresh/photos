@@ -181,7 +181,8 @@ python -m photolib.promote
 
 Step 16, the pass that finds out what step 14 actually did — it destroys names and verifies
 nothing itself. Re-hashes every promoted vault name against its recorded SHA-256 (435.6 GB, one
-reader, ~1h57m), asserts `nlink == 1` and read-only and containment per object, asserts that
+reader, **~1h29m** — measured at 81.7 MB/s on 2026-08-07, not the 62.0 the estimate assumed;
+the vault tree reads faster than MediaVault's did), asserts `nlink == 1` and read-only and containment per object, asserts that
 nothing survives under MediaVault's objects root and that staging is empty *positively*, and
 reconciles the delete log against the excluded set in both directions. Writes nothing: the
 connection is `mode=ro`. Never run it concurrently with `promote` or `promote --repair`.

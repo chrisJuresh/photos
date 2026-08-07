@@ -1744,6 +1744,38 @@ Review effort belongs on Phase 4's classifier and its seven-step sequence, which
 destroyed data twice; what needs adversarial review *here* is only the scoping choice in the
 first bullet.
 
+> **Status 2026-08-07: the sweep ran full-scope and step 14 is verified.** `PROMOTION VERIFIED`,
+> exit 0, all four checks clean. **The scoping question in the first bullet resolved itself
+> rather than being decided:** the ledger holds a durable row per object for every state and
+> **zero rows outside `status = 'done'`**, so there was no in-flight set to scope *to*. The full
+> pass was therefore the only sound scope and also the affordable one — this is the strong
+> claim, not the weaker sampled one.
+>
+> Check 1+2 re-hashed **38,376 of 38,376** promoted names, 435.6 GB, one reader, in **1h28m54s
+> at 81.7 MB/s**. `mismatched 0`, `missing 0`, `nlink != 1` **0**, `not read-only` **0**,
+> `outside vault` **0**. So no half-promotion survives, nothing was left unsealed, and no
+> wrong-bytes survivor exists — the failure mode this whole step is built to catch, and the one
+> the batch-shaped promotion actually produced once.
+>
+> **The budget was over-costed, in the safe direction.** The header's ~1h57m was derived from
+> step 5's 62.0 MB/s; the sweep sustained 81.7. The early minutes read 117.9 MB/s and decayed to
+> a stable ~81, so the honest figure to carry forward for a one-reader pass over the *vault* tree
+> is **~81 MB/s**, not 62 — the vault is the freshly-written tree and lays out better than
+> MediaVault's did. `CLAUDE.md` is corrected to ~1h29m.
+>
+> Checks 3 and 4 are exact. The objects root holds **0** files — not merely none for a promoted
+> or excluded digest, but none at all — so `for_promoted`, `for_excluded` and `unknown` are all
+> 0. Staging is empty *positively*: the directory is **absent** and **0** `file` rows are in
+> state `staged`. The delete log reconciles both directions with no orphan on either side —
+> 146,034 lines, **107,658** completed unlinks against **107,658** rows in state `excluded`,
+> zero logged-but-not-excluded, zero excluded-but-not-logged, zero logged twice, zero malformed,
+> and **zero unlinks that name no rule or override**.
+>
+> The orphaned derivatives confirm the 2026-08-07 correction above rather than the step's
+> original prompt: **66,106** thumbnails and **874** substrates, counted and not failed on. The
+> ~107,658 the prompt projected was wrong for the reason already recorded — 41,552 excluded
+> objects never had a tile, because step 5 copied only what v1 had already built.
+
 Vault target names must be collision-free **by construction, including case-insensitively**.
 Path lengths are bounded (real object paths max 148 chars) and 369-char paths work unprefixed
 on this volume, so assert a length bound rather than adding `\\?\` ceremony. Promoted files do
