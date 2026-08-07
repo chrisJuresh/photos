@@ -10,6 +10,14 @@ The password never appears here. `config.restic_password_command` is handed to
 restic as ``--password-command`` and restic runs it itself, so the secret never
 reaches this process, a command line, or a log line.
 
+No spawn here inherits this process's stdin, for two reasons. Since the password
+comes from ``--password-command``, restic reaching a terminal for a prompt could
+only mean that command failed, and a prompt reading ``NUL`` fails immediately
+where an inherited console would sit and wait. The second reason is Windows:
+``stdin=None`` resolves to ``GetStdHandle(STD_INPUT_HANDLE)`` rather than to
+fd 0, and a process started without a console holds a closed handle there, so
+the spawn itself raises ``WinError 6`` before restic runs.
+
 Subprocess output is decoded with an explicit ``encoding="utf-8"``. Python's
 Windows default is the ANSI codepage, which rewrites non-ASCII path bytes into
 different, valid-looking names and raises nothing -- 896 non-ASCII names in this
@@ -53,6 +61,7 @@ def _run(argv: list[str]) -> str:
         encoding="utf-8",
         errors="strict",
         check=False,
+        stdin=subprocess.DEVNULL,
     )
     if done.returncode != 0:
         raise RuntimeError(f"{argv[:2]} exited {done.returncode}: {done.stderr.strip()[:2000]}")
@@ -83,6 +92,7 @@ def ls_nodes(config: Config, snapshot: str) -> Iterator[dict]:
         encoding="utf-8",
         errors="strict",
         bufsize=_LS_BUFFER,
+        stdin=subprocess.DEVNULL,
     )
     try:
         for line in proc.stdout:
@@ -113,13 +123,15 @@ def dump_tar(config: Config, snapshot: str, subtree: str) -> subprocess.Popen:
     `path "\\\\C:" not found in snapshot`.
     """
     argv = read_argv(config, "dump", "--archive", "tar", snapshot, subtree)
-    return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL
+    )
 
 
 def dump_file(config: Config, snapshot: str, path: str) -> bytes:
     """One file's bytes, straight from the repository. For small files only."""
     argv = read_argv(config, "dump", snapshot, path)
-    done = subprocess.run(argv, capture_output=True, check=False)
+    done = subprocess.run(argv, capture_output=True, check=False, stdin=subprocess.DEVNULL)
     if done.returncode != 0:
         message = done.stderr.decode("utf-8", "replace").strip()[:2000]
         raise RuntimeError(f"restic dump {path!r} exited {done.returncode}: {message}")

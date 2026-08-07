@@ -417,6 +417,15 @@ def _poster_frame(ffmpeg: str, path: str, timeout_s: float) -> tuple[bytes, bool
     `scale` precedes `thumbnail` deliberately -- see `POSTER_FRAMES`. It is what
     keeps the filter graph's buffer bounded by a constant in this file instead
     of by the source resolution.
+
+    stdin is named rather than inherited. On Windows `stdin=None` does not mean
+    fd 0, it means `GetStdHandle(STD_INPUT_HANDLE)`, which nothing keeps in step
+    with fd 0 and which names an already-closed handle in any process started
+    without a console of its own -- a service, a scheduled task, a parent that
+    closed its own stdin, a test runner that has captured fd 0. Duplicating that
+    handle raises `WinError 6` and the spawn fails before ffmpeg is launched.
+    `-nostdin` already says this process feeds ffmpeg nothing; `DEVNULL` says the
+    same thing to `CreateProcess`, which is the half that was missing.
     """
     scale = (
         f"scale='if(gt(a,1),min({POSTER_EDGE},iw),-2)':"
@@ -432,6 +441,7 @@ def _poster_frame(ffmpeg: str, path: str, timeout_s: float) -> tuple[bytes, bool
     ]
     done = subprocess.run(
         command, capture_output=True, timeout=timeout_s,
+        stdin=subprocess.DEVNULL,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if not done.stdout:

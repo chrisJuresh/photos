@@ -1189,9 +1189,15 @@ def phase_d(config: Config, work: sqlite3.Connection, snapshot: str, *, read_dat
 
 
 def _stream(argv: list[str]) -> int:
-    """Run a command, echoing its output as it goes. Used for `restic check`."""
+    """Run a command, echoing its output as it goes. Used for `restic check`.
+
+    stdin is `DEVNULL` for the reason `restic_repo` gives: inheriting it buys
+    nothing and costs a `WinError 6` spawn failure wherever this process has no
+    console.
+    """
     proc = subprocess.Popen(
-        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace"
+        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace",
+        stdin=subprocess.DEVNULL,
     )
     for line in proc.stdout:
         print(f"          | {line.rstrip()}", flush=True)

@@ -96,6 +96,7 @@ def make_video(path: Path, *, size: str = "320x240", seconds: int = 2) -> Path:
          "-f", "lavfi", "-i", f"testsrc=duration={seconds}:size={size}:rate=10",
          "-pix_fmt", "yuv420p", str(path)],
         check=True, capture_output=True,
+        stdin=subprocess.DEVNULL,  # never inherit this process's stdin -- see `_poster_frame`
     )
     return path
 
@@ -233,6 +234,33 @@ def test_scale_precedes_thumbnail_so_the_filter_buffer_is_bounded(tmp_path: Path
     assert graph.index("scale") < graph.index("thumbnail")
     assert f"thumbnail={POSTER_FRAMES}" in graph
     assert str(POSTER_EDGE) in graph
+
+
+@needs_ffmpeg
+def test_the_poster_spawn_never_inherits_this_process_stdin(tmp_path: Path):
+    """`stdin=None` does not mean fd 0 on Windows, it means
+    `GetStdHandle(STD_INPUT_HANDLE)`, and a process with no console of its own
+    holds an already-closed handle there. Duplicating it raises `WinError 6` and
+    the spawn fails before ffmpeg starts, so the handle is named here rather than
+    inherited. Asserted because the environments where it breaks -- a service, a
+    scheduled task, a test runner that has captured fd 0 -- are not the one this
+    suite usually runs in.
+    """
+    seen: dict[str, object] = {}
+    real = subprocess.run
+
+    def spy(command, **kwargs):
+        seen.update(kwargs)
+        return real(command, **kwargs)
+
+    path = make_video(tmp_path / "clip.mp4")
+    subprocess.run = spy
+    try:
+        phase2b._poster_frame(FFMPEG, str(path), 30.0)
+    finally:
+        subprocess.run = real
+
+    assert seen["stdin"] == subprocess.DEVNULL
 
 
 @needs_ffmpeg
