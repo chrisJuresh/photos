@@ -162,9 +162,11 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   build, every time.** You may work in this tree only when `HEAD` is on `main` or a non-ticket
   branch *and* `git status --porcelain` is empty. A ticket branch checked out, files you did
   not write, or a `git worktree list` longer than this tree all mean someone else is here, and
-  your work goes in `git worktree add ../photos-<n>` instead. "Pick your tree" in
-  `docs/agents/issue-tracker.md` is the check. When in doubt, worktree: a needless one costs a
-  directory, a missed one costs a commit that swallowed another ticket.
+  your work goes in a worktree of its own instead — added with `git worktree add`, then
+  **entered with `EnterWorktree`** so that reaching back into this tree is refused rather than
+  merely discouraged. "Pick your tree" in `docs/agents/issue-tracker.md` is the check. When in
+  doubt, worktree: a needless one costs a directory, a missed one costs a commit that swallowed
+  another ticket. **Never restore a `HEAD` you moved by accident** — say what you ran and stop.
 - Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
 - `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
 

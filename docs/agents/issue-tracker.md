@@ -61,12 +61,13 @@ walked through `gh`.
    a session is here, and you take your own instead:
 
    ```bash
-   git worktree add ../photos-<n> -b <n>-<short-slug> <base>
+   git worktree add .claude/worktrees/<n> -b <n>-<short-slug> <base>
    ```
 
-   Then `cd ../photos-<n>` and treat that path as the working directory for the rest of the
-   session, `gh` included. Bias towards taking one: a needless worktree costs a directory, a
-   missed one costs a commit that swallowed another ticket's half-finished work.
+   Then **enter it with `EnterWorktree`**, not with `cd` — the difference is enforcement, and
+   "Entering versus cd-ing" below is why it matters. Bias towards taking a worktree at all: a
+   needless one costs a directory, a missed one costs a commit that swallowed another ticket's
+   half-finished work.
 5. **Branch off the right base.** `<base>` is the ticket's blocker where step 2 found one that
    is closed but not yet merged to `main`; otherwise `main`. Never branch off "the current
    branch" — with a shared `HEAD` that is whatever another session last checked out, which is
@@ -96,19 +97,51 @@ sitting idle between turns is indistinguishable from no session at all, so no re
 tree can prove you are alone — it can only prove you are not. Treat a clean tree on `main` as
 the one case that lets you stay and everything else as occupied.
 
+### Entering versus cd-ing
+
+`git worktree add` isolates files. It does not stop a session reaching back into the tree it
+came from, and reaching back is what actually goes wrong. Claude Code enforces the boundary
+only for a worktree the session **entered** — with `EnterWorktree`, or by starting under
+`claude --worktree`. From inside one, an `Edit`/`Write` targeting the main checkout, a command
+whose working directory resolves there, and a git redirect into it via `git -C`, `--git-dir`,
+`GIT_DIR`/`GIT_WORK_TREE` or a `cd` are each refused as a tool error. A worktree you only
+`cd` into has none of that: every one of those still lands on the shared tree.
+
+Create the worktree with git, because the base matters here, then enter that path.
+`claude --worktree <name>` does both in one step but branches from the default branch —
+`worktree.baseRef` chooses only between that and the local `HEAD`, never a named branch — and
+that is the wrong base for any ticket with a blocker. A path under `.claude/worktrees/` is
+entered without a prompt; anywhere else asks first, since entering moves the session's working
+directory, write access and project config along with it.
+
+A worktree is a fresh checkout, so `ui/node_modules` is not in it. The committed `bundle.js`
+and `bundle.css` mean the server still runs; only a ticket that edits `ui/src` needs its own
+`npm install` there before `npm run build`.
+
+### Getting it wrong
+
+Never put back a `HEAD` you moved by accident. A session that finds it has moved the shared
+tree — checked out a branch there, left it somewhere new — **says which command it ran and
+stops.** It does not restore anything. "Back" is not knowable from inside one session: the
+value you are trying to restore is another session's, you cannot see what that session had,
+and a wrong guess silently swaps the files under a live worker. Two sessions each guessing
+leaves the tree somewhere neither of them intended, with the second guess hiding the first.
+The session that owns the branch is the only one that can put it back, and it can only do that
+if it is told.
+
+If a session realises mid-ticket that it has been sharing a tree, it moves rather than
+finishes: commit or stash what is genuinely its own, add a worktree off the correct base, and
+carry on there. Sorting the branches out afterwards is far more expensive than moving now, and
+the shared tree gets worse with every file written.
+
 Push the branch before finishing, then release the directory:
 
 ```bash
-git worktree remove ../photos-<n>
+git worktree remove .claude/worktrees/<n>
 ```
 
 The branch survives that; only the checkout goes. A worktree left behind is harmless but it
 counts as occupancy for the next session's step 4, which is a false positive nobody needs.
-
-If a session realises mid-ticket that it has been sharing a tree, it moves rather than
-finishes: commit or stash what is genuinely its own, `git worktree add` a tree off the correct
-base, and carry on there. Sorting the branches out afterwards is far more expensive than
-moving now, and the shared tree gets worse with every file written.
 
 Independent tickets are still not free of each other. Two things collide even in separate
 worktrees, and both are physical rather than textual:
