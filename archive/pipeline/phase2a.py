@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import ctypes
 import hashlib
 import io
 import json
@@ -152,6 +153,30 @@ class RunLock:
 
 
 def _alive(pid: int) -> bool:
+    """Is that pid a running process? Asked without signalling it.
+
+    `os.kill(pid, 0)` is the POSIX idiom and it is **not** portable here: on
+    Windows signal 0 is `CTRL_C_EVENT`, so CPython routes it to
+    `GenerateConsoleCtrlEvent` and it sends a real Ctrl-C to that process group
+    rather than probing anything. Asked about our own pid -- which is what
+    holding the lock twice does -- that interrupts the caller's whole console,
+    asynchronously, some arbitrary moment later. It is why the test suite kept
+    dying mid-run with a `KeyboardInterrupt` nobody typed.
+    """
+    if sys.platform == "win32":
+        kernel32 = ctypes.windll.kernel32
+        # PROCESS_QUERY_LIMITED_INFORMATION: enough to ask, and it still answers
+        # for a process owned by another user, where the full right would not.
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return code.value == 259  # STILL_ACTIVE
+            return True
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except (OSError, PermissionError) as exc:

@@ -70,6 +70,25 @@ opens a path from `config.toml`.
 python -m pytest tests -q
 ```
 
+The full suite takes about three minutes, which is longer than a tool call's console lives.
+When that console is torn down Windows sends Ctrl-C to everything attached to it, and pytest
+dies around the two-minute mark with a `KeyboardInterrupt` — read variously as a refusal, a
+hung task and a test failure, and every reading costs a re-run from the top. **An agent runs
+the full suite through the script below**, which starts it on a console of its own and returns
+at once; wait for `pytest.done`, which holds the exit code, and read `pytest.out` for the
+report. A single test file is short enough to run directly.
+`Start-Process -RedirectStandardOutput` is not a workaround: redirecting makes the child
+inherit the caller's console, which is the thing being escaped.
+
+```bash
+powershell -NoProfile -File scripts\run-tests.ps1
+```
+
+**A running `python -m photolib.grid` may be stopped to get a clean run**, and restarted
+afterwards — the website is a read-only server over regenerable state, so nothing is lost by
+killing it. Check what a `python.exe` actually is before stopping it: the launcher and the
+suite look alike in a process list, and only the launcher is safe to kill.
+
 The grid and the nine triage screens are one client, two modes, served by one process on
 `127.0.0.1:8770`. Read-only except `/api/triage/*`, whose write handlers hold a connection to
 `state.sqlite3` with no `ATTACH` of the catalog.

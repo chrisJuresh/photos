@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -526,6 +527,24 @@ def test_a_lock_left_by_a_dead_run_is_not_a_wall(tmp_path: Path):
     path.write_text("999999999")  # a pid that cannot be running
     with phase2a.RunLock(path):
         assert path.read_text() == str(__import__("os").getpid())
+
+
+def test_asking_whether_a_pid_is_alive_does_not_signal_it():
+    """The liveness probe answers a question. It must not also be an action.
+
+    `os.kill(pid, 0)` reads as a probe and is one on POSIX. On Windows signal 0
+    is `CTRL_C_EVENT`, so it sent a real Ctrl-C to the named process group
+    instead, and the group it was asked about most often was this suite's own:
+    every full run died partway through with a `KeyboardInterrupt` nobody
+    typed, which was read as a cancellation, a hang and a test failure in turn.
+    The two assertions below both passed while that was happening — the damage
+    was the call itself, so the source is checked as well.
+    """
+    assert phase2a._alive(os.getpid()) is True
+    assert phase2a._alive(999999999) is False
+    source = Path(phase2a.__file__).read_text(encoding="utf-8")
+    probe = source.split("def _alive")[1].split("\ndef ")[0]
+    assert "sys.platform" in probe, "the Windows path is what makes os.kill safe here"
 
 
 def test_assets_width_and_height_are_never_read():
