@@ -580,11 +580,27 @@ def stacked(make_grid) -> Grid:
 
 def expected_stacks(rows) -> dict[str, list[int]]:
     """The grouping the corpus was built to produce, from the plan and not the
-    endpoint. See `synthetic.bursts`."""
+    endpoint. Members are in capture order. See `synthetic.bursts`."""
     stacks: dict[str, list[int]] = {}
     for row in rows:
         stacks.setdefault(row[5], []).append(row[0])
     return stacks
+
+
+def expected_covers(rows) -> dict[str, int]:
+    """The member each stack must be drawn as, read off `synthetic.BURST_PLAN`.
+
+    Named by where the frame sits in the plan rather than by re-running the rule
+    the endpoint is being tested for: the bracket's middle exposure, the pair's
+    sharper frame, and -- in the bursts whose brightest frame has no quality
+    scalars at all -- the darker of the two that can still be ranked.
+    """
+    covers = {}
+    for stack, members in expected_stacks(rows).items():
+        group, name = stack.split(":", 1)
+        bracketed = name == "bracket" and not synthetic.brightest_failed(int(group))
+        covers[stack] = members[1] if bracketed else members[0]
+    return covers
 
 
 def walk_stacked(port: int, query: str, limit: int = 500):
@@ -620,12 +636,11 @@ def test_a_stacked_page_returns_one_tile_per_stack(stacked):
 
 def test_every_returned_photo_carries_its_own_stacks_size(stacked):
     groups = expected_stacks(stacked.rows)
-    by_cover = {members[0]: members for members in groups.values()}  # newest first
     covers = walk_stacked(stacked.port, "stack=4")
 
     # A cover stands for its whole set, and a tile in no set is a stack of one.
     assert {photo_id: size for photo_id, size in covers} == {
-        max(members): len(members) for members in by_cover.values()
+        cover: len(groups[stack]) for stack, cover in expected_covers(stacked.rows).items()
     }
     assert sorted(size for _, size in covers) == sorted(
         len(members) for members in groups.values()
@@ -691,44 +706,126 @@ def test_a_page_carries_close_to_the_covers_it_asked_for(stacked, limit):
 
 
 @pytest.mark.parametrize("name", sorted(SORTS))
-def test_every_sort_stacks_the_same_frames(stacked, name):
+def test_every_sort_stacks_the_same_frames_and_draws_the_same_cover(stacked, name):
     """Grouping is by capture time and camera, so the ordering cannot change it.
-    Which member is the cover does change: it is the first one the page sees."""
+    Neither can it change which member is drawn: the cover comes from the
+    frames' own exposure and sharpness, and an ordering is not one of those."""
     groups = expected_stacks(stacked.rows)
     covers = walk_stacked(stacked.port, f"stack=4&sort={name}", limit=7)
     assert len(covers) == len(groups)
     assert len({photo_id for photo_id, _ in covers}) == len(covers)
     assert sum(size for _, size in covers) == len(stacked.rows)
-    # Each cover is a member of the set whose size it reports.
-    members = {photo_id: stack for stack, ids in groups.items() for photo_id in ids}
-    assert {members[photo_id] for photo_id, _ in covers} == set(groups)
+    assert {photo_id for photo_id, _ in covers} == set(expected_covers(stacked.rows).values())
 
 
-def test_an_alternate_sort_names_a_different_cover_and_orders_by_the_sort(stacked):
+def test_an_alternate_sort_moves_a_stack_without_changing_what_it_draws(stacked):
     """The eight non-time sorts scatter a stack's members through the ordering,
     which is why they cannot collapse runs as they page.
 
-    The cover is still the first member the page sees, which on `largest` is the
-    stack's biggest file rather than its newest frame -- so the covers are a
-    different set of tiles from the ones the default sort names, and they come
-    back in file-size order.
+    What they change is where a stack sits, not what it is drawn as. A stack's
+    place on `largest` is its biggest file, which is rarely the frame the cover
+    rule names -- so the page comes back in a different order carrying the same
+    tiles, and the cursor is the ordering's row rather than the drawn one.
     """
     groups = expected_stacks(stacked.rows)
-    holds = {photo_id: stack for stack, ids in groups.items() for photo_id in ids}
+    covers = expected_covers(stacked.rows)
     size = {row[0]: row[6] for row in stacked.rows}
+    # Where each stack sits on `largest`: its first member in that ordering.
+    place = {stack: max((size[member], member) for member in members)
+             for stack, members in groups.items()}
 
     body = get_json(stacked.port, "/api/photos?limit=1000&stack=4&sort=largest")
-    covers = [photo["id"] for photo in body["photos"]]
-    assert len(covers) == 38
-    assert covers == sorted(covers, key=lambda photo_id: (size[photo_id], photo_id),
-                            reverse=True)
-    for photo_id in covers:
-        assert size[photo_id] == max(size[member] for member in groups[holds[photo_id]])
+    drawn = [photo["id"] for photo in body["photos"]]
+    assert len(drawn) == 38
+    assert drawn == [
+        covers[stack]
+        for stack in sorted(place, key=lambda stack: place[stack], reverse=True)
+    ]
 
-    # ...and that is a different set of tiles from what `newest` draws.
+    # ...the same tiles `newest` draws, in an order that is not `newest`'s.
     by_time = [photo["id"] for photo in get_json(
         stacked.port, "/api/photos?limit=1000&stack=4")["photos"]]
-    assert set(covers) != set(by_time)
+    assert set(drawn) == set(by_time) and drawn != by_time
+
+
+def test_a_bracket_is_drawn_as_the_sharpest_frame_of_its_middle_exposure(stacked):
+    """The rule, on the first burst: three exposures a stop apart, ids 1-3 in
+    capture order, and the sharpest of them is the brightest. So the frame drawn
+    is none of the ones a simpler rule would reach for -- not the first the page
+    sees (3 on `newest`, 1 on `oldest`), not the brightest, not the sharpest."""
+    covers = dict(walk_stacked(stacked.port, "stack=4"))
+    assert covers[2] == 3
+    assert 1 not in covers and 3 not in covers
+    assert dict(walk_stacked(stacked.port, "stack=4&sort=oldest"))[2] == 3
+
+
+def test_a_pair_that_shares_an_exposure_is_drawn_as_its_sharper_frame(stacked):
+    """Cam B's two frames are one exposure, which is the case the rule degrades
+    to plain sharpest for. Its sharper frame is the older one, so `newest`
+    cannot reach it by reading the run's first member."""
+    covers = dict(walk_stacked(stacked.port, "stack=4"))
+    assert covers[4] == 2
+    assert 5 not in covers
+
+
+def test_a_frame_whose_quality_pass_failed_is_not_drawn_over_one_that_can_be_ranked(
+    stacked,
+):
+    """Burst 3's brightest frame carries `{"error": ...}` and no scalars, and it
+    is the sharpest of its bracket. It cannot be ranked, so it cannot win -- the
+    bracket falls to the darker of the two that can, and the page still serves.
+    """
+    failed = [row for row in stacked.rows if row[7] is None]
+    assert [row[5] for row in failed] == ["3:bracket", "8:bracket"]
+
+    covers = dict(walk_stacked(stacked.port, "stack=4"))
+    for row in failed:
+        bracket = expected_stacks(stacked.rows)[row[5]]
+        assert row[0] not in covers
+        assert covers[bracket[0]] == len(bracket) == 3
+
+
+def test_filtering_out_a_cover_promotes_the_frame_the_rule_names_next(stacked):
+    """A stack forms over the current selection, so the cover has to be resolved
+    against the members that survived the filter. Burst 1's bracket is drawn as
+    its middle exposure (2), which is also the only square frame in it: removing
+    the squares leaves 1 and 3, still one stack at a four-second window, and the
+    rule names 1 -- the darker of the two, and not the sharper.
+    """
+    assert dict(walk_stacked(stacked.port, "stack=4"))[2] == 3
+
+    covers = dict(walk_stacked(stacked.port, "stack=4&orient=landscape,portrait"))
+    assert covers[1] == 2
+    assert 2 not in covers and 3 not in covers
+
+
+@pytest.mark.parametrize("sort", ["newest", "largest"])
+def test_a_page_reads_the_quality_of_its_own_members_and_nothing_else(stacked, sort,
+                                                                      monkeypatch):
+    """The cost the whole design turns on. Ranking reads two values out of a
+    JSON column, which is ~50 ms over the tile set, so it is asked only about
+    the members of the stacks being served -- and not about the stacks of one,
+    which have nothing to choose between.
+    """
+    read: list[list[int]] = []
+    original = grid_module._scalars
+
+    def spy(conn, ids):
+        read.append(list(ids))
+        return original(conn, ids)
+
+    monkeypatch.setattr(grid_module, "_scalars", spy)
+    body = get_json(stacked.port, f"/api/photos?limit=3&stack=4&sort={sort}")
+
+    groups = expected_stacks(stacked.rows)
+    holds = {photo_id: stack for stack, ids in groups.items() for photo_id in ids}
+    served = {holds[photo["id"]] for photo in body["photos"]}
+    wanted = [photo_id for stack in served for photo_id in groups[stack]
+              if len(groups[stack]) > 1]
+
+    assert len(read) == 1
+    assert sorted(read[0]) == sorted(wanted)
+    assert len(read[0]) < len(stacked.rows)
 
 
 def test_a_wider_window_merges_and_a_narrower_one_does_not_split_a_bracket(stacked):

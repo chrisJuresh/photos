@@ -41,7 +41,10 @@ into one tile, so a page carries covers rather than frames and each one says how
 many it stands for. The two default sorts pay nothing for it beyond the tiles
 they read: a run is contiguous in `photo_sort` order, so a page collapses its
 own as it streams. The other eight cannot, and buy one grouping pass per
-selection instead.
+selection instead. Which frame a stack is drawn as is `browse.cover` — the
+sharpest of the middle-exposure third — resolved from one read over the members
+of the stacks on the page and never materialised, because a filter applies
+before the grouping and can change what a stack holds.
 
 What can be filtered and sorted by lives in `photolib.browse`, so the vocabulary
 can be read, measured and tested without a server. This module keeps the query
@@ -225,23 +228,70 @@ def parse_limit(values: list[str]) -> int:
 
 
 def build_assignment(conn: sqlite3.Connection, query: browse.Query) -> tuple:
-    """Every stack of one selection as `(cover id, sort key, size)`, in order.
+    """Every stack of one selection as `(id, sort key, members)`, in order.
+
+    The id and the key are the *first* member's in this ordering: that is where
+    the stack sits in it, and it is what a keyset cursor compares against. Which
+    member the stack is drawn as is a separate question with a separate answer —
+    it depends on readings this pass does not carry, so it is asked only of the
+    stacks a page actually holds.
 
     One pass, ~380 ms; the caller memoises it. Only the eight sorts that cannot
     stream ever ask for it — see `GridServer.assignment`.
     """
     sql, params = browse.assignment_sql(query)
-    covers: list[list] = []
-    seen: dict[int, int] = {}  # stack -> the index of its cover
+    stacks: list[list] = []
+    seen: dict[int, int] = {}  # stack -> the index of its first member
     for photo_id, key, stack in conn.execute(sql, params):
         index = seen.get(stack)
         if index is None:
-            # First member in this ordering, so this is the stack's cover.
-            seen[stack] = len(covers)
-            covers.append([photo_id, key, 1])
+            seen[stack] = len(stacks)
+            stacks.append([photo_id, key, [photo_id]])
         else:
-            covers[index][2] += 1
-    return tuple(tuple(cover) for cover in covers)
+            stacks[index][2].append(photo_id)
+    return tuple((photo_id, key, tuple(members)) for photo_id, key, members in stacks)
+
+
+def _scalars(conn: sqlite3.Connection, ids: list[int]) -> dict:
+    """`(mean luminance, sharpness)` per photo — what the cover rule ranks on.
+
+    Both live inside `file.quality` as JSON, and extracting one costs ~50 ms
+    over the whole tile set. This is the read that keeps that off the page: it
+    is asked only about the members of the stacks being served, and never about
+    the library. The ids come from `photo`, not from a request.
+    """
+    if not ids:
+        return {}
+    sql = (
+        f"SELECT p.id, {browse.LUMINANCE}, {browse.SHARPNESS} "
+        "FROM photo AS p JOIN file AS f ON f.sha256 = p.rep_sha256 "
+        f"WHERE p.id IN ({', '.join('?' * len(ids))})"
+    )
+    return {
+        row[0]: (browse.mean_luminance(row[1]), row[2])
+        for row in conn.execute(sql, ids)
+    }
+
+
+def _covers(conn: sqlite3.Connection, groups: list) -> list[int]:
+    """Which member each stack is drawn as, in one read for the whole page.
+
+    A stack of one is not read for — there is nothing to choose between, and
+    most of the stacks on a page are that — but it still goes through the rule
+    like any other. An unread member arrives as a member with no readings, which
+    is a state the rule already answers: it draws the first, and the first of
+    one is it. So the size of a stack is not a case anything here has to know
+    about.
+    """
+    scalars = _scalars(
+        conn, [photo_id for group in groups if len(group) > 1 for photo_id in group]
+    )
+    return [
+        browse.cover(
+            [(photo_id, *scalars.get(photo_id, (None, None))) for photo_id in group]
+        )
+        for group in groups
+    ]
 
 
 def _photo(row) -> dict:
@@ -301,9 +351,10 @@ def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int)
     """One page of covers, collapsing runs as the tiles arrive.
 
     The two default sorts read in capture order, so a run's members arrive in
-    one pass and the cover is the first of them the page sees — the newest frame
-    on `newest`, the oldest on `oldest`. Each camera keeps its own open run, so
-    a second body shooting at the same moment interleaves without splitting
+    one pass and a stack takes the place of the first of them — the newest frame
+    on `newest`, the oldest on `oldest`. Which member is *drawn* there is
+    `_covers`, asked once the page is whole. Each camera keeps its own open run,
+    so a second body shooting at the same moment interleaves without splitting
     anything.
 
     A page ends at a *clean cut*: the first tile more than the window away from
@@ -319,8 +370,8 @@ def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int)
     serve the whole selection as one page.
     """
     window = query.stack
-    covers: list[dict] = []
-    runs: dict = {}  # camera -> [seconds of its last tile, index of its cover]
+    groups: list[list] = []  # the page's stacks, each its members' rows in order
+    runs: dict = {}  # camera -> [seconds of its last tile, index of its stack]
     frontier = None  # the last tile that could stack, in seconds
     last = None  # the last tile this page consumed, which is what `next` names
     has_more = False
@@ -328,7 +379,7 @@ def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int)
     for row in _rows(conn, query, cursor, limit * TILES_PER_COVER):
         camera = row[browse.CAMERA]
         seconds, stackable = row[browse.SECONDS], row[browse.STACKABLE]
-        if len(covers) >= limit and (
+        if len(groups) >= limit and (
             frontier is None or seconds is None or abs(seconds - frontier) > window
         ):
             has_more = True
@@ -336,46 +387,63 @@ def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int)
         run = runs.get(camera) if stackable else None
         if run is not None and abs(seconds - run[0]) <= window:
             run[0] = seconds
-            covers[run[1]]["n"] += 1
+            groups[run[1]].append(row)
         else:
-            covers.append({**_photo(row), "n": 1})
+            groups.append([row])
             if stackable:
-                runs[camera] = [seconds, len(covers) - 1]
+                runs[camera] = [seconds, len(groups) - 1]
         if stackable:
             frontier = seconds
         last = row
 
+    # Every member's row is already in hand, so naming the cover costs the
+    # quality read and no second look at the tiles.
+    rows = {row[0]: row for group in groups for row in group}
+    covers = _covers(conn, [[row[0] for row in group] for group in groups])
+    photos = [
+        {**_photo(rows[cover]), "n": len(group)}
+        for cover, group in zip(covers, groups)
+    ]
+
     following = None
     if has_more and last is not None:
         following = {"before": last[browse.KEY], "before_id": last[0]}
-    return covers, following
+    return photos, following
 
 
 def _assigned(
-    conn: sqlite3.Connection, query: browse.Query, cursor, limit: int, covers
+    conn: sqlite3.Connection, query: browse.Query, cursor, limit: int, stacks
 ):
     """One page of covers, sliced out of an assignment computed in one pass.
 
     The eight non-time sorts cannot stream: a stack's members are scattered
-    through the ordering, so there is no run to collapse. `covers` is every
+    through the ordering, so there is no run to collapse. `stacks` is every
     stack in this sort's order, first member first, computed once per selection
     — see `GridServer.assignment`. Paging is then a slice, and the cursor is
     found by walking to it rather than by looking it up, so a key that survived
     a round trip through the query string compares the way SQL would.
+
+    The cursor is the first member's `(key, id)` and not the cover's, because it
+    is the ordering it has to compare against: the drawn frame is chosen from
+    readings the ordering knows nothing about, and could sit anywhere in it.
     """
     start = 0
     if cursor is not None:
         descending = query.ordering.descending
-        while start < len(covers):
-            here = (covers[start][1], covers[start][0])
+        while start < len(stacks):
+            here = (stacks[start][1], stacks[start][0])
             if here < cursor if descending else here > cursor:
                 break
             start += 1
-    wanted = covers[start:start + limit]
-    rows = _by_id(conn, [cover[0] for cover in wanted])
-    photos = [{**_photo(rows[photo_id]), "n": size} for photo_id, _, size in wanted]
+    wanted = stacks[start:start + limit]
+    covers = _covers(conn, [members for _, _, members in wanted])
+    rows = _by_id(conn, covers)
+    photos = [
+        {**_photo(rows[cover]), "n": len(members)}
+        for cover, (_, _, members) in zip(covers, wanted)
+    ]
     following = None
-    if wanted and start + limit < len(covers):
+    if wanted and start + limit < len(stacks):
         following = {"before": wanted[-1][1], "before_id": wanted[-1][0]}
     return photos, following
 
@@ -567,8 +635,9 @@ class GridServer(ThreadingHTTPServer):
         the same reason: it is the same answer for every page of one selection,
         so paying it per page would put it in front of every scroll. Same cap
         and same eviction as the count memo, on keys that come from a query
-        string. One entry is a tuple per stack, ~2 MB over the real corpus,
-        which is why the cap is on the number of selections and not on bytes.
+        string. One entry is a tuple per stack carrying its members' ids, ~2 MB
+        over the real corpus, which is why the cap is on the number of
+        selections and not on bytes.
         """
         with self._totals_lock:
             if query not in self._assignments:

@@ -90,10 +90,44 @@ Paging is then a slice and a page is 9 ms. The window is part of the memo key, s
 is what the grouping groups by; it is dropped from `total`'s key, because no window
 changes how many tiles there are.
 
-The **cover** is the first member of the run *in the page's own order* — the newest
-frame on `newest`, the oldest on `oldest`, the biggest file on `largest`. So changing
-the sort changes which tile a stack is drawn as, not which frames it holds. The real
-cover rule is a separate ticket.
+The **cover** — the frame a closed stack is drawn as — is **the sharpest frame of the
+middle-exposure third**. Rank the members by mean luminance, take the middle third
+rounded up to at least one, and take `max(sharpness)` among those: the library is
+mostly three-frame bracketing, and the middle exposure is the one that was aimed. The
+band widens to every member sharing its edge exposures, which is what makes a
+constant-exposure burst degrade to plain sharpest instead of picking an arbitrary frame
+out of a tie. A member whose quality pass failed carries neither reading, cannot be
+ranked, and so is never drawn over one that can be — only when it is the whole stack.
+
+Mean luminance is not stored. It is the centre of mass of the 16-bin
+`luminance_histogram` Phase 2b wrote, computed in Python: Phase 2b's own
+`underexposure` is clamped at mid grey, so every frame brighter than that reads 0 and a
+bracket's top two frames are indistinguishable by it. The cover is **resolved per query
+and never materialised**, because filters apply before the grouping — removing a member
+changes what a stack holds and therefore what it draws.
+
+Which member is drawn does *not* depend on the sort, because an ordering is not an
+exposure: `largest` and `newest` draw the same tiles and differ only in where each
+stack sits. The keyset cursor stays the *first* member's `(key, id)`, since that is the
+ordering's own row; the drawn frame can sit anywhere in it.
+
+**The rule costs one read over the page's own members**, and on a stacked page it is
+the second-largest line in the bill:
+
+| page (limit 500, window 4s) | tiles read | members ranked | page | of which the cover |
+|---|---|---|---|---|
+| `newest` | 1,805 | 1,632 | 72-77 ms | 37-40 ms |
+| `oldest` | 640 | 240 | 19-21 ms | 6 ms |
+| `newest`, `orient=landscape` | 1,189 | 906 | 223-228 ms | 22 ms |
+| `newest`, limit 200 | 409 | 302 | 16 ms | 8 ms |
+
+So **30 ms holds for a 200-cover page and for `oldest`, and the 500-cover first page on
+`newest` is ~75 ms against the 36 ms it was without the rule.** Both halves of that read
+are irreducible without a schema change this feature does not make: ~13 ms to fetch
+1,632 rows by id and ~12 ms for SQLite to parse `file.quality` once per row. Stacks of
+one are not read for at all, having nothing to choose between, and computing the mean
+in SQL with `json_each` measured slower than shipping the histogram and parsing it in
+Python. The lever is still the page size.
 
 Gaps are measured with `unixepoch`, which is exact for the whole-second timestamps
 `capture_time` writes. The spec's `julianday(...) * 86400.0` carries ~2e-5 s of float
