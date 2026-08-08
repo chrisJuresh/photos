@@ -675,6 +675,100 @@ def test_no_window_value_reaches_the_sql_text(bursts):
     assert params_four[-1] == 4 and params_ten[-1] == 10
 
 
+# -- the cover -----------------------------------------------------------
+
+# The cover rule reads two numbers per frame and nothing else, so it is tested
+# on the numbers rather than through a corpus. Ids are the frame's position in
+# the page's own order, because that is the only other thing the rule uses.
+
+
+def frames(*readings) -> list[tuple]:
+    """`(id, luminance, sharpness)` per frame, in the page's order."""
+    return [(index + 1, *reading) for index, reading in enumerate(readings)]
+
+
+def test_a_bracket_draws_the_sharpest_frame_of_its_middle_exposure():
+    """The rule the whole feature is for. The bracket's sharpest frame is its
+    brightest one, so plain sharpest, brightest and first-in-order each name a
+    different frame -- and the one that was aimed is the middle exposure."""
+    bracket = frames((0.20, 0.40), (0.50, 0.70), (0.80, 0.95))
+    assert browse.cover(bracket) == 2
+    # ...and it is the middle exposure that decides it, not the position: the
+    # same sharpnesses in a differently exposed order move the cover.
+    assert browse.cover(frames((0.50, 0.40), (0.80, 0.70), (0.20, 0.95))) == 1
+
+
+def test_a_burst_that_holds_one_exposure_draws_its_sharpest():
+    """A constant-exposure burst has one band, so the rule reduces to plain
+    sharpest. Anything that sliced the middle third by rank alone would draw an
+    arbitrary frame here, which is the case this degrades correctly for."""
+    assert browse.cover(frames((0.5, 0.30), (0.5, 0.90), (0.5, 0.60))) == 2
+    assert browse.cover(
+        frames((0.5, 0.10), (0.5, 0.20), (0.5, 0.90), (0.5, 0.30), (0.5, 0.40))
+    ) == 3
+
+
+@pytest.mark.parametrize("size, expected", [(3, 2), (6, 4), (9, 6), (12, 8)])
+def test_the_band_is_the_middle_third_rounded_up(size, expected):
+    """Sharpness rising with exposure makes the cover the top of the band, so
+    the frame that comes back names where the band ends: a third of 9 is frames
+    4-6 of the ranked order, and a third of 12 is frames 5-8."""
+    rising = frames(*[(index / size, index / size) for index in range(size)])
+    assert browse.cover(rising) == expected
+
+
+def test_a_stack_of_two_and_a_stack_of_one_need_no_case_of_their_own():
+    """Both fall out of the same arithmetic. A third of two rounds up to one,
+    which is the darker of them; a third of one is itself."""
+    assert browse.cover(frames((0.20, 0.40), (0.80, 0.95))) == 1
+    assert browse.cover(frames((0.80, 0.95), (0.20, 0.40))) == 2
+    assert browse.cover(frames((0.5, 0.30))) == 1
+
+
+def test_a_frame_with_a_missing_reading_cannot_win():
+    """A failed quality pass leaves `{"error": ...}` and no scalars, so both
+    readings come back NULL. Such a frame is drawn only when it is the whole
+    stack -- never in preference to one that can actually be ranked, however it
+    is placed and whatever the other frames read."""
+    assert browse.cover(frames((0.50, None), (0.20, 0.40), (0.80, 0.95))) == 2
+    assert browse.cover(frames((None, 9.9), (0.20, 0.40), (0.80, 0.95))) == 2
+    assert browse.cover(frames((None, None), (0.50, 0.70))) == 2
+
+
+def test_a_stack_no_frame_of_which_can_be_ranked_draws_its_first():
+    """Something has to be drawn, and with no reading to choose on the honest
+    answer is the frame the page's own order reached first."""
+    assert browse.cover(frames((None, None), (None, None))) == 1
+    assert browse.cover(frames((None, 0.9), (0.5, None))) == 1
+
+
+def test_a_tie_in_sharpness_goes_to_the_first_in_the_pages_order():
+    """Two frames of one exposure that read identically sharp are, as far as
+    this can tell, the same photograph. The page's order settles it, so the
+    answer is stable rather than whichever the sort happened to hand over."""
+    assert browse.cover(frames((0.5, 0.70), (0.5, 0.70), (0.5, 0.70))) == 1
+    assert browse.cover(frames((0.5, 0.10), (0.5, 0.70), (0.5, 0.70))) == 2
+
+
+def test_the_mean_luminance_is_the_histograms_centre_of_mass():
+    """16 bins over the 0-1 luma, each holding a fraction of the frame. A frame
+    that is half black and half white reads mid grey, which is what a centre of
+    mass says and what a modal or a median bin would not."""
+    black = [1.0] + [0.0] * 15
+    white = [0.0] * 15 + [1.0]
+    assert browse.mean_luminance(json.dumps(black)) == pytest.approx(0.03125)
+    assert browse.mean_luminance(json.dumps(white)) == pytest.approx(0.96875)
+    assert browse.mean_luminance(
+        json.dumps([0.5] + [0.0] * 14 + [0.5])
+    ) == pytest.approx(0.5)
+
+
+def test_a_frame_with_no_histogram_has_no_mean_luminance():
+    """`json_extract` returns NULL for a quality pass that never ran and for one
+    that failed, and neither is an exposure of 0."""
+    assert browse.mean_luminance(None) is None
+
+
 def test_the_sort_key_is_never_null(catalog):
     """A NULL sort key makes `(key, id) < (?, ?)` unknown, and the page ends
     early with no error. Every sort coalesces, and tile 4 (no dimensions) and

@@ -31,7 +31,10 @@ time and not the perceptual hash. `assignment_sql` is the whole grouping in one
 pass, ~380 ms, and only the eight sorts that cannot stream ever run it. The two
 default sorts never do: their runs are contiguous in `photo_sort` order, so
 `page_sql` carries the three extra columns a reader needs to collapse them as it
-streams, and a stacked page stays a keyset page.
+streams, and a stacked page stays a keyset page. Which member a stack is *drawn*
+as is `cover`, and it is a different question from where the stack sits in the
+ordering: it is the sharpest frame of the middle-exposure third, computed in
+Python over readings that only the page's own members are ever read for.
 
 The vocabulary itself is served from `facets`, one pass over the tile set at
 startup, so the header can only ever offer a value that exists and can show what
@@ -51,6 +54,14 @@ from dataclasses import dataclass, replace
 QUALITY = "json_extract(f.quality, '$.composite_quality')"
 SHARPNESS = "json_extract(f.quality, '$.sharpness')"
 RESOLUTION = "json_extract(f.quality, '$.resolution_class')"
+
+# The fourth reading, and the only one that is not a scalar: 16 bins over the
+# 0-1 luma, each holding the fraction of the frame that fell in it, written by
+# `archive/pipeline/features.py`. It comes back as JSON text and `mean_luminance`
+# turns it into the one number the cover rule ranks on. Phase 2b kept no mean of
+# its own -- `underexposure` is clamped at mid grey, so every frame brighter than
+# that reads 0 and a bracket's top two frames are indistinguishable by it.
+LUMINANCE = "json_extract(f.quality, '$.luminance_histogram')"
 
 # What a NULL sorts as, so that a sort key is never NULL and a keyset cursor can
 # always compare against it. Below every real value in both cases: quality runs
@@ -527,6 +538,63 @@ def assignment_sql(query: Query) -> tuple[str, list]:
         f"SELECT id, k, stack FROM assigned ORDER BY k {direction}, id {direction}",
         params,
     )
+
+
+# --------------------------------------------------------------------------
+# the cover
+
+
+def mean_luminance(histogram: str | None) -> float | None:
+    """How bright a frame is, from the 16-bin histogram Phase 2b stored.
+
+    The bins are equal cuts of the 0-1 luma and each holds the fraction of the
+    frame that fell in it, so the mean is the centre of mass over the bin
+    midpoints. None where the quality pass never ran or failed -- a failure is
+    persisted as `{"error": ...}`, so `json_extract` returns NULL for both, and
+    a frame with no exposure reading cannot be ranked by one.
+    """
+    if histogram is None:
+        return None
+    bins = json.loads(histogram)
+    return sum(share * (index + 0.5) / len(bins) for index, share in enumerate(bins))
+
+
+def cover(members: list[tuple[int, float | None, float | None]]) -> int:
+    """Which member a closed stack is drawn as, from `(id, luminance, sharpness)`.
+
+    The sharpest frame of the middle-exposure third. Rank the members by mean
+    luminance, take the middle third rounded up to at least one, and take the
+    sharpest of those. The library is mostly three-frame bracketing, and the
+    middle exposure is the one that was aimed -- so the frame worth looking at
+    is the best-focused frame of the metered exposure, not the brightest and not
+    whichever one the ordering happened to reach first.
+
+    The band widens to every member sharing its edge exposures, which is what
+    makes a constant-exposure burst degrade to plain sharpest: frames that all
+    read the same brightness are one band, and the rule reduces to
+    `max(sharpness)` over the whole stack. A stack of two and a stack of one
+    fall out of the same arithmetic and need no case of their own.
+
+    A member missing either reading cannot be ranked and so cannot win. When no
+    member has both, the stack is drawn as the first member in the page's own
+    order -- which is what `members` is in, and which is also how a tie in
+    sharpness is settled.
+    """
+    ranked = sorted(
+        (member for member in members if member[1] is not None and member[2] is not None),
+        key=lambda member: member[1],
+    )
+    if not ranked:
+        return members[0][0]
+    width = -(-len(ranked) // 3)  # the middle third, rounded up
+    start = (len(ranked) - width) // 2
+    band = ranked[start:start + width]
+    low, high = band[0][1], band[-1][1]
+    order = {member[0]: index for index, member in enumerate(members)}
+    return max(
+        (member for member in ranked if low <= member[1] <= high),
+        key=lambda member: (member[2], -order[member[0]]),
+    )[0]
 
 
 # --------------------------------------------------------------------------

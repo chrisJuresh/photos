@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import random
 import sqlite3
 from datetime import datetime, timedelta
@@ -110,20 +111,61 @@ def corpus(
 # spine is made of, and the second body is what proves a run is per camera
 # rather than per moment.
 #
-# (camera, seconds into the burst, taken_src, stack)
+# The two readings are what the cover rule ranks on, and both sets are chosen so
+# that a wrong rule draws a visibly different tile. Cam A is a real bracket --
+# three exposures, and its *brightest* frame is its sharpest -- so plain
+# sharpest, brightest, and first-in-the-page's-order each name a different frame
+# from the middle-exposure one. Cam B's two frames share an exposure, which is
+# the case the rule degrades to plain sharpest for, and the sharper of them is
+# the older, so first-in-order cannot pass for that either.
+#
+# (camera, seconds into the burst, taken_src, stack, luminance, sharpness)
 BURST_PLAN = (
-    ("Cam A", 0, "exif:DateTimeOriginal", "bracket"),
-    ("Cam A", 1, "exif:DateTimeOriginal", "bracket"),
-    ("Cam A", 2, "exif:DateTimeOriginal", "bracket"),
-    ("Cam B", 0, "exif:DateTimeOriginal", "second body"),
-    ("Cam B", 1, "exif:DateTimeOriginal", "second body"),
-    ("Cam C", 30, "exif:DateTimeOriginal", "lone"),
+    ("Cam A", 0, "exif:DateTimeOriginal", "bracket", 0.20, 0.40),
+    ("Cam A", 1, "exif:DateTimeOriginal", "bracket", 0.50, 0.70),
+    ("Cam A", 2, "exif:DateTimeOriginal", "bracket", 0.80, 0.95),
+    ("Cam B", 0, "exif:DateTimeOriginal", "second body", 0.50, 0.60),
+    ("Cam B", 1, "exif:DateTimeOriginal", "second body", 0.50, 0.30),
+    ("Cam C", 30, "exif:DateTimeOriginal", "lone", 0.50, 0.10),
 )
 
 # Every seventh burst also carries a frame `capture_time` dated from mtime --
 # same body, chronologically inside the bracket. It is never stacked, and it
-# must not split the bracket around it.
-GUESSED = ("Cam A", 1, "mtime", "guessed")
+# must not split the bracket around it. It is also the sharpest frame in the
+# burst, so a cover rule that read past a stack's own members would draw it.
+GUESSED = ("Cam A", 1, "mtime", "guessed", 0.65, 0.99)
+
+# The 16 bins `archive/pipeline/features.py` cuts the 0-1 luma into.
+BINS = 16
+
+# Where the bracket's over-exposed frame sits in the plan, and which bursts had
+# its quality pass fail. Phase 2b persists a failure as `{"error": ...}` and no
+# scalars at all, so that frame cannot be ranked -- and it is the sharpest of
+# its bracket, so a rule that read a missing scalar as a low one, or as no
+# obstacle, would draw it. Not the first burst, which is the one the readable
+# bracket is demonstrated on.
+BRIGHTEST = 2
+FAILED = json.dumps({"error": "decode failed"})
+
+
+def brightest_failed(group: int) -> bool:
+    """Whether this burst's over-exposed frame has no quality scalars at all."""
+    return group % 5 == 3
+
+
+def quality(luminance: float, sharpness: float) -> str:
+    """The `file.quality` JSON of a frame, holding what the cover rule reads.
+
+    The whole histogram's mass sits in the bin `luminance` falls in, so the mean
+    it yields is that bin's midpoint: the ordering is exact and the value is
+    quantised to 1/16, which is all a corpus for a ranking needs. Two frames
+    given the same luminance therefore read as exactly the same exposure, which
+    is the case that matters.
+    """
+    histogram = [0.0] * BINS
+    histogram[min(int(luminance * BINS), BINS - 1)] = 1.0
+    return json.dumps({"luminance_histogram": histogram, "sharpness": sharpness})
+
 
 # Bursts are an hour apart, so no window the slider offers can merge two of
 # them and the expected grouping is a property of the plan alone.
@@ -134,10 +176,11 @@ BURST_START = "2025-05-01T12:00:00"
 def bursts(catalog_db: Path, state_db: Path, *, groups: int = 12) -> list[tuple]:
     """A migrated pair holding `groups` bursts, and the grouping they must yield.
 
-    Returns (photo_id, sha, camera, sort_key, taken_src, stack, size) per row,
-    where `stack` names the set the row belongs to at any window the slider
-    offers. A test computes what it expects from that rather than from the
-    endpoint it is testing.
+    Returns (photo_id, sha, camera, sort_key, taken_src, stack, size, luminance,
+    sharpness) per row, where `stack` names the set the row belongs to at any
+    window the slider offers and the last two are what the cover rule ranks on
+    -- both None for the frames whose quality pass failed. A test computes what
+    it expects from that rather than from the endpoint it is testing.
 
     File sizes are scattered rather than ascending, so an alternate sort really
     does interleave the members of a stack -- which is the whole reason the
@@ -150,9 +193,10 @@ def bursts(catalog_db: Path, state_db: Path, *, groups: int = 12) -> list[tuple]
     rows = []
     for group in range(groups):
         plan = list(BURST_PLAN) + ([GUESSED] if group % 7 == 0 else [])
-        for camera, offset, taken_src, stack in plan:
+        for index, (camera, offset, taken_src, stack, luminance, sharpness) in enumerate(plan):
             photo_id = len(rows) + 1
             when = start + timedelta(seconds=group * BURST_SPACING + offset)
+            failed = index == BRIGHTEST and brightest_failed(group)
             rows.append(
                 (
                     photo_id,
@@ -162,19 +206,22 @@ def bursts(catalog_db: Path, state_db: Path, *, groups: int = 12) -> list[tuple]
                     taken_src,
                     f"{group}:{stack}",
                     (photo_id * 37) % 997 + 1,
+                    None if failed else luminance,
+                    None if failed else sharpness,
                 )
             )
 
     conn = sqlite3.connect(catalog_db)
     try:
         conn.execute("BEGIN")
-        for photo_id, sha, camera, sort_key, taken_src, _, size in rows:
+        for photo_id, sha, camera, sort_key, taken_src, _, size, lum, sharp in rows:
             width, height = shapes[photo_id % len(shapes)]
             conn.execute(
                 "INSERT INTO file (sha256, size, ext, kind, width, height, taken_at, "
-                "taken_src, camera, vault_relpath, state, feature_ver) "
-                "VALUES (?, ?, '.jpg', 'image', ?, ?, ?, ?, ?, ?, 'adopted', 'test')",
+                "taken_src, camera, quality, vault_relpath, state, feature_ver) "
+                "VALUES (?, ?, '.jpg', 'image', ?, ?, ?, ?, ?, ?, ?, 'adopted', 'test')",
                 (sha, size, width, height, sort_key, taken_src, camera,
+                 FAILED if lum is None else quality(lum, sharp),
                  f"objects\\{sha[:2]}\\{sha}.blob"),
             )
             conn.execute(
