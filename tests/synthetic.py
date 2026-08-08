@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from photolib import migrate
-from photolib.config import thumb_path
+from photolib.config import substrate_path, thumb_path
 
 # A 2x2 lossless WebP. Small enough to write thousands of, real enough that the
 # browser performs an actual decode.
@@ -194,9 +194,22 @@ def expected_order(rows) -> list[int]:
 
 def write_thumbnails(thumb_root: Path, shas) -> int:
     """Materialise a thumbnail for each sha. Returns how many were written."""
+    return _write_webp(thumb_path, thumb_root, shas)
+
+
+def write_substrates(substrate_root: Path, shas) -> int:
+    """Materialise a 1536px substrate for each sha. Returns how many were written.
+
+    The bytes are the same 2x2 WebP a thumbnail gets: the tier a test is looking
+    at is decided by which tree the file is in, not by its dimensions.
+    """
+    return _write_webp(substrate_path, substrate_root, shas)
+
+
+def _write_webp(path_of, root: Path, shas) -> int:
     written = 0
     for sha in shas:
-        path = thumb_path(thumb_root, sha)
+        path = path_of(root, sha)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(TINY_WEBP)
         written += 1

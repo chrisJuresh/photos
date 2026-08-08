@@ -34,12 +34,14 @@ def server(tmp_path: Path):
         catalog_db=tmp_path / "catalog.sqlite3",
         state_db=tmp_path / "state.sqlite3",
         thumb_root=tmp_path / "thumb",
+        substrate_root=tmp_path / "substrate",
         vault_root=tmp_path / "vault",
         reveal_root=tmp_path / "vault",
         photos_root=tmp_path / "photos",
     )
     roots.reveal_root.mkdir(parents=True)
     roots.thumb_root.mkdir()
+    roots.substrate_root.mkdir()
     roots.photos_root.mkdir()
     migrate.apply(roots.catalog_db, roots.state_db)
     conn = db.connect(roots.catalog_db, roots.state_db)

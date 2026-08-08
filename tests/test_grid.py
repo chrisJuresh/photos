@@ -94,7 +94,12 @@ def make_grid(tmp_path: Path):
     started: list[GridServer] = []
 
     def factory(
-        *, count: int = 40, tie: int = 0, thumbnails: int = 0, bursts: int = 0
+        *,
+        count: int = 40,
+        tie: int = 0,
+        thumbnails: int = 0,
+        substrates: int = 0,
+        bursts: int = 0,
     ) -> Grid:
         # Step 14 promoted the objects, so the base a relpath joins to and the
         # containment root are both the vault root now. They stay two fields
@@ -104,18 +109,26 @@ def make_grid(tmp_path: Path):
             catalog_db=tmp_path / "catalog.sqlite3",
             state_db=tmp_path / "state.sqlite3",
             thumb_root=tmp_path / "thumb",
+            substrate_root=tmp_path / "substrate",
             vault_root=base,
             reveal_root=base,
             photos_root=tmp_path / "photos",
         )
         (roots.reveal_root).mkdir(parents=True, exist_ok=True)
         roots.thumb_root.mkdir(parents=True, exist_ok=True)
+        roots.substrate_root.mkdir(parents=True, exist_ok=True)
         roots.photos_root.mkdir(parents=True, exist_ok=True)
         if bursts:
             rows = synthetic.bursts(roots.catalog_db, roots.state_db, groups=bursts)
         else:
             rows = synthetic.corpus(roots.catalog_db, roots.state_db, count=count, tie=tie)
         synthetic.write_thumbnails(roots.thumb_root, [row[1] for row in rows[:thumbnails]])
+        # Disjoint from the thumbnails on purpose: a handler that reads the wrong
+        # root then answers 404 where the fixture says 200, in both directions.
+        synthetic.write_substrates(
+            roots.substrate_root,
+            [row[1] for row in rows[thumbnails : thumbnails + substrates]],
+        )
 
         spawns: list = []
         server = GridServer(
@@ -136,7 +149,7 @@ def make_grid(tmp_path: Path):
 
 @pytest.fixture
 def grid(make_grid) -> Grid:
-    return make_grid(count=40, thumbnails=3)
+    return make_grid(count=40, thumbnails=3, substrates=3)
 
 
 def walk(port: int, *, limit: int = 500, kind: str | None = None) -> tuple[list[int], int]:
@@ -981,6 +994,90 @@ def test_thumbnails_never_open_the_database(grid, monkeypatch):
     assert status == 200
 
 
+# -- substrates ----------------------------------------------------------
+#
+# The 1536px tier the stack overlay draws its frames from. Same shape as the
+# thumbnail route above, a second root: what is asserted here is that it IS the
+# same shape, and that the two roots do not leak into each other.
+
+
+def test_substrate_is_served_immutable_with_an_etag(grid):
+    sha = grid.rows[3][1]
+    status, headers, body = http_request(grid.port, "GET", f"/d/{sha}.webp")
+    assert status == 200
+    assert body == synthetic.TINY_WEBP
+    assert headers["Content-Type"] == "image/webp"
+    assert headers["Cache-Control"] == "private, max-age=31536000, immutable"
+    assert headers["ETag"] == f'"{sha}"'
+
+
+def test_substrate_revalidates_with_if_none_match(grid):
+    sha = grid.rows[3][1]
+    status, _, body = http_request(
+        grid.port, "GET", f"/d/{sha}.webp", headers=(("If-None-Match", f'"{sha}"'),)
+    )
+    assert status == 304
+    assert body == b""
+
+
+def test_a_query_string_does_not_break_the_substrate_route(grid):
+    sha = grid.rows[3][1]
+    status, _, _ = http_request(grid.port, "GET", f"/d/{sha}.webp?v=1")
+    assert status == 200
+
+
+def test_a_missing_substrate_is_a_plain_404(grid):
+    """23 tiles have a thumbnail and no substrate. That is expected, not an error."""
+    sha = grid.rows[-1][1]
+    status, _, body = http_request(grid.port, "GET", f"/d/{sha}.webp")
+    assert status == 404
+    assert body == b""
+
+
+def test_the_two_tiers_are_separate_roots(grid):
+    """A sha with one tier and not the other answers from its own tree only."""
+    thumbnailed, substrated = grid.rows[0][1], grid.rows[3][1]
+    assert http_request(grid.port, "GET", f"/t/{thumbnailed}.webp")[0] == 200
+    assert http_request(grid.port, "GET", f"/d/{thumbnailed}.webp")[0] == 404
+    assert http_request(grid.port, "GET", f"/d/{substrated}.webp")[0] == 200
+    assert http_request(grid.port, "GET", f"/t/{substrated}.webp")[0] == 404
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/d/../../config.toml",
+        "/d/..%2f..%2fconfig.toml",
+        "/d/%2e%2e%2f%2e%2e%2fconfig.toml",
+        "/d/" + "a" * 63 + ".webp",
+        "/d/" + "a" * 65 + ".webp",
+        "/d/" + "A" * 64 + ".webp",
+        "/d/" + "z" * 64 + ".webp",
+        "/d/" + "a" * 64 + ".png",
+        "/d/" + "a" * 64 + ".webp/",
+        "/d/",
+    ],
+)
+def test_the_substrate_route_only_matches_64_hex(grid, path, monkeypatch):
+    """The pattern IS the containment proof here too, so nothing reaches the disk."""
+    monkeypatch.setattr(
+        grid_module, "substrate_path", lambda *args: pytest.fail(f"{path} reached the filesystem")
+    )
+    status, _, body = http_request(grid.port, "GET", path)
+    assert status == 404
+    assert b"reveal_root" not in body and b"photos_root" not in body
+
+
+def test_substrates_never_open_the_database(grid, monkeypatch):
+    """Opening a stack asks for one frame per member. None of them is a query."""
+    monkeypatch.setattr(
+        GridServer, "connection", lambda self: pytest.fail("substrate opened the catalog")
+    )
+    sha = grid.rows[3][1]
+    status, _, _ = http_request(grid.port, "GET", f"/d/{sha}.webp")
+    assert status == 200
+
+
 # -- static and headers --------------------------------------------------
 
 
@@ -1022,7 +1119,8 @@ def test_the_built_bundle_is_committed_and_current(grid):
 
 
 @pytest.mark.parametrize(
-    "path", ["/", "/tune", "/bundle.js", "/bundle.css", "/api/photos", "/t/x.webp", "/nope"]
+    "path",
+    ["/", "/tune", "/bundle.js", "/bundle.css", "/api/photos", "/t/x.webp", "/d/x.webp", "/nope"],
 )
 def test_security_headers_are_on_every_response(grid, path):
     _, headers, _ = http_request(grid.port, "GET", path)
@@ -1055,7 +1153,7 @@ def test_the_host_allowlist_accepts_loopback(grid):
         assert status == 200, host
 
 
-@pytest.mark.parametrize("path", ["/", "/bundle.js", "/api/photos", "/t/x.webp"])
+@pytest.mark.parametrize("path", ["/", "/bundle.js", "/api/photos", "/t/x.webp", "/d/x.webp"])
 def test_a_foreign_host_header_is_refused(grid, path):
     """F48: a name an attacker controls that resolves to 127.0.0.1 is same-origin
     to the browser, so CSP does not help and only a Host allowlist does."""
@@ -1306,7 +1404,7 @@ def test_the_server_writes_nothing(revealable):
 
     def snapshot() -> dict[str, tuple[int, int]]:
         seen = {}
-        for root in (grid.roots.vault_root, grid.roots.thumb_root):
+        for root in (grid.roots.vault_root, grid.roots.thumb_root, grid.roots.substrate_root):
             for path in sorted(root.rglob("*")):
                 if path.is_file():
                     stat = path.stat()
@@ -1320,6 +1418,7 @@ def test_the_server_writes_nothing(revealable):
     walk(grid.port)
     for row in grid.rows:
         http_request(grid.port, "GET", f"/t/{row[1]}.webp")
+        http_request(grid.port, "GET", f"/d/{row[1]}.webp")
     assert reveal_post(grid, b'{"id": 1}')[0] == 204
     assert snapshot() == before
 

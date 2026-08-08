@@ -6,6 +6,7 @@
     GET  /api/photos?before=&before_id=&limit=&<filters>  a keyset page
     GET  /api/facets                                      what can be filtered by
     GET  /t/<sha256>.webp                                 a thumbnail, immutable
+    GET  /d/<sha256>.webp                                 a 1536px substrate, ditto
     POST /api/reveal {"id": N} | {"origin": N}            select it in Explorer
     GET  /api/triage/*                                    the survey, read-only
     POST /api/triage/*                                    the only writes there are
@@ -63,7 +64,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from photolib import browse, db, reveal as reveal_module, triage_api
-from photolib.config import load, thumb_path
+from photolib.config import load, substrate_path, thumb_path
 
 DEFAULT_PORT = 8770  # v1 used 8765 for the dashboard and 8766 for the review API
 
@@ -115,6 +116,11 @@ STATIC_ROUTES = {
 # structurally stronger than checking a joined path afterwards, and it costs no
 # database round-trip — one query per thumbnail would dominate first paint.
 THUMB_ROUTE = re.compile(r"^/t/([0-9a-f]{64})\.webp$")
+# The 1536px tier, which a stack's overlay draws its frames from. Same proof,
+# same tier-per-root split as `thumb_path`/`substrate_path`: a sha can have one
+# tier and not the other, and a request for the tier that is missing is a 404
+# rather than a fall back to the other one.
+SUBSTRATE_ROUTE = re.compile(r"^/d/([0-9a-f]{64})\.webp$")
 
 LIMIT_VALUE = re.compile(r"^[0-9]{1,5}$")
 
@@ -160,6 +166,7 @@ class Roots:
     catalog_db: Path
     state_db: Path
     thumb_root: Path
+    substrate_root: Path
     # What a `file.vault_relpath` is relative to. Step 14 promoted the objects out
     # of MediaVault, so this is the vault root and `reveal_root` is the vault too;
     # they are still two fields because the base and the containment root are
@@ -181,6 +188,7 @@ class Roots:
             catalog_db=config.catalog_db,
             state_db=config.state_db,
             thumb_root=config.thumb_root,
+            substrate_root=config.substrate_root,
             vault_root=config.vault_root,
             reveal_root=config.reveal_root,
             photos_root=config.photos_root,
@@ -655,6 +663,7 @@ class GridHandler(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
 
         thumbnail = THUMB_ROUTE.match(path)
+        substrate = SUBSTRATE_ROUTE.match(path)
         if path in STATIC_ROUTES:
             self._static(path)
         elif path == "/api/photos":
@@ -662,7 +671,11 @@ class GridHandler(BaseHTTPRequestHandler):
         elif path == "/api/facets":
             self._json(200, self.server.facets())
         elif thumbnail:
-            self._thumbnail(thumbnail.group(1))
+            sha256 = thumbnail.group(1)
+            self._tile(thumb_path(self.server.roots.thumb_root, sha256), sha256)
+        elif substrate:
+            sha256 = substrate.group(1)
+            self._tile(substrate_path(self.server.roots.substrate_root, sha256), sha256)
         elif path in triage_api.READ_ROUTES:
             self._triage_read(path, query)
         elif path == "/api/reveal" or path in triage_api.WRITE_ROUTES:
@@ -738,15 +751,24 @@ class GridHandler(BaseHTTPRequestHandler):
         )
         self._json(200, payload)
 
-    def _thumbnail(self, sha256: str) -> None:
+    def _tile(self, path: Path, sha256: str) -> None:
+        """One content-addressed webp off the NVMe: a thumbnail or a substrate.
+
+        The two tiers differ only in which root the caller resolved the sha
+        against — the caching, the revalidation and the 404 are the same answer
+        to the same question, so they are one handler rather than a near-clone.
+        Which root applies is fixed by the route that matched, before anything
+        touches the disk, and neither tier ever falls back to the other.
+        """
         etag = f'"{sha256}"'
         if self.headers.get("If-None-Match") == etag:
             self._respond(304, b"", (("ETag", etag),))
             return
         try:
-            body = thumb_path(self.server.roots.thumb_root, sha256).read_bytes()
+            body = path.read_bytes()
         except OSError:
-            # Expected: 22,531 stills have no derivative. Step 12's problem.
+            # Expected: 22,531 stills have no thumbnail — step 12's problem —
+            # and 23 tiles have no 1536px substrate in either source tree.
             self._fail(404)
             return
         self._respond(
@@ -898,6 +920,7 @@ def main(argv: list[str] | None = None) -> int:
         "catalog",
         "state",
         "thumb-root",
+        "substrate-root",
         "vault-root",
         "reveal-root",
         "photos-root",
@@ -910,6 +933,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog_db=args.catalog or roots.catalog_db,
         state_db=args.state or roots.state_db,
         thumb_root=args.thumb_root or roots.thumb_root,
+        substrate_root=args.substrate_root or roots.substrate_root,
         vault_root=args.vault_root or roots.vault_root,
         reveal_root=args.reveal_root or roots.reveal_root,
         photos_root=args.photos_root or roots.photos_root,
@@ -928,6 +952,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  host allowlist  {sorted(server.allowed_hosts)}")
     print(f"  catalog         {roots.catalog_db}")
     print(f"  thumbnails      {roots.thumb_root}")
+    print(f"  substrates      {roots.substrate_root}")
     print(f"  reveal root     {roots.reveal_root}")
     print(f"  triage root     {roots.photos_root}")
     print("  kinds           " + ", ".join(f"{kind} {count:,}" for kind, count in counts))
