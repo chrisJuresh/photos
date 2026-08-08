@@ -51,7 +51,9 @@ _Avoid_: duplicate, sidecar, RAW+JPEG group
 **Near-duplicate**:
 Two files whose perceptual hashes are within the stored Hamming threshold — in
 practice, the same frame twice. Recorded, filterable, and it collapses nothing.
-Not a measure of whether two photographs look alike to a person.
+Not a measure of whether two photographs look alike to a person. The grid's filter
+for it is labelled **Identical frames**, because that is what the shipped threshold
+finds and a reader should not have to know the word "perceptual" to use it.
 _Avoid_: similar, duplicate, match
 
 ### The two words that are not interchangeable

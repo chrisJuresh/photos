@@ -296,6 +296,17 @@ class Query:
         """
         return self if self.stack is None else replace(self, stack=None)
 
+    def grouping(self) -> Query:
+        """The same selection reduced to what decides how it stacks.
+
+        Runs are formed per camera in capture order, so the sort the reader is
+        looking at changes which cover a stack shows and never how many stacks
+        there are. Dropping the sort is what lets the count survive a change of
+        ordering instead of paying ~410 ms again for the number already on
+        screen.
+        """
+        return self if self.sort == DEFAULT_SORT else replace(self, sort=DEFAULT_SORT)
+
 
 def _tokens(field: str, values: list[str], *, split: bool) -> tuple[str, ...]:
     """The distinct values a repeated query parameter selects.
@@ -506,6 +517,20 @@ def count_sql(query: Query) -> tuple[str, list]:
     )
 
 
+def stack_count_sql(query: Query) -> tuple[str, list]:
+    """How many stacks the whole selection collapses to. ~410 ms; memoise it.
+
+    `starts` is 1 exactly where a new stack begins, so summing it counts them
+    without materialising one. The two default sorts collapse their own runs as
+    they page and so never build an assignment, but the count pane still has to
+    say what stacking did to the whole selection rather than to the page in
+    front of it — this is that number, and the only grouping pass those two
+    sorts pay for.
+    """
+    sql, params = _assignment(query)
+    return f"{sql}\nSELECT coalesce(sum(starts), 0) FROM marked", params
+
+
 def assignment_sql(query: Query) -> tuple[str, list]:
     """Every selected tile as `(id, sort key, stack)`, in the page's own order.
 
@@ -577,7 +602,7 @@ LABELS: dict[str, dict[str, str]] = {
     },
     "gps": {"yes": "Has location", "no": "No location"},
     "pair": {"pair": "RAW + JPEG", "single": "Single file"},
-    "dup": {"dup": "Has near-duplicates", "unique": "Unique"},
+    "dup": {"dup": "Has an identical frame", "unique": "Unique"},
     "dated": {"exif": "From EXIF", "filename": "From filename", "mtime": "From file date"},
 }
 
@@ -599,7 +624,7 @@ TITLES: dict[str, str] = {
     "grade": "Quality",
     "gps": "Location",
     "pair": "Grouping",
-    "dup": "Near-duplicates",
+    "dup": "Identical frames",
     "dated": "Date from",
 }
 
@@ -616,8 +641,10 @@ HINTS: dict[str, str] = {
     "grade": "Phase 2b's composite quality scalar, banded at this corpus's own "
              "quartiles.",
     "pair": "Phase 5 collapsed 13,840 RAW+JPEG pairs into one tile each.",
-    "dup": "Perceptual near-duplicates are recorded and never collapsed, so both "
-           "of a pair are still their own tile.",
+    "dup": "Frames that hash the same at the shipped threshold of 2, which is "
+           "copies rather than resemblances — similar frames from one moment are "
+           "a stack instead. They are recorded and never collapsed, so both of a "
+           "pair are still their own tile.",
     "dated": "Where the capture time came from. A filename or a file date is a "
              "guess about when the photograph was taken.",
     "lens": "As the camera wrote it. Several bodies record a code rather than a "

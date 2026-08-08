@@ -763,6 +763,56 @@ def test_a_filter_applies_before_stacking(stacked):
     assert body["total"] == sum(photo["n"] for photo in body["photos"])
 
 
+def test_a_stacked_page_carries_both_of_the_count_panes_numbers(stacked):
+    """`<stacks> stacks · <photos> photos`. The first is about the whole
+    selection and not the page in front of it, so a first page of one cover
+    still says how many there are in all -- and it is what the sheet reserves
+    its height for, because the rows it will hold are covers."""
+    first = get_json(stacked.port, "/api/photos?limit=1&stack=4")
+    assert first["stacks"] == 38
+    assert first["total"] == 74
+    assert len(first["photos"]) < first["stacks"]
+    assert len(walk_stacked(stacked.port, "stack=4")) == first["stacks"]
+
+    filtered = get_json(stacked.port, "/api/photos?limit=1000&stack=4&orient=portrait")
+    assert filtered["stacks"] == len(filtered["photos"])
+    assert filtered["total"] == sum(photo["n"] for photo in filtered["photos"])
+
+
+def test_the_stack_count_is_counted_once_per_selection_and_window(stacked):
+    """~380 ms and the same answer for every page, so it is banked like a total.
+    Two windows are two counts; two sorts are one, because the sort decides
+    which member covers a stack and never how many stacks there are."""
+    for url in (
+        "/api/photos?limit=1&stack=4",
+        "/api/photos?limit=1&stack=4",  # the same one, again
+        "/api/photos?limit=1&stack=4&sort=largest",  # a different sort
+        "/api/photos?limit=1&stack=6",  # a different window
+    ):
+        get_json(stacked.port, url)
+    assert sorted(key.stack for key in stacked.server._stacks) == [4, 6]
+    assert all(key.sort == browse.DEFAULT_SORT for key in stacked.server._stacks)
+
+
+def test_a_stack_count_is_banked_under_the_count_memos_cap(stacked):
+    """Same cap and same eviction as the other two memos: the keys come from a
+    query string, so what a session can bank has to be bounded."""
+    from photolib.grid import MAX_TOTALS
+
+    for window in range(browse.MIN_WINDOW, browse.MAX_WINDOW + 1):
+        get_json(stacked.port, f"/api/photos?limit=1&stack={window}")
+    assert len(stacked.server._stacks) == 10 <= MAX_TOTALS
+    assert all(value == 38 for value in stacked.server._stacks.values())
+
+
+def test_an_unstacked_page_is_never_counted_for_stacks(stacked):
+    """The pass costs what a total costs, and a reader who has not turned
+    stacking on must not pay for it."""
+    for url in ("/api/photos?limit=5", "/api/photos?limit=5&sort=largest"):
+        assert "stacks" not in get_json(stacked.port, url)
+    assert stacked.server._stacks == {}
+
+
 def test_stacking_off_returns_what_it_returned_before_stacking_existed(stacked):
     body = get_json(stacked.port, "/api/photos?limit=1000")
     assert set(body) == {"photos", "next", "kind", "sort", "limit", "total"}

@@ -15,6 +15,7 @@
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
   import Sheet from "./lib/Sheet.svelte";
+  import { remember, restore } from "./lib/stack.js";
   import Table from "./lib/Table.svelte";
   import Tree from "./lib/Tree.svelte";
   import Tuner from "./lib/Tuner.svelte";
@@ -44,7 +45,9 @@
   let busy = $state(false);
   let saving = $state(false);
   let loadingRows = $state(false);
-  let sheet = $state({ loading: false, count: 0, exhausted: false, total: null });
+  // `total` is the rows the answer holds — covers while stacking is on — and
+  // `tiles` the ones behind them, null when a row is already a tile.
+  let sheet = $state({ loading: false, count: 0, exhausted: false, total: null, tiles: null });
   let failed = $state(null);
   // Bumped by every write that changes the rule set, which is the tree's signal
   // to re-cost every node it has open. A counter rather than a reload call so the
@@ -60,6 +63,12 @@
   // and both mean "do not send it", so an untouched filter never reaches the URL.
   let filters = $state({});
   let sort = $state("newest");
+  // Whether a run of consecutive captures is drawn as one tile, and how many
+  // seconds of gap still counts as one run. Restored from localStorage rather
+  // than defaulted, so the grid opens the way it was left — the only part of
+  // the header's state that is remembered, and the reason it is remembered is
+  // that it is a preference about the grid rather than a search in it.
+  let stacking = $state(restore());
 
   const screen = $derived(SCREENS[index]);
   const showTable = $derived(screen.table !== false);
@@ -73,8 +82,13 @@
   // once so the sheet key and the request cannot disagree about the selection:
   // the key IS the request, so a filter that changes the answer always resets the
   // sheet and one that does not never does.
+  // The window is in it only while stacking is on, so turning it off leaves a
+  // query string with no `stack` in it at all rather than one the server has to
+  // read as "off" — and the sheet key below then says the two are different
+  // answers, which they are.
   const gridQuery = $derived({
     sort,
+    ...(stacking.on ? { stack: stacking.window } : {}),
     ...Object.fromEntries(
       Object.entries(filters).filter(([, values]) => values.length > 0),
     ),
@@ -436,10 +450,13 @@
     {facets}
     selected={filters}
     {sort}
+    {stacking}
     total={sheet.total}
+    tiles={sheet.tiles}
     loading={sheet.loading}
     onselect={selectFilter}
     onsort={(next) => (sort = next)}
+    onstack={(next) => (stacking = remember(next))}
     onclear={() => (filters = {})}
     ontriage={() => (mode = "triage")}
   />
