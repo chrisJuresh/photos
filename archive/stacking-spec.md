@@ -1,14 +1,16 @@
 # Spec — Stacking similar photos in the grid
 
-Status: ready to build, nothing started. Delete or archive this file once shipped;
-the permanent record is [ADR 0001](../adr/0001-stack-on-capture-time-not-phash.md)
-and the glossary in [CONTEXT.md](../../CONTEXT.md).
+Status: **shipped 2026-08-08, archived.** The permanent record is
+[ADR 0001](../docs/adr/0001-stack-on-capture-time-not-phash.md), the glossary in
+[CONTEXT.md](../CONTEXT.md), and [docs/grid-queries.md](../docs/grid-queries.md)
+for what each query costs. The measurements below are the prototype's and the
+shipped code does not reproduce them; re-derive against `docs/grid-queries.md`.
 
 **A stack is a run of consecutive captures from one camera within N seconds.** The
 grid draws each stack as one tile — its cover — and clicking it fans the members out
 over a blurred backdrop. A toggle turns stacking on; a slider sets N.
 
-Read [ADR 0001](../adr/0001-stack-on-capture-time-not-phash.md) first. It records why
+Read [ADR 0001](../docs/adr/0001-stack-on-capture-time-not-phash.md) first. It records why
 this is capture time and not the perceptual hash that exists for apparently this exact
 purpose, with the measurements. Without it the obvious reaction to this spec is
 "why isn't this using `near_dup`?", and the answer is that pHash finds 14.9% of the
@@ -16,7 +18,7 @@ frames this groups.
 
 ## Vocabulary
 
-Terms are defined in [CONTEXT.md](../../CONTEXT.md); the four that matter here:
+Terms are defined in [CONTEXT.md](../CONTEXT.md); the four that matter here:
 **tile** (one grid entry, a `photo` row, already a RAW+JPEG group), **stack** (a run
 of tiles shot in one moment), **cover** (the member drawn when a stack is closed),
 **near-duplicate** (the pHash relation — a different thing, and not this).
@@ -101,7 +103,7 @@ Build in order. Each phase ends at a gate that is a fact you can check.
 
 The substrates exist but are unreachable: the relpath lives in MediaVault's own
 manifest (`SELECT ... FROM derivatives WHERE long_edge = 1536 AND is_current = 1`),
-the same source [archive/pipeline/thumbnails.py](../../archive/pipeline/thumbnails.py)
+the same source [archive/pipeline/thumbnails.py](pipeline/thumbnails.py)
 uses for the 384px tier. They are also split across two trees with different layouts
 — 1,486 repaired ARW under `G:\vault\deriv` in `<aa>\<bb>\<sha><ext>`, the rest under
 `G:\MediaVault\derivatives` in v1's sharded `d1_` layout.

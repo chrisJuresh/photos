@@ -97,6 +97,17 @@ The grid and the nine triage screens are one client, two modes, served by one pr
 python -m photolib.grid --open
 ```
 
+**A stack is a run of consecutive captures from one camera within the reader's window** —
+what a bracketed set or a burst becomes in the grid, drawn as one tile and fanned out over
+the sheet when it is clicked. It is formed at query time over whatever the filters select
+and never stored, so removing a member splits its stack in two and the cover is resolved
+per query rather than materialised. It is grid-only: `/api/triage/*` is untouched and a
+triage screen never collapses anything. The overlay draws its frames from the 1536px
+substrate tree on the NVMe, served by `/d/<sha256>.webp` and filled by
+`python -m photolib.substrates` below. `docs/adr/0001-stack-on-capture-time-not-phash.md`
+records why this groups on capture time and not on the perceptual hash that exists for
+apparently this exact purpose, and `docs/grid-queries.md` what each stacked query costs.
+
 The client's source is `ui/` — Svelte 5, no Kit. `npm run build` emits
 `photolib/static/bundle.js` and `bundle.css` under fixed unhashed names, and **those two files
 are committed**: they are the only generated code in this repository, and they are here so the
@@ -141,7 +152,6 @@ Read the one that matches the work. Do not read them all.
 |---|---|
 | Domain vocabulary — tile, stack, cover, near-duplicate | `CONTEXT.md` |
 | Decisions and why they went the way they did | `docs/adr/` |
-| Specs for work not yet built | `docs/specs/` |
 | The header's glass material, `/tune`, `/glass`, theme | `docs/glass-material.md` |
 | Grid filters, sorts, facets, and what each query costs | `docs/grid-queries.md` |
 | The 16 one-shot build steps, restic, the off-site copy | `archive/pipeline/README.md` |
