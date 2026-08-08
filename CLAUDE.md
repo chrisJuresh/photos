@@ -156,17 +156,16 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   Never commit media, database, or vault state — rule 5 above still applies, so check
   `git status` before staging rather than reaching for `git add -A`. If nothing changed, say so
   and skip the commit.
-- **One session, one branch, one working tree.** Two sessions in this tree share an index and
-  a `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
-  means anything. **You cannot assume you are the only session here, so check before you
-  build, every time.** You may work in this tree only when `HEAD` is on `main` or a non-ticket
-  branch *and* `git status --porcelain` is empty. A ticket branch checked out, files you did
-  not write, or a `git worktree list` longer than this tree all mean someone else is here, and
-  your work goes in a worktree of its own instead — added with `git worktree add`, then
-  **entered with `EnterWorktree`** so that reaching back into this tree is refused rather than
-  merely discouraged. "Pick your tree" in `docs/agents/issue-tracker.md` is the check. When in
-  doubt, worktree: a needless one costs a directory, a missed one costs a commit that swallowed
-  another ticket. **Never restore a `HEAD` you moved by accident** — say what you ran and stop.
+- **One writer, one branch, one working tree.** Two writers in this tree share an index and a
+  `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
+  means anything. **Check before you build, every time** — `list_sessions` for another running
+  session whose `cwd` is this checkout, `git status --porcelain` for work you did not make.
+  Neither: work in place, which is the common case and keeps the diff where the operator is
+  already looking. Either: take a worktree, added with `git worktree add` and then **entered
+  with `EnterWorktree`** so reaching back into this tree is refused rather than merely
+  discouraged. "Pick your tree" in `docs/agents/issue-tracker.md` is the check. Leave the
+  worktree standing until its branch merges, and **never restore a `HEAD` you moved by
+  accident** — say what you ran and stop.
 - Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
 - `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
 

@@ -46,28 +46,27 @@ walked through `gh`.
    one and stop, rather than building against a blocker's unwritten half.
 3. **Claim it.** `gh issue edit <n> --add-assignee @me`. First write of the session, so an
    abandoned session still shows who was in it.
-4. **Pick your tree.** Before touching a file, find out whether another session is already in
-   this one. Nothing announces itself, so read the tree:
+4. **Pick your tree.** A worktree is for a *second concurrent writer*, not for every ticket.
+   Whether one is here is a question with an answer rather than a guess: `list_sessions`
+   reports every other session's `cwd` and whether it `isRunning`, and `git status` reports
+   the disk.
 
-   ```bash
-   git worktree list
-   git status --porcelain
-   git symbolic-ref --short HEAD
-   ```
+   | signal | verdict |
+   |---|---|
+   | another session with `isRunning: true` whose `cwd` is this checkout | worktree |
+   | `git status --porcelain` shows work you did not make | worktree |
+   | neither | **work in place** |
 
-   Build where you are **only** if `HEAD` is on `main` or a non-ticket branch *and*
-   `git status --porcelain` is empty. Any other reading — a ticket branch checked out that
-   isn't yours, uncommitted files you did not write, another worktree already listed — means
-   a session is here, and you take your own instead:
+   Working in place is the common case and the right one when it is true — the operator has
+   this directory open, and a diff in a worktree is a diff nobody is looking at. When the
+   answer is worktree, take one off the base step 5 picks:
 
    ```bash
    git worktree add .claude/worktrees/<n> -b <n>-<short-slug> <base>
    ```
 
    Then **enter it with `EnterWorktree`**, not with `cd` — the difference is enforcement, and
-   "Entering versus cd-ing" below is why it matters. Bias towards taking a worktree at all: a
-   needless one costs a directory, a missed one costs a commit that swallowed another ticket's
-   half-finished work.
+   "Entering versus cd-ing" below is why it matters.
 5. **Branch off the right base.** `<base>` is the ticket's blocker where step 2 found one that
    is closed but not yet merged to `main`; otherwise `main`. Never branch off "the current
    branch" — with a shared `HEAD` that is whatever another session last checked out, which is
@@ -92,10 +91,16 @@ other's half-finished files, `git switch` moves the floor under both, and neithe
 `git status` describes anything real. Step 4 above is what keeps that from happening; the rest
 of this section is what surrounds it.
 
-The check is deliberately one-sided because the two errors are not the same size. A session
-sitting idle between turns is indistinguishable from no session at all, so no reading of the
-tree can prove you are alone — it can only prove you are not. Treat a clean tree on `main` as
-the one case that lets you stay and everything else as occupied.
+Step 4's two signals are not redundant, and neither is a check on its own. `list_sessions` sees
+Claude sessions and nothing else; `git status` sees the disk and cannot say who dirtied it.
+Together they cover the case each one misses — a person in an editor, a plain `claude` CLI
+session, a session that is here but has not written yet.
+
+They share one hole, which this repo has already fallen into. A session that `cd`s into a
+worktree goes on reporting the main checkout as its `cwd`, because only entering re-registers
+it. When two sessions had moved out of this tree and a third asked who was still in it, both
+movers were still listed here. So the rule below is not only about enforcement: entering rather
+than `cd`-ing is also what keeps the first signal true for everybody else.
 
 ### Entering versus cd-ing
 
@@ -134,14 +139,22 @@ finishes: commit or stash what is genuinely its own, add a worktree off the corr
 carry on there. Sorting the branches out afterwards is far more expensive than moving now, and
 the shared tree gets worse with every file written.
 
-Push the branch before finishing, then release the directory:
+### Leave the work where it can be seen
+
+**Removing a worktree is a merge-time action, not an end-of-prompt one.** Tearing it down when
+the prompt ends is what makes the work vanish: the reply names a branch and the operator is left
+with no files to open. Push the branch, **leave the directory**, and name its path in the reply.
+It stands until the branch merges.
+
+Sweep the merged ones at the *start* of a session instead, when nothing is in flight:
 
 ```bash
-git worktree remove .claude/worktrees/<n>
+git branch --merged main --format='%(refname:short)|%(worktreepath)'
 ```
 
-The branch survives that; only the checkout goes. A worktree left behind is harmless but it
-counts as occupancy for the next session's step 4, which is a false positive nobody needs.
+Any row with a path is a worktree whose branch is already in `main`. Remove the ones that are
+yours with `git worktree remove`; another session's is its business even after its branch
+merges, so leave those and say they are there.
 
 Independent tickets are still not free of each other. Two things collide even in separate
 worktrees, and both are physical rather than textual:
