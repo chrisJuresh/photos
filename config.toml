@@ -29,6 +29,11 @@ meta_root    = 'G:\vault\meta'
 # NVMe. Read on every scroll, so it does not live on the USB HDD.
 thumb_root = 'E:\photolib\thumb'
 
+# The 1536px tier, read when a stack is opened. Adopted from the two trees that
+# hold it -- see photolib/substrates.py -- for the same reason as thumb_root: a
+# frame off the USB HDD measured 40 ms against 9 ms here.
+substrate_root = 'E:\photolib\substrate'
+
 # catalog is regenerable and written only by the pipeline; state holds human
 # decisions, is irreplaceable, and is written only by the app.
 catalog_db = 'E:\photolib\catalog.sqlite3'

@@ -4,7 +4,8 @@ A local-first photo and video vault. **The rebuild is complete.** What is left a
 repository root is the thing that runs: the grid and triage website, and the schema it reads.
 
 - `photolib/` is the website — `grid`, `browse`, `triage_api`, `triage_screens`, `triage`,
-  `probe`, and the `config`/`db`/`migrate` infrastructure under them. `ui/` is its Svelte source.
+  `probe`, `substrates`, and the `config`/`db`/`migrate` infrastructure under them. `ui/` is
+  its Svelte source.
 - `archive/pipeline/` is the one-shot build pipeline that produced the vault: 16 modules that
   ran to completion between 2026-08-01 and 2026-08-07. It is still importable and still
   tested, but nothing it holds is needed to serve the website. It imports `config`, `db`,
@@ -93,6 +94,15 @@ To apply pending migrations to the configured databases:
 
 ```bash
 python -m photolib.migrate
+```
+
+To fill `substrate_root` — the 1536px tier a stack's overlay draws from, adopted from
+`G:\MediaVault\derivatives` and `G:\vault\deriv` onto the NVMe. Checksum-verified where the
+manifest records a checksum, resumable, and idempotent, so a re-run of a complete pass places
+nothing. It reads `G:`: run it in the background and leave the drive alone while it does.
+
+```bash
+python -m photolib.substrates
 ```
 
 To run the archived v1 suite as a reference oracle. `archive/v1/.venv` is a Python 3.14
