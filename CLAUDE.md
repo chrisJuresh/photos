@@ -156,6 +156,9 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   Never commit media, database, or vault state — rule 5 above still applies, so check
   `git status` before staging rather than reaching for `git add -A`. If nothing changed, say so
   and skip the commit.
+- **One session, one branch, one working tree.** Two sessions in this tree share an index and
+  a `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
+  means anything. A second concurrent session gets its own worktree.
 - Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
 - `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
 
@@ -165,6 +168,11 @@ open `archive/v1/docs/` when you need the detail behind a finding.
 
 Issues live as GitHub issues on `chrisJuresh/photos`, driven through the `gh` CLI.
 See `docs/agents/issue-tracker.md`.
+
+**When a request names a ticket, run its whole lifecycle without being asked** — claim it,
+branch, build it, commit and push, then close it with a comment saying what landed. The
+reader should not have to type a `gh` command. "Working a ticket" in that file is the
+sequence; it is an extension of the commit-and-push etiquette above, not an exception to it.
 
 ### Triage labels
 
