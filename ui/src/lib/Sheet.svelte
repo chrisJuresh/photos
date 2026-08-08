@@ -104,7 +104,12 @@
           return;
         }
         if (!event.target.closest(".chip")) {
-          onActivate(item);
+          // The element too, and only for its rect: a stack's overlay emanates
+          // from the tile that was clicked, and this is the one moment anything
+          // outside the sheet can know where that tile is. Handing over the
+          // element rather than a rect keeps the measuring at the point of use
+          // and this a pass-through — the sheet does not gain a geometry API.
+          onActivate(item, tile);
           return;
         }
         const decision = NEXT[item.o ?? "null"];
