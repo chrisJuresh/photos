@@ -11,6 +11,7 @@
   import { PHOTOS_ROOT, SCREENS, decisionOf, folderOf, isUnder } from "./lib/screens.js";
   import Counts from "./lib/Counts.svelte";
   import Header from "./lib/Header.svelte";
+  import Overlay from "./lib/Overlay.svelte";
   import Probe from "./lib/Probe.svelte";
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
@@ -69,6 +70,10 @@
   // the header's state that is remembered, and the reason it is remembered is
   // that it is a preference about the grid rather than a search in it.
   let stacking = $state(restore());
+  // The open stack — its frames and the rect of the tile they came out of — or
+  // null. Held here rather than in the sheet because the sheet is not what is
+  // open: the overlay floats above it and leaves its rows exactly as packed.
+  let opened = $state(null);
 
   const screen = $derived(SCREENS[index]);
   const showTable = $derived(screen.table !== false);
@@ -440,8 +445,22 @@
     return api.page(candidate, cursor);
   }
 
-  function activate(item) {
+  // A stack opens; everything else reveals, exactly as it always has. `m` is
+  // the page's own answer to what a stack holds and it is absent on a stack of
+  // one, so "is there anything to open" is a key test and not a size test.
+  function activate(item, tile) {
+    if (mode === "grid" && item.m) {
+      opened = { frames: item.m, origin: tile.getBoundingClientRect() };
+      return;
+    }
     guard(() => (mode === "grid" ? api.revealPhoto(item.id) : api.revealOrigin(item.id)));
+  }
+
+  // The second click: a frame inside an open stack. It closes on the way out,
+  // because the reveal was the thing it was opened to do.
+  function revealFrame(frame) {
+    opened = null;
+    guard(() => api.revealPhoto(frame.id));
   }
 </script>
 
@@ -601,6 +620,15 @@
     {/if}
   </div>
 </div>
+
+{#if opened}
+  <Overlay
+    frames={opened.frames}
+    origin={opened.origin}
+    onreveal={revealFrame}
+    onclose={() => (opened = null)}
+  />
+{/if}
 
 {#if failed}
   <div class="status" class:bare={mode === "grid"}>{failed}</div>

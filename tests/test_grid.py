@@ -643,7 +643,8 @@ def test_a_stacked_page_returns_one_tile_per_stack(stacked):
     assert len(body["photos"]) == len(groups) == 38
     assert sum(photo["n"] for photo in body["photos"]) == len(stacked.rows)
     assert all(
-        set(photo) == {"id", "s", "w", "h", "th", "n"} for photo in body["photos"]
+        set(photo) == {"id", "s", "w", "h", "th", "n"} | ({"m"} if photo["n"] > 1 else set())
+        for photo in body["photos"]
     )
 
 
@@ -658,6 +659,70 @@ def test_every_returned_photo_carries_its_own_stacks_size(stacked):
     assert sorted(size for _, size in covers) == sorted(
         len(members) for members in groups.values()
     )
+
+
+def test_a_cover_carries_the_frames_it_collapsed(stacked):
+    """The overlay's whole input, and the reason it needs no second endpoint.
+
+    The page has already grouped these tiles; asking again for one stack would
+    re-derive a grouping that filters and an evicted memo can move under it, and
+    then draw a set the grid never returned. So the members ride with the cover
+    that stands for them.
+
+    A stack of one carries none. It opens nothing -- clicking it reveals in
+    Explorer, exactly as an unstacked tile always has -- and on the real corpus
+    that is 6,297 of the 10,929 rows, every one of which would otherwise carry a
+    one-element list saying so.
+    """
+    sha = {row[0]: row[1] for row in stacked.rows}
+    groups = expected_stacks(stacked.rows)
+    stack_of = {cover: stack for stack, cover in expected_covers(stacked.rows).items()}
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4")
+
+    collapsed = 0
+    for photo in body["photos"]:
+        if photo["n"] == 1:
+            assert "m" not in photo
+            continue
+        collapsed += 1
+        frames = photo["m"]
+        assert len(frames) == photo["n"]
+        assert all(set(frame) == {"id", "s", "w", "h"} for frame in frames)
+        assert {frame["id"] for frame in frames} == set(groups[stack_of[photo["id"]]])
+        # The cover is one of the frames it draws for, not a thirty-ninth tile.
+        assert photo["id"] in {frame["id"] for frame in frames}
+        # Real shas, because the overlay turns each into a /d/ URL.
+        assert all(frame["s"] == sha[frame["id"]] for frame in frames)
+        # Real boxes, because the overlay packs rows before an image arrives.
+        assert all(frame["w"] > 0 and frame["h"] > 0 for frame in frames)
+    assert collapsed == 24  # the corpus really does hold multi-frame stacks
+
+
+@pytest.mark.parametrize("sort", sorted(SORTS))
+def test_a_covers_frames_are_in_the_pages_own_order(stacked, sort):
+    """Not capture order: the order this sort would have drawn them in, which on
+    `newest` is capture order reversed. The overlay lays them out in the order it
+    is handed, so a grid sorted largest-first opens a stack largest-first too."""
+    body = get_json(stacked.port, f"/api/photos?limit=1000&stack=4&sort={sort}")
+    place = {
+        photo["id"]: index
+        for index, photo in enumerate(
+            get_json(stacked.port, f"/api/photos?limit=1000&sort={sort}")["photos"]
+        )
+    }
+
+    for photo in body["photos"]:
+        if photo["n"] == 1:
+            continue
+        seats = [place[frame["id"]] for frame in photo["m"]]
+        assert seats == sorted(seats), (sort, photo["id"])
+
+
+def test_stacking_off_carries_no_frames(stacked):
+    """`m` is a stacked page's key, like `n`. An unstacked page is byte for byte
+    what it was before stacking existed, and this is the second half of that."""
+    body = get_json(stacked.port, "/api/photos?limit=1000")
+    assert all("m" not in photo for photo in body["photos"])
 
 
 def test_paging_a_stacked_selection_returns_each_stack_exactly_once(stacked):

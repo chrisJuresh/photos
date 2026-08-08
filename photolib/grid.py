@@ -314,6 +314,28 @@ def _photo(row) -> dict:
     }
 
 
+def _frame(row) -> dict:
+    """One member of a stack, as the overlay draws it.
+
+    `_photo` without the ThumbHash: a frame is drawn from `/d/`, which is a
+    1536px read behind a click that has already happened, and a placeholder for
+    it would be a second decode of a hash the cover has already shown.
+    """
+    return {"id": row[0], "s": row[1], "w": row[2], "h": row[3]}
+
+
+def _frames(rows, members: tuple | list) -> dict:
+    """`{"m": [...]}` for a stack worth opening, and nothing for one that is not.
+
+    A stack of one opens nothing — clicking it reveals in Explorer, as an
+    unstacked tile always has — so the key is absent rather than a list of one.
+    That is 6,297 of the 10,929 rows a four-second window leaves.
+    """
+    if len(members) < 2:
+        return {}
+    return {"m": [_frame(rows[photo_id]) for photo_id in members]}
+
+
 def _plain_page(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int):
     """One keyset page of tiles, and whether another follows.
 
@@ -407,10 +429,11 @@ def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int)
     # Every member's row is already in hand, so naming the cover costs the
     # quality read and no second look at the tiles.
     rows = {row[0]: row for group in groups for row in group}
-    covers = _covers(conn, [[row[0] for row in group] for group in groups])
+    members = [[row[0] for row in group] for group in groups]
+    covers = _covers(conn, members)
     photos = [
-        {**_photo(rows[cover]), "n": len(group)}
-        for cover, group in zip(covers, groups)
+        {**_photo(rows[cover]), "n": len(group), **_frames(rows, group)}
+        for cover, group in zip(covers, members)
     ]
 
     following = None
@@ -445,9 +468,12 @@ def _assigned(
             start += 1
     wanted = stacks[start:start + limit]
     covers = _covers(conn, [members for _, _, members in wanted])
-    rows = _by_id(conn, covers)
+    # Every member and not just the drawn one: the covers alone would leave the
+    # overlay a second read behind the click. The same ids `_covers` has just
+    # read the quality of, so this adds a row width rather than a query shape.
+    rows = _by_id(conn, [photo_id for _, _, members in wanted for photo_id in members])
     photos = [
-        {**_photo(rows[cover]), "n": len(members)}
+        {**_photo(rows[cover]), "n": len(members), **_frames(rows, members)}
         for cover, (_, _, members) in zip(covers, wanted)
     ]
     following = None
@@ -493,6 +519,13 @@ def page(
     two together are the count pane's two numbers and the first of them is what
     the sheet reserves its height for. With stacking off none of the three keys
     is there and the page is byte for byte what it was before stacking existed.
+
+    A photo whose `n` is more than one also carries `m`, the frames it collapsed
+    — `id`, `sha`, `width`, `height` each, in this page's own order — which is
+    what the overlay draws when the stack is opened. They ride with the cover
+    rather than being fetched per click because this page is where the grouping
+    is authoritative: a filter applies before stacking and the assignment memo
+    evicts, so asking again later could answer about a different set of frames.
     """
     if query.stack is None:
         photos, following = _plain_page(conn, query, cursor, limit)
