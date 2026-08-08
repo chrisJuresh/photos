@@ -631,6 +631,42 @@ def test_the_assignment_lists_a_stacks_members_in_the_pages_order(bursts):
     assert oldest[101] == [101, 103, 106, 107]
 
 
+@pytest.mark.parametrize("window, expected", sorted(STACKS_AT.items()))
+def test_the_stack_count_is_the_number_of_stacks_without_building_them(
+    bursts, window, expected
+):
+    """The count pane's first number. It has to agree with the assignment at
+    every window: they are the same grouping, summed rather than listed."""
+    sql, params = browse.stack_count_sql(selection(stack=str(window)))
+    assert bursts.execute(sql, params).fetchone()[0] == expected
+    assert expected == stack_count(bursts, selection(stack=str(window)))
+
+
+def test_a_selection_holding_nothing_has_no_stacks(bursts):
+    """`sum` over no rows is NULL, and a count pane cannot print NULL."""
+    sql, params = browse.stack_count_sql(selection(stack="4", ext=".nothing"))
+    assert bursts.execute(sql, params).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("name", sorted(browse.SORTS))
+def test_the_stack_count_does_not_depend_on_the_sort(bursts, name):
+    """Which member covers a stack is the sort's business; how many stacks there
+    are is not. So the memo drops the sort and one count serves all ten."""
+    sql, params = browse.stack_count_sql(selection(stack="4", sort=name))
+    assert bursts.execute(sql, params).fetchone()[0] == STACKS_AT[4]
+    assert selection(stack="4", sort=name).grouping() == selection(stack="4")
+
+
+def test_the_grouping_key_keeps_the_window_and_drops_the_sort(bursts):
+    """The mirror of `unstacked`: a tile count drops the window because no
+    window changes how many tiles there are, and a stack count drops the sort
+    for the same kind of reason."""
+    assert selection(stack="4", sort="largest").grouping() == selection(stack="4")
+    assert selection(stack="4").grouping() != selection(stack="3").grouping()
+    default = selection(stack="4")
+    assert default.grouping() is default
+
+
 def test_the_window_is_part_of_the_selection(bursts):
     """Two windows are two selections, so a memo keyed on the query cannot serve
     one from the other -- and dropping the window makes them one, which is what

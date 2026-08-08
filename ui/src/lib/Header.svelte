@@ -9,6 +9,7 @@
   import { onMount } from "svelte";
   import { count } from "./api.js";
   import { refract } from "./glass.js";
+  import { MAX, MIN } from "./stack.js";
   import { current, set } from "./theme.js";
 
   let {
@@ -17,15 +18,26 @@
     // proposes the next one and never mutates the one it was given.
     selected = {},
     sort = "newest",
+    // `{on, window}`, owned and remembered by App exactly as the filters are
+    // owned by it: this proposes the next one.
+    stacking = { on: false, window: 4 },
+    // The rows the answer holds, and — while stacking is on — the tiles those
+    // rows stand for. `tiles` is null when a row is already a tile, which is
+    // what makes the count pane's second number appear and disappear with
+    // stacking rather than the pane having to be told the toggle's state.
+    // The pane says "photos" for them, because that is the reader's word for a
+    // tile and CONTEXT.md's is not.
     total = null,
+    tiles = null,
     loading = false,
     onselect = () => {},
     onsort = () => {},
+    onstack = () => {},
     onclear = () => {},
     ontriage = () => {},
   } = $props();
 
-  let panel = $state(""); // "" | "sort" | "filters"
+  let panel = $state(""); // "" | "sort" | "filters" | "stacks"
   // Read off the document rather than defaulted here: main.js has already put
   // the remembered one on it, and this is the button that says which it is.
   let theme = $state(current());
@@ -72,6 +84,30 @@
     theme = set(theme === "dark" ? "light" : "dark");
   }
 
+  // The window under the reader's thumb, while the thumb is on it. A range
+  // input fires `input` for every pixel of a drag and `change` once the value
+  // is settled, and each settled value is a new selection: a new page, a new
+  // count and a grouping pass behind it. So the label follows the drag from
+  // here and the grid is only asked about the value the reader stopped on.
+  let dragging = $state(null);
+  const seconds = $derived(dragging ?? stacking.window);
+
+  function slide(value) {
+    dragging = Number(value);
+  }
+
+  function commit(value) {
+    dragging = null;
+    onstack({ ...stacking, window: Number(value) });
+  }
+
+  // A drag interrupted by Escape gets no `change`, because the input it would
+  // have fired on is gone. Without this the slider would reopen showing a value
+  // the grid was never asked for.
+  $effect(() => {
+    if (panel !== "stacks") dragging = null;
+  });
+
   // Escape closes whatever is open, and a click anywhere that is not the header
   // does the same. Both are on window rather than on a backdrop element: a
   // backdrop over the sheet would eat the click that reveals a photograph.
@@ -112,9 +148,22 @@
        thing here that is an answer rather than a control, and reading it off a
        photograph is what a bar tuned clear enough to see through makes hard.
        Its own pane gives it its own ground. -->
+  <!-- Two numbers while stacking is on, because one number that silently
+       changes meaning under a toggle is the one failure this pane cannot
+       afford: 10,731 where 24,306 stood, with the word "photos" still beside
+       it, reads as a library that has lost more than half of itself. So the
+       rows say "stacks" and the tiles they collapsed stay on the pane. -->
   <div class="glass tally" use:refract>
-    <strong>{total === null ? "…" : count(total)}</strong>
-    <span class="muted">{total === 1 ? "photo" : "photos"}</span>
+    {#if tiles !== null}
+      <strong>{count(total)}</strong>
+      <span class="muted">{total === 1 ? "stack" : "stacks"}</span>
+      <span class="muted sep">·</span>
+      <strong>{count(tiles)}</strong>
+      <span class="muted">{tiles === 1 ? "photo" : "photos"}</span>
+    {:else}
+      <strong>{total === null ? "…" : count(total)}</strong>
+      <span class="muted">{total === 1 ? "photo" : "photos"}</span>
+    {/if}
     {#if loading}<span class="spin" aria-label="loading"></span>{/if}
   </div>
 
@@ -141,6 +190,21 @@
           onclick={() => (panel = panel === "filters" ? "" : "filters")}
         >
           Filters{#if active}<span class="badge">{active}</span>{/if}<span class="caret">▾</span>
+        </button>
+
+        <!-- The count on the pill is what stacking did, readable without
+             opening the panel — the same number the pane's first half says,
+             which is the point: the pill is where you turned it on. -->
+        <button
+          class="menu"
+          class:open={panel === "stacks"}
+          class:on={stacking.on}
+          aria-expanded={panel === "stacks"}
+          onclick={() => (panel = panel === "stacks" ? "" : "stacks")}
+        >
+          Stacks{#if stacking.on && total !== null}<span class="badge">{count(total)}</span>{/if}<span
+            class="caret">▾</span
+          >
         </button>
 
         {#if chips.length}
@@ -191,6 +255,54 @@
             {entry.label}
           </button>
         {/each}
+      </div>
+    {/if}
+
+    <!-- A panel and not two controls in the bar: the bar stops shrinking at
+         `--bar-min`, and a slider does not fit in what is left at that width.
+         Same material and same behaviour as Sort and Filters, so Escape and a
+         click outside close this one too, from the two handlers above. -->
+    {#if panel === "stacks"}
+      <div class="glass sheet stacks" use:refract>
+        <section>
+          <h2>Stacking</h2>
+          <div class="options">
+            <button
+              class="option"
+              class:on={stacking.on}
+              role="switch"
+              aria-checked={stacking.on}
+              onclick={() => onstack({ ...stacking, on: !stacking.on })}
+            >
+              {stacking.on ? "On" : "Off"}
+            </button>
+          </div>
+          <p class="note">
+            A run of consecutive frames from one camera is drawn as one tile.
+          </p>
+        </section>
+
+        <section>
+          <h2 id="stack-window">Window</h2>
+          <div class="slider">
+            <input
+              type="range"
+              min={MIN}
+              max={MAX}
+              step="1"
+              value={seconds}
+              aria-labelledby="stack-window"
+              aria-valuetext="{seconds} seconds"
+              oninput={(event) => slide(event.currentTarget.value)}
+              onchange={(event) => commit(event.currentTarget.value)}
+            />
+            <span class="secs">{seconds}s</span>
+          </div>
+          <p class="note">
+            Frames further apart than this start a new stack. Four is where the
+            number of distinct sets in this library peaks.
+          </p>
+        </section>
       </div>
     {/if}
 
@@ -375,6 +487,12 @@
     letter-spacing: -0.01em;
   }
 
+  /* The gap between the two answers, at the flex row's own gap on either side
+     rather than a wider one: they are two halves of one sentence. */
+  .sep {
+    margin: 0 1px;
+  }
+
   .controls {
     display: flex;
     align-items: center;
@@ -443,6 +561,55 @@
     gap: 2px;
     padding: var(--s-2);
     min-width: 210px;
+  }
+
+  /* Narrow rather than spread across the bar like the filters: it holds two
+     controls, and a panel the width of the window for two controls reads as a
+     page rather than as a menu. Hung from the bar's left edge, as the sort menu
+     is — the panels line up with each other rather than each with the pill that
+     opened it, so opening a second one does not slide the ground sideways. */
+  .stacks {
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-3);
+    padding: var(--s-4);
+    width: 300px;
+    max-width: 100%;
+  }
+
+  .slider {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+  }
+
+  /* The native control, tinted. A range input styled from scratch is four
+     vendor pseudo-elements and a thumb that has to be redrawn per engine;
+     `accent-color` is the one property that says "this is the accent" and lets
+     the platform draw the rest. */
+  .slider input {
+    flex: 1;
+    min-width: 0;
+    accent-color: var(--accent);
+  }
+
+  .secs {
+    min-width: 3ch;
+    font-size: var(--fs-200);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  /* A sentence under a control, in the panel's own ink. The hints on the filter
+     panel are a `?` because there are fifteen of them and fifteen sentences is
+     a page; there are two here, and a sentence you have to hover for is a
+     sentence nobody reads. */
+  .note {
+    margin: var(--s-2) 0 0;
+    font-size: var(--fs-100);
+    line-height: 1.45;
+    color: color-mix(in srgb, var(--glass-text) 58%, transparent);
   }
 
   .filters {

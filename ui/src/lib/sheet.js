@@ -58,6 +58,12 @@ export function createSheet(canvas, sentinel, options) {
   let nextTop = 0; // y of the next row to commit
   let cursor = null; // the envelope's `next`, passed straight back
   let total = null; // rows the whole query has, or null while unknown
+  // The tiles those rows stand for, or null when a row is already a tile —
+  // which is every query except a stacked one. `total` is what the sheet
+  // reserves height for and so has to be the number of rows it will hold; the
+  // tiles they collapsed are the count pane's other number, and nothing here
+  // uses them for anything but reporting.
+  let tiles = null;
   let exhausted = false;
   let inflight = false;
   let width = 0;
@@ -245,7 +251,7 @@ export function createSheet(canvas, sentinel, options) {
     if (inflight || exhausted) return;
     inflight = true;
     const mine = generation;
-    onState({ loading: true, count: items.length, exhausted, total });
+    onState({ loading: true, count: items.length, exhausted, total, tiles });
     try {
       do {
         const body = await options.fetchPage(cursor);
@@ -258,17 +264,26 @@ export function createSheet(canvas, sentinel, options) {
         // `/api/photos` carries it; `/api/triage/page` does not, because there it
         // costs 220 ms and the same number arrives free with the counts — see
         // `setTotal`. So this is "if this endpoint knows", not "if it is set".
-        if (typeof body.total === "number") total = body.total;
+        // A stacked page's rows are covers, so `stacks` is the one that sizes
+        // this sheet and `total` becomes the tiles behind it. The key is
+        // absent with stacking off, which is what keeps the unstacked path the
+        // path it has always been.
+        if (typeof body.stacks === "number") {
+          total = body.stacks;
+          tiles = typeof body.total === "number" ? body.total : null;
+        } else if (typeof body.total === "number") {
+          total = body.total;
+        }
         pack(exhausted);
         render();
-        onState({ loading: true, count: items.length, exhausted, total });
+        onState({ loading: true, count: items.length, exhausted, total, tiles });
       } while (!exhausted && needsMore());
     } catch (err) {
       if (mine === generation) onState({ error: String(err) });
     } finally {
       if (mine === generation) {
         inflight = false;
-        onState({ loading: false, count: items.length, exhausted, total });
+        onState({ loading: false, count: items.length, exhausted, total, tiles });
       }
     }
   }
@@ -355,6 +370,7 @@ export function createSheet(canvas, sentinel, options) {
       // A new predicate is a new answer and therefore a new size. Keeping the
       // old one would reserve the previous screen's height for this one.
       total = null;
+      tiles = null;
       exhausted = false;
       canvas.style.height = "0px";
       window.scrollTo(0, 0);

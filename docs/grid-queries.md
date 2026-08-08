@@ -79,9 +79,19 @@ unchanged; `_rows` steps the cursor rather than fetching it, so a tile the page 
 reaches is a tile SQLite never visits. A page ends at a *clean cut* — the first tile
 more than the window away from the last one that could stack — so no run straddles a
 boundary and a page can carry a few covers more than it asked for. That is deliberate:
-the alternative is splitting a burst across two pages. Nothing tells a default sort how
-many stacks the whole selection holds, because nothing has asked yet and the only way
-to find out is the pass it exists to avoid.
+the alternative is splitting a burst across two pages.
+
+**How many stacks the whole selection holds is one more number of `total`'s shape**, and
+the count pane is what asks for it: `<stacks> stacks · <photos> photos`, where the first
+is the selection and not the page in front of it. `starts` is 1 exactly where a stack
+begins, so summing it counts them without building one — 410–420 ms unfiltered against
+this catalog on a warm `total` memo, which is the assignment pass's ~380 ms plus the sum.
+Memoised per selection under the same cap and eviction as the other two. It is the only
+grouping pass a default sort pays for, once, in front of the first page rather than per
+page, and a reader who has not turned stacking on never pays it. The memo key **drops the
+sort**, since the sort decides which member covers a stack and never how many there are,
+so changing the ordering does not re-count; it keeps the window, which is what the
+grouping groups by.
 
 **The eight other sorts cannot stream**, because a stack's members are scattered through
 the ordering. They compute the whole assignment in one ~380 ms pass and memoise it per

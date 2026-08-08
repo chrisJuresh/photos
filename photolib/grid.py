@@ -475,6 +475,7 @@ def page(
     limit: int,
     *,
     total: int | None = None,
+    stacks: int | None = None,
     assignment: tuple | None = None,
 ) -> dict:
     """One page, stacked or not, with an honest end-of-stream marker.
@@ -487,8 +488,11 @@ def page(
     `GridServer.total`.
 
     With stacking on the envelope echoes `stack`, the window it grouped at, and
-    every photo gains `n`, its stack's size. With stacking off neither key is
-    there and the page is byte for byte what it was before stacking existed.
+    every photo gains `n`, its stack's size. It also carries `stacks`, how many
+    rows the whole selection collapses to: `total` still counts tiles, so the
+    two together are the count pane's two numbers and the first of them is what
+    the sheet reserves its height for. With stacking off none of the three keys
+    is there and the page is byte for byte what it was before stacking existed.
     """
     if query.stack is None:
         photos, following = _plain_page(conn, query, cursor, limit)
@@ -506,6 +510,7 @@ def page(
     }
     if query.stack is not None:
         envelope["stack"] = query.stack
+        envelope["stacks"] = stacks
     return envelope
 
 
@@ -561,6 +566,7 @@ class GridServer(ThreadingHTTPServer):
         self._local = threading.local()
         self._facets: dict | None = None
         self._totals: dict[browse.Query, int] = {}
+        self._stacks: dict[browse.Query, int] = {}
         self._assignments: dict[browse.Query, tuple] = {}
         self._totals_lock = threading.Lock()
         super().__init__(address, handler)
@@ -634,6 +640,28 @@ class GridServer(ThreadingHTTPServer):
                     del self._totals[next(iter(self._totals))]
                 self._totals[key] = self.connection().execute(sql, params).fetchone()[0]
             return self._totals[key]
+
+    def stacks(self, query: browse.Query) -> int:
+        """How many stacks one selection collapses to, counted once per window.
+
+        The count pane says `<stacks> stacks · <photos> photos`, and the first
+        of those is about the whole selection rather than the page on screen —
+        so it is one more number of the same shape as `total`: ~410 ms measured
+        against the real catalog, the same for every page of one selection, and
+        therefore counted once in front of the first page rather than per page.
+        Same cap and same eviction as the other two memos.
+
+        Keyed on the selection with its sort dropped, because the sort decides
+        which member covers a stack and never how many stacks there are.
+        """
+        key = query.grouping()
+        with self._totals_lock:
+            if key not in self._stacks:
+                sql, params = browse.stack_count_sql(key)
+                if len(self._stacks) >= MAX_TOTALS:
+                    del self._stacks[next(iter(self._stacks))]
+                self._stacks[key] = self.connection().execute(sql, params).fetchone()[0]
+            return self._stacks[key]
 
     def assignment(self, query: browse.Query) -> tuple:
         """How one selection stacks, grouped once per selection and window.
@@ -810,6 +838,9 @@ class GridHandler(BaseHTTPRequestHandler):
             cursor,
             limit,
             total=self.server.total(selection),
+            stacks=(
+                self.server.stacks(selection) if selection.stack is not None else None
+            ),
             # Only the sorts that cannot stream: a default sort collapses its
             # own runs as it pages, so it must never pay for a grouping pass.
             assignment=(
