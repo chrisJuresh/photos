@@ -135,6 +135,20 @@ nothing. It reads `G:`: run it in the background and leave the drive alone while
 python -m photolib.substrates
 ```
 
+Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
+it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
+then drops the facet vocabulary and every `total` the server had memoised — no restart.
+It is a background job, never a request; `photolib/rebuild.py` is the whole of it.
+
+To roll the triage state back to one of those snapshots. It refuses while the grid is
+up, refuses while anything holds the database, verifies the snapshot carries the
+decisions, and snapshots the current state before replacing it. Rolling back a triage
+session means restoring the snapshot from *before* it, which is the previous run's.
+
+```bash
+python -m photolib.restore_state --list
+```
+
 To run the archived v1 suite as a reference oracle. `archive/v1/.venv` is a Python 3.14
 environment and still works after the move. Frontend checks are `npm test`, `npm run check`,
 `npm run build` inside `archive/v1/review_ui`. Playwright screenshot, video, and trace capture

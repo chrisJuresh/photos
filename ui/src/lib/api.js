@@ -99,9 +99,28 @@ export const api = {
   moveRule: (id, at) => post("/api/triage/rules/move", { id, at }),
   override: (sha256, decision) => post("/api/triage/override", { sha256, decision }),
 
-  // --- the one surface that leaves the process
+  // --- the two surfaces that leave the process
   revealPhoto: (id) => post("/api/reveal", { id }),
   revealOrigin: (origin) => post("/api/reveal", { origin }),
+
+  // Enqueue the snapshot-and-rebuild job. 202 is "started" and 409 is "already
+  // running" or "this server may not"; all three carry the same status
+  // document, so this returns the body rather than throwing and the popup reads
+  // `state` and `error` off it. Anything else is a real failure and throws.
+  rebuild: async () => {
+    const response = await fetch("/api/triage/rebuild", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status !== 202 && response.status !== 409) {
+      throw new Error(`/api/triage/rebuild ${response.status}`);
+    }
+    return body;
+  },
+
+  rebuildStatus: () => get("/api/triage/rebuild"),
 };
 
 /** Drops any response that a newer request has already overtaken. */

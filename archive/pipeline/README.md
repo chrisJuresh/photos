@@ -212,8 +212,13 @@ and is not good for.
 Idempotent, and incremental: `group.extend` adds files by index seek off `pair_key`
 and `near_band` at ~17 rows per photo, regardless of corpus size. Re-run it after
 anything that changes the kept set or `capture_time` — including writing or clearing
-an override, which the grid does not see until it does. The server memoises the facet
-vocabulary and every `total` for the life of the process, so restart it too.
+an override, which the grid does not see until it does.
+
+**Triage's Apply to grid button is this step**, plus `backup_state` ahead of it: the
+website spawns the two as a background job and then drops the facet vocabulary and
+every `total` it had memoised, which is what used to need a server restart. See
+`photolib/rebuild.py`. Running it here by hand is still the same rebuild, and a
+server that was up while you did needs restarting to notice — nothing tells it.
 
 ```bash
 python -m archive.pipeline.group
@@ -224,7 +229,13 @@ python -m archive.pipeline.group
 Snapshots `state.sqlite3` — the triage rules and overrides, the one thing here that
 cannot be regenerated — onto `C:`, a different physical disk from `E:`. Instant,
 ~20 KB before triage. Uses `VACUUM INTO`, so it is safe against a live WAL, and it
-refuses to write onto the source's own volume. Run it after every triage session.
+refuses to write onto the source's own volume. Run it after every triage session —
+or press Apply to grid, which runs it first and then rebuilds the tiles.
+
+Because it never prunes and never overwrites, the backup root is a ladder of restore
+points rather than a single latest copy: one per run, each of them the settings as
+they stood at the end of that run. `python -m photolib.restore_state` is the way back
+down it, and a triage session is undone by restoring the snapshot from *before* it.
 
 ```bash
 python -m archive.pipeline.backup_state
