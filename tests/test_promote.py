@@ -67,6 +67,7 @@ def config(tmp_path: Path, migrated: tuple[Path, Path]) -> Config:
         deriv_root=tmp_path / "vault" / "deriv",
         meta_root=tmp_path / "vault" / "meta",
         thumb_root=tmp_path / "thumb",
+        substrate_root=tmp_path / "substrate",
         catalog_db=migrated[0],
         state_db=migrated[1],
         backup_root=tmp_path / "backups",

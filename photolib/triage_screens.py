@@ -1,4 +1,4 @@
-"""The survey queries behind `PLAN.md`'s eight triage screens, and the directory
+"""The survey queries behind `archive/PLAN.md`'s eight triage screens, and the directory
 tree added alongside them.
 
 Each screen answers the same two questions in the same two shapes:
@@ -14,7 +14,7 @@ Each screen answers the same two questions in the same two shapes:
 
 The cursor is the pair `(path, origin id)`, never the path alone. `origin.path`
 is UNIQUE so a one-column cursor would in fact work here -- but the grid's
-cursor is a pair for the reason `PLAN.md` gives about tied sort keys, and a
+cursor is a pair for the reason `archive/PLAN.md` gives about tied sort keys, and a
 second contract that happens to be satisfiable with one column is a contract
 the UI has to special-case. It orders ascending, because a contact sheet of a
 directory tree is read in tree order.
@@ -36,7 +36,7 @@ from photolib import triage
 DEFAULT_LIMIT = 500
 MAX_LIMIT = 1000
 
-# Screen 3's bands, from `PLAN.md`. The long edge is orientation-invariant, so
+# Screen 3's bands, from `archive/PLAN.md`. The long edge is orientation-invariant, so
 # a header reading that has not been transposed still lands in the right band.
 DIMENSION_BANDS = (64, 256, 512, 1024)
 
@@ -198,7 +198,7 @@ def aggregate(
 def second_level(conn: sqlite3.Connection, rules: list[triage.Rule], root: str) -> list[dict]:
     """Screen 6's drill-down: the directories one level inside one source root.
 
-    `PLAN.md` wants `lumix\\DCIM` accepted wholesale and the backup trees
+    `archive/PLAN.md` wants `lumix\\DCIM` accepted wholesale and the backup trees
     scrutinised, which is a decision about the second path component and not
     about the root.
     """

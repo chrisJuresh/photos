@@ -155,7 +155,7 @@ EXIFTOOL_MAX_BYTES = 4 << 20
 # One head on a USB HDD, so the image pass is the shape Phase 2a pass C
 # measured: a couple of readers feeding twelve decoders.
 #
-# Video is *not* that shape, and this is the one place `PLAN.md`'s "more readers
+# Video is *not* that shape, and this is the one place `archive/PLAN.md`'s "more readers
 # is slower, not faster" does not hold. ffmpeg is both the reader and the
 # decoder, but a poster frame reads the head of a file and stops -- 445 videos
 # decoded 702 MB out of 4.6 GB of container -- so the cost is process startup

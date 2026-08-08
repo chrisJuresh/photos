@@ -3,7 +3,7 @@ features, and the regression check.
 
 No path from config.toml and no real media. The corpus is six assets chosen for
 what they can catch: an orientation-3 ARW whose aspect is unchanged (invisible
-to the predicate PLAN.md warns against), an orientation-1 ARW that must be left
+to the predicate archive/PLAN.md warns against), an orientation-1 ARW that must be left
 alone, and an `.rw2` that v1 already rotated correctly and this must not rotate
 twice.
 """
@@ -161,6 +161,7 @@ def vault(tmp_path: Path, migrated: tuple[Path, Path]) -> tuple[Config, sqlite3.
         deriv_root=tmp_path / "vault" / "deriv",
         meta_root=tmp_path / "vault" / "meta",
         thumb_root=tmp_path / "thumb",
+        substrate_root=tmp_path / "substrate",
         catalog_db=migrated[0],
         state_db=migrated[1],
         backup_root=tmp_path / "backups",
@@ -528,7 +529,7 @@ def test_a_lock_left_by_a_dead_run_is_not_a_wall(tmp_path: Path):
 
 
 def test_assets_width_and_height_are_never_read():
-    """PLAN.md's exception D. `assets.width/height` holds at least five
+    """archive/PLAN.md's exception D. `assets.width/height` holds at least five
     different quantities and has the wrong polarity for about 52 assets, so the
     dimensions come from `asset_extended_metadata` or from re-measuring."""
     source = Path(phase2a.__file__).read_text(encoding="utf-8")

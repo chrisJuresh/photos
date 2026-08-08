@@ -288,7 +288,7 @@ def containment_root(config: Config, state: str) -> Path:
 
 
 def object_path(vault_root: Path, sha256: str, ext: str) -> Path:
-    """`<vault_root>\\<aa>\\<bb>\\<sha256><ext>`, per `PLAN.md` § "Storage layout".
+    """`<vault_root>\\<aa>\\<bb>\\<sha256><ext>`, per `archive/PLAN.md` § "Storage layout".
 
     Collision-free by construction, case-insensitively included: `sha256` is
     `file`'s primary key and lowercase hex, so no two targets can differ only by

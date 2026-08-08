@@ -89,12 +89,16 @@
 <style>
   .counts {
     display: flex;
-    gap: 18px;
+    gap: var(--s-6);
     flex-wrap: wrap;
+    margin-bottom: var(--s-4);
   }
 
+  /* Wide enough that the kept and excluded figures stay on one line, and never
+     wider than what it has been given: a fixed 22rem pushes a horizontal
+     scrollbar onto the whole page as soon as the window is narrow. */
   .block {
-    min-width: 22rem;
+    min-width: min(22rem, 100%);
   }
 
   /* The live block dims while a recompute is in flight, so a stale number is
@@ -104,19 +108,21 @@
   }
 
   .tag {
-    font-size: 11px;
+    font-size: var(--fs-100);
+    font-weight: 600;
     letter-spacing: 0.08em;
-    color: var(--text);
+    color: var(--dim);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--s-2);
+    margin-bottom: 3px;
   }
 
   /* FILES is boxed and PATHS is not, so the two are told apart at a glance and
      not by reading the label. */
   .block:last-child {
     border-left: 2px solid var(--line);
-    padding-left: 12px;
+    padding-left: var(--s-4);
   }
 
   .line {
@@ -127,11 +133,11 @@
   }
 
   .line.cand {
-    margin-top: 2px;
+    margin-top: 3px;
   }
 
   .small {
-    font-size: 11px;
+    font-size: var(--fs-100);
   }
 
   .keep {
@@ -162,5 +168,8 @@
   .stale {
     color: var(--drop);
     font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 </style>

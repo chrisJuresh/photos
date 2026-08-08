@@ -207,7 +207,7 @@ def test_ordering_across_the_two_predicate_kinds(survey):
 
 
 def test_exclude_a_tree_then_re_include_a_subtree(survey):
-    """The `PLAN.md` sentence this whole model exists for.
+    """The `archive/PLAN.md` sentence this whole model exists for.
 
     "exclude everything under node_modules, except this one folder" -- which is
     only expressible because the include sits *above* the exclude.
@@ -582,7 +582,7 @@ def test_the_probe_worklist_is_only_what_the_rules_still_keep(survey):
     contained every path a `dir_segment` rule had excluded.
 
     Invisible with a bucket-only rule set, which is why it survived: the
-    categorical prefilter is nine `ext` rules. `PLAN.md` runs this after screen
+    categorical prefilter is nine `ext` rules. `archive/PLAN.md` runs this after screen
     1, whose whole output is directory rules.
     """
     assert {path for _sha, path in probe.worklist(survey)} == {

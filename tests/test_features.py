@@ -68,7 +68,7 @@ def test_hashes_are_stable_and_fit_a_signed_column():
 
 
 def test_a_rotation_is_uncorrelated_from_its_own_original():
-    """PLAN.md measured mean Hamming 31.3/64 between a derivative and its 90
+    """archive/PLAN.md measured mean Hamming 31.3/64 between a derivative and its 90
     degree rotation -- indistinguishable from unrelated. A mis-rotated ARW can
     never match its correctly rotated sibling, which is why the repair is not
     cosmetic."""

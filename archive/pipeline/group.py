@@ -56,6 +56,17 @@ row in the table on every future import. A group's timestamp is the earliest
 resolved `taken_at` among its members -- they are one exposure, and the earliest
 value is the one least likely to be a copy date, which is the same argument
 `capture_time` uses for `min(mtime)` across origins.
+
+**A `state.triage_override` of `exclude` is not a tile either**, and that is the
+one thing this module reads out of `state.sqlite3`. `published` records what Phase
+4 hardlinked into the vault, and a photograph can be condemned after that: Phase 4
+skips a row already in state `published`, so a post-promotion exclusion has no
+`file.state` to move to and would otherwise show in the grid for ever. It is read
+here rather than in `photolib.browse` because this module is the only builder of
+`photo` -- a tile that should not exist then never exists, instead of every page,
+count, facet and tree query carrying a subquery to hide one. Invariant 3 holds
+either way: the override is a row, the vault object is untouched, and deleting the
+row puts the tile back on the next rebuild.
 """
 
 from __future__ import annotations
@@ -74,6 +85,25 @@ from archive.pipeline.capture_time import SORT_KEY_UNDATED
 
 # The one `file.state` that becomes a tile. See the module docstring.
 TILE_STATE = "published"
+
+# The other half of "is this a tile": no per-file human decision condemns it.
+OVERRIDE_EXCLUDE = "exclude"
+
+
+def not_overridden(alias: str = "file") -> str:
+    """`alias` names no file an override excludes. A correlated NOT EXISTS.
+
+    One seek on `triage_override`'s primary key per row, and the table holds tens
+    of rows, so this costs the full scan nothing measurable. Written as a function
+    of the alias because the three queries that need it spell the table three
+    ways, and an unqualified `sha256` inside the subquery would resolve to the
+    override's own column and match every row.
+    """
+    return (
+        "NOT EXISTS (SELECT 1 FROM state.triage_override ov "
+        f"WHERE ov.sha256 = {alias}.sha256 AND ov.decision = '{OVERRIDE_EXCLUDE}')"
+    )
+
 
 # The two halves of a pair. RAW is `file.kind`, which the preprocessing pass
 # wrote from the decoder it actually used; JPEG is the extension, because there
@@ -257,7 +287,7 @@ def corroborates(raw: Kept, jpeg: Kept) -> bool:
 
 
 def representative(members: list[Kept]) -> tuple[str, str]:
-    """`(rep_sha256, sort_key)` for one group, by the rule `PLAN.md` states.
+    """`(rep_sha256, sort_key)` for one group, by the rule `archive/PLAN.md` states.
 
     **On this corpus that rule picks the JPEG in every RAW+JPEG pair, and the
     reason is a defect in the input rather than in the ordering.** `file.width`
@@ -293,7 +323,9 @@ def load_kept(
     """
     found = {} if into is None else into
     if shas is None:
-        rows = conn.execute(f"SELECT {_COLUMNS} FROM file WHERE state = ?", (TILE_STATE,))
+        rows = conn.execute(
+            f"SELECT {_COLUMNS} FROM file WHERE state = ? AND {not_overridden()}", (TILE_STATE,)
+        )
     else:
         rows = [
             row
@@ -301,7 +333,8 @@ def load_kept(
             if sha not in found
             and (
                 row := conn.execute(
-                    f"SELECT {_COLUMNS} FROM file WHERE sha256 = ? AND state = ?",
+                    f"SELECT {_COLUMNS} FROM file WHERE sha256 = ? AND state = ? "
+                    f"AND {not_overridden()}",
                     (sha, TILE_STATE),
                 ).fetchone()
             )
@@ -328,7 +361,7 @@ def _read_names(
     if shas is None:
         rows = conn.execute(
             "SELECT o.sha256, o.path FROM origin o JOIN file f ON f.sha256 = o.sha256 "
-            "WHERE f.state = ?",
+            f"WHERE f.state = ? AND {not_overridden('f')}",
             (TILE_STATE,),
         )
     else:
@@ -425,6 +458,7 @@ class Report:
 
     stale_tiles: int = 0
     kept_files: int = 0
+    overridden: int = 0
     pair_buckets: int = 0
     mixed_buckets: int = 0
     collapsed: int = 0
@@ -448,9 +482,23 @@ def rebuild(conn: sqlite3.Connection) -> Report:
     report.stale_tiles = conn.execute("SELECT count(*) FROM photo").fetchone()[0]
 
     work = report.work
+    # Counted rather than inferred from `kept_files`, so the report says why the
+    # kept set is smaller than the published set instead of leaving a reader to
+    # subtract two numbers and guess.
+    report.overridden = conn.execute(
+        "SELECT count(*) FROM file f JOIN state.triage_override ov ON ov.sha256 = f.sha256 "
+        "WHERE f.state = ? AND ov.decision = ?",
+        (TILE_STATE, OVERRIDE_EXCLUDE),
+    ).fetchone()[0]
     kept, keys = load_kept(conn, None, work)
     report.kept_files = len(kept)
     if not kept:
+        if report.overridden:
+            raise GroupRefused(
+                f"every one of the {report.overridden:,} files in state {TILE_STATE!r} is excluded "
+                "by a triage override, so the grid would be empty. Clear an override "
+                "(POST /api/triage/override with decision 'clear') rather than rebuilding onto that"
+            )
         raise GroupRefused(
             f"no file is in state {TILE_STATE!r}, so there is nothing to show. Phase 4 "
             "(python -m archive.pipeline.promote) publishes the kept objects; this step reads what it "
@@ -701,7 +749,8 @@ def _apply_near(
 
 
 def _print_report(report: Report, top: int) -> None:
-    print(f"\nkept set        {report.kept_files:,} files in state {TILE_STATE!r}")
+    print(f"\nkept set        {report.kept_files:,} files in state {TILE_STATE!r}, not overridden")
+    print(f"{'':16}{report.overridden:,} further published files a triage override excludes")
     print(f"{'':16}{report.stale_tiles:,} rows were in `photo` before this ran")
     print(f"\npair evidence   {report.pair_buckets:,} distinct (directory, stem)")
     print(f"{'':16}{report.mixed_buckets:,} of them hold both a raw and a JPEG")

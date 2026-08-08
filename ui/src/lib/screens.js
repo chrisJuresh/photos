@@ -1,4 +1,4 @@
-// The eight screens, in PLAN.md's order, which is cheapest and most decisive
+// The eight screens, in archive/PLAN.md's order, which is cheapest and most decisive
 // first so the working set collapses fast.
 //
 // A screen is mostly data: which server aggregate feeds its table, and what

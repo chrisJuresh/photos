@@ -1,0 +1,1046 @@
+/* Glass lab — ten published liquid-glass implementations over the real grid,
+ * each at the settings its own source ships. Where a library documents defaults
+ * these are those defaults; where a demo publishes CSS it is copied literally;
+ * where an editor has controls these are the values it opens on. Nothing is
+ * turned up to be easier to see, and no source appears twice.
+ *
+ * Every variant is a block under `body[data-v="…"]`. A block owns the material
+ * and nothing else: the layout, the type and the controls are shared above, so
+ * flipping between two variants changes the glass and never the geometry. The
+ * blocks that need a displacement filter read `--glass-refract`, which glass.js
+ * sets to `url(#…)` once it has measured the pane; a variant that needs no
+ * filter never sets it and the `var(…, )` fallback collapses to nothing.
+ *
+ * No literal `style="…"` anywhere, here or in glass.html: the server's CSP
+ * carries no 'unsafe-inline'. The script writes custom properties through the
+ * CSSOM, which is a different thing and is not blocked.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding-bottom: 128px; /* the switcher, which is fixed */
+  background: #07070a;
+  color: #fff;
+  font: 400 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: none;
+}
+
+/* ------------------------------------------------------------------ layout */
+
+:root {
+  --inset: 14px;
+  --r: 26px;
+  --ctl: 30px;
+  --ctl-sm: 24px;
+  --dim: rgba(255, 255, 255, 0.58);
+  --accent: #3f7dff;
+}
+
+.topbar {
+  position: fixed;
+  top: var(--inset);
+  left: var(--inset);
+  right: var(--inset);
+  z-index: 30;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  min-height: 56px;
+}
+
+.sheet {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 8px 28px;
+  padding: 20px;
+}
+
+.sheet[hidden] {
+  display: none;
+}
+
+.tally {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: none;
+  padding-left: 6px;
+}
+
+.tally strong {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.muted {
+  color: var(--dim);
+}
+
+/* ---------------------------------------------------------------- controls */
+
+.menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  min-height: var(--ctl);
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.menu:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.menu.on {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.caret {
+  font-size: 8px;
+  color: var(--dim);
+}
+
+.badge {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+
+.fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--ctl-sm);
+  padding: 0 8px 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.fchip .muted {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.fchip .x {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.clear {
+  min-height: var(--ctl-sm);
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.triage {
+  flex: none;
+  min-height: var(--ctl);
+  padding: 0 16px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 44%, transparent);
+}
+
+.sheet h2 {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.sheet section {
+  min-width: 0;
+  padding-bottom: 10px;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--ctl-sm);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.option .n {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.option.on {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* -------------------------------------------------------------------- grid */
+
+/* Justified rows: each tile grows in proportion to its own aspect ratio, so a
+ * row fills the width and the photographs keep their shape. `--ar` is written
+ * per tile by the script. The tall final flex item stops a short last row from
+ * being stretched to full width. */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: calc(var(--inset) + 56px + 8px) var(--inset) var(--inset);
+}
+
+.grid::after {
+  content: "";
+  flex-grow: 9999;
+}
+
+.tile {
+  position: relative;
+  flex-grow: calc(var(--ar) * 100);
+  flex-basis: calc(var(--ar) * 190px);
+  height: 190px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #131318;
+}
+
+.tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The synthetic backdrop. No photographs at all — procedural bands whose hue
+ * and lightness sweep across the whole range, which is the property that
+ * actually matters when you are judging whether white text survives what
+ * scrolls under it. */
+.tile.fake {
+  background-image: repeating-linear-gradient(
+      calc(var(--angle) + 90deg),
+      rgba(255, 255, 255, 0.07) 0 9px,
+      rgba(0, 0, 0, 0.07) 9px 18px
+    ),
+    linear-gradient(
+      var(--angle),
+      hsl(var(--h) 78% var(--l)),
+      hsl(calc(var(--h) + 46) 72% calc(var(--l) + 16%)) 55%,
+      hsl(calc(var(--h) + 98) 64% calc(var(--l) - 12%))
+    );
+}
+
+/* ---------------------------------------------------------------- switcher */
+
+.switcher {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 16px;
+  background: #0d0d12;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.switcher .nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.switcher .nav button {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 15px;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.switcher .nav button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.idx {
+  min-width: 54px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+
+.about {
+  flex: 1;
+  min-width: 0;
+}
+
+.about .line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.about strong {
+  font-size: 14px;
+}
+
+.tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--dim);
+}
+
+.support {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.support.chromium {
+  color: #ffb454;
+}
+
+.support.all {
+  color: #63d68a;
+}
+
+.about a {
+  font-size: 11px;
+  color: #7aa7ff;
+}
+
+/* Clamped, because the switcher is fixed and the body reserves a constant
+   amount of room for it: a note that grows to five lines on a narrow window
+   would hide the last row of the grid behind itself. Hover for the rest. */
+.note {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--dim);
+  max-width: 96ch;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.switcher:hover .note {
+  -webkit-line-clamp: 6;
+}
+
+/* The frost state line. One line, because the switcher's height is what the body
+   reserves room for; the colour is the provenance — green where the frosted
+   values are the source's own, amber where they are this page's. */
+.frost {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.34);
+  max-width: 110ch;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.switcher:hover .frost {
+  -webkit-line-clamp: 3;
+}
+
+.frost.on {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.frost.on.source {
+  color: #63d68a;
+}
+
+.frost.on.page {
+  color: #ffb454;
+}
+
+#frost {
+  min-width: 74px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--dim);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+#frost:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+#frost.on {
+  color: #fff;
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
+/* Already frosted at its own defaults: the switch still flips, it just has nothing
+   to add on this variant. */
+#frost.inert {
+  opacity: 0.45;
+}
+
+@media (max-width: 1100px) {
+  .keys {
+    display: none;
+  }
+}
+
+.keys {
+  flex: none;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+kbd {
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font: inherit;
+  font-size: 10px;
+}
+
+.warn {
+  position: fixed;
+  left: var(--inset);
+  bottom: 140px;
+  z-index: 40;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(120, 40, 20, 0.92);
+  border: 1px solid rgba(255, 160, 120, 0.4);
+}
+
+.warn[hidden] {
+  display: none;
+}
+
+/* =========================================================== the materials */
+
+/* Shared skeleton. A variant supplies background, backdrop-filter, shadow and
+ * whatever it draws in ::before / ::after; nothing here is material. */
+.glass {
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--r);
+  color: #fff;
+}
+
+/* The stack of backdrop layers, for the one variant whose material is a stack
+ * rather than a single filter: `tonni` takes all seven. Inert everywhere else. */
+.layers {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.layers i {
+  position: absolute;
+  inset: 0;
+}
+
+/* --------------------------------------------------------- 1 · this build */
+
+/* What ships today: a linear red/green ramp map flattened to neutral inside a
+ * blurred rounded rectangle, sampled three times at staggered scales for
+ * dispersion. See ui/src/lib/glass.js. */
+body[data-v="current"] .glass {
+  background-color: rgba(12, 12, 16, 0.44);
+  background-image: linear-gradient(
+    176deg,
+    rgba(255, 255, 255, 0.075) 0%,
+    rgba(255, 255, 255, 0.02) 46%,
+    rgba(255, 255, 255, 0) 72%,
+    rgba(0, 0, 0, 0.06) 100%
+  );
+  backdrop-filter: blur(22px) saturate(210%) brightness(0.74) var(--glass-refract, );
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.38),
+    0 12px 32px -12px rgba(0, 0, 0, 0.62),
+    0 34px 76px -32px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+body[data-v="current"] .glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.5),
+    rgba(255, 255, 255, 0.06) 34%,
+    rgba(0, 0, 0, 0.28) 76%,
+    rgba(255, 255, 255, 0.14)
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------- 2 · shuding SDF shader */
+
+/* The copy-paste shader, and his CSS with it: no background at all, the two
+ * shadows he writes, and `blur(0.25px) contrast(1.2) brightness(1.05)
+ * saturate(1.1)`.
+ *
+ * The refraction comes *first* here, which is the one place this page departs
+ * from its own house order. His declaration puts url() ahead of the blur, so the
+ * sharp backdrop is displaced and then softened; every other variant blurs first
+ * because that keeps the lensing. At 0.25px the difference is nearly nothing,
+ * and copying him is the point. */
+body[data-v="sdf"] .glass {
+  background: none;
+  backdrop-filter: var(--glass-refract, ) blur(0.25px) contrast(1.2) brightness(1.05)
+    saturate(1.1);
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.25),
+    0 -10px 25px inset rgba(0, 0, 0, 0.15);
+}
+
+/* ------------------------------------------------ 3 · kube.io, Snell's law */
+
+/* Refraction computed rather than approximated: the convex circle its playground
+ * opens on, its derivative as the surface normal, Snell's law at n=1.5, and the
+ * resulting ray offset baked into the map. An 11px bevel, measured off the
+ * displacement map it publishes for its own 320×42 searchbox.
+ *
+ * Its material is the filter and nothing else — no tint, no saturate, no
+ * brightness, and the only blur is the 0.2px that sits inside the filter graph
+ * ahead of the displacement. The rim in its demos comes from a second baked
+ * image, so there is no rim here; a drawn one would be this page's invention
+ * rather than theirs. */
+body[data-v="kube"] .glass {
+  background: none;
+  backdrop-filter: blur(0.2px) var(--glass-refract, );
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+}
+
+/* ------------------------------------------------ 4 · rdev/liquid-glass-react */
+
+/* The library's defaults, arithmetic included: `blurAmount` 0.0625 goes through
+ * its own `4 + blurAmount * 32` to give blur(6px), `saturation` is 140, and the
+ * shadow is the one it writes when `overLight` is false.
+ *
+ * The two rings are what it always draws — the same 1.5px masked border twice,
+ * once screened at 0.2 opacity and once overlaid — and their gradient angle is
+ * the only thing the pointer touches besides the lean. */
+body[data-v="rdev"] .glass {
+  background: none;
+  backdrop-filter: blur(6px) saturate(140%) var(--glass-refract, );
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.25, 1);
+  will-change: transform;
+}
+
+body[data-v="rdev"] .glass::before,
+body[data-v="rdev"] .glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  padding: 1.5px;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.5),
+    inset 0 1px 3px rgba(255, 255, 255, 0.25),
+    0 1px 4px rgba(0, 0, 0, 0.35);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+body[data-v="rdev"] .glass::before {
+  mix-blend-mode: screen;
+  opacity: 0.2;
+  background: linear-gradient(
+    var(--ang, 135deg),
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.12) 33%,
+    rgba(255, 255, 255, 0.4) 66%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+body[data-v="rdev"] .glass::after {
+  mix-blend-mode: overlay;
+  background: linear-gradient(
+    var(--ang, 135deg),
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.32) 33%,
+    rgba(255, 255, 255, 0.6) 66%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+/* ------------------------------------------- 5 · feTurbulence (macOS demo) */
+
+/* The widely-copied macOS recreation: no computed map at all, just fractal
+ * noise displacing the backdrop. Its blur, its flat white tint at 0.25, its
+ * wrapper shadow and its two shine insets, all as published. */
+body[data-v="turbulence"] .glass {
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(3px) var(--glass-refract, );
+  box-shadow:
+    0 6px 6px rgba(0, 0, 0, 0.2),
+    0 0 20px rgba(0, 0, 0, 0.1),
+    inset 2px 2px 1px 0 rgba(255, 255, 255, 0.5),
+    inset -1px -1px 1px 1px rgba(255, 255, 255, 0.5);
+}
+
+/* ------------------------------------------------------- 6 · pure CSS shine */
+
+/* No SVG, no script, works in every engine. The rim is an inset box-shadow
+ * offset far enough that only a crescent of it lands on the edge, blurred and
+ * brightened — a highlight that reads as a lens without bending anything. The
+ * article's values, down to the blue cast in its outer shadow. */
+body[data-v="css-shine"] .glass {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(2px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow:
+    0 8px 32px rgba(31, 38, 135, 0.2),
+    inset 0 4px 20px rgba(255, 255, 255, 0.3);
+}
+
+body[data-v="css-shine"] .glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(1px);
+  box-shadow:
+    inset -10px -8px 0 -11px rgba(255, 255, 255, 1),
+    inset 0 -9px 0 -8px rgba(255, 255, 255, 1);
+  opacity: 0.6;
+  filter: blur(1px) drop-shadow(10px 4px 6px black) brightness(115%);
+  pointer-events: none;
+}
+
+/* --------------------------------------------- 7 · Apple's shipped material */
+
+/* What iOS 26.1 actually settled on after the first betas were called
+ * illegible: the lensing is confined to a narrow rim, the middle is flat, and
+ * the pane carries a real adaptive tint so text has ground under it whatever
+ * scrolls behind. Squircle profile, short band, heavier dim.
+ *
+ * The one block here that is a reading rather than a copy — Apple publishes no
+ * CSS and the article that describes this material publishes none either. */
+body[data-v="apple"] .glass {
+  background-color: rgba(20, 20, 26, 0.55);
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.02) 50%,
+    rgba(0, 0, 0, 0.05)
+  );
+  backdrop-filter: blur(28px) saturate(180%) brightness(0.82) var(--glass-refract, );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 0 0 0.5px rgba(255, 255, 255, 0.14),
+    0 10px 30px -10px rgba(0, 0, 0, 0.6);
+}
+
+/* --------------------------------------------------- 8 · ybouane/liquidglass */
+
+/* The library's published defaults, which are barer than the feature list makes
+ * them sound: `blurAmount: 0`, `tintStrength: 0`, `saturation: 0`,
+ * `brightness: 0`, `specular: 0`. The refraction is doing all of the work and
+ * there is nothing behind it, which makes this the one variant here with no
+ * ground under its text at all — worth knowing before reading the note.
+ *
+ * `fresnel: 1.00` is the rim and it is a 4th power of the normal's z, so it is a
+ * glow across the whole bevel band rather than a hairline. `edgeHighlight: 0.05`
+ * is the hairline, and is deliberately almost nothing. The shadow is theirs
+ * literally: opacity 0.30, spread 10, offsetY 1.
+ *
+ * A no-op `saturate(100%)` holds the declaration open. With `blurAmount: 0` there
+ * is no other filter function to write, and `backdrop-filter: var(--glass-refract, )`
+ * alone would be an empty value — invalid, dropped, and then the property would
+ * not exist for glass.js to read back when it checks whether the url() survived. */
+body[data-v="ybouane"] .glass {
+  background: none;
+  backdrop-filter: saturate(100%) var(--glass-refract, );
+  box-shadow:
+    0 1px 10px rgba(0, 0, 0, 0.3),
+    inset 0 0 20px -8px rgba(255, 255, 255, 0.4),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+body[data-v="ybouane"] .glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.34),
+    rgba(255, 255, 255, 0.05) 40%,
+    rgba(255, 255, 255, 0.03) 70%,
+    rgba(255, 255, 255, 0.22)
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* -------------------------------------------------- 9 · liquid-glass-studio */
+
+/* Its editor opens on `blurRadius` 1 and a tint whose alpha is 0, so the default
+ * of the most configurable implementation here is a nearly clear pane — not the
+ * frosted one its screenshots are usually cropped from. The shadow is
+ * `shadowExpand` 25 at `shadowFactor` 15.
+ *
+ * The glare is the part worth looking at, and it is on by default: an angular
+ * highlight at −45° whose angle is doubled before use, which puts a bright lobe
+ * on two opposite corners with the far one at 80% of the near. A linear gradient
+ * cannot do that at any angle, so this rim is conic. Its strength is
+ * `glareFactor` 90 with `refFresnelFactor` 20 as the faint all-round floor.
+ *
+ * What does not survive the reduction is the blur gating: the shader chooses
+ * between a sharp and a pre-blurred copy of the backdrop *by edge height*, and
+ * one backdrop-filter has no way to vary across a pane. */
+body[data-v="studio"] .glass {
+  background: none;
+  backdrop-filter: blur(1px) var(--glass-refract, );
+  box-shadow: 0 4px 25px rgba(0, 0, 0, 0.15);
+}
+
+body[data-v="studio"] .glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from -45deg,
+    rgba(255, 255, 255, 0.45),
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.36) 50%,
+    rgba(255, 255, 255, 0.04) 75%,
+    rgba(255, 255, 255, 0.45)
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------ 10 · TonniTools generator */
+
+/* The one material here that refracts without moving a pixel, and the only one
+ * whose whole implementation is CSS — no filter, no map, no script.
+ *
+ * Seven backdrop layers, which is what the generator emits at its defaults —
+ * its tint, contrast and brightness layers exist too but carry no filter at all
+ * while those three controls sit at 0%, 100% and 100%. Four of the seven are
+ * masked to a concentric ring by the padding-box/content-box exclude pair, so
+ * each filters a band and not the pane: reading inward, a 1.5px edge reflection,
+ * a 4.6px emboss, a 3.6px "refraction", then the flat interior. What that
+ * refraction ring actually does is invert(10%) contrast(1.5) — a tonal inversion
+ * in a band, and that inversion *is* the generator's Invert control. It reads as
+ * a bent edge for the same reason a drawn specular ring reads as a lit one, and
+ * it costs nothing that the other variants spend a canvas on.
+ *
+ * The two unmasked full-pane passes are the trick that makes it cohere: they
+ * blur and then contrast the whole assembled stack, so the ring boundaries stop
+ * being four visible steps and become one gradient of material.
+ *
+ * The variables are the generator's own, at the values it opens on, and the
+ * derived widths are kept as their calc() so the formula stays legible. There is
+ * no drawn ring and no full-pane inversion on top: the generator draws neither,
+ * and its own hairline is the brightness/contrast pass on layer 7. */
+body[data-v="tonni"] .glass {
+  --base-strength: 14px;
+  --extra-blur: 2px;
+  --softness: 12px;
+  --invert: 10%;
+  --total-strength: calc(var(--base-strength) + var(--extra-blur));
+  --edge-width: calc(0.3px + (var(--softness) * 0.1));
+  --emboss-width: calc(var(--softness) * 0.38);
+  --refraction-width: calc(var(--softness) * 0.3);
+
+  /* No tint and no shadow: the generator gives its container neither, and the
+   * depth in the preview is entirely the layer stack's doing. Left as it ships
+   * rather than propped up, which is the point of comparing them. */
+  background: none;
+}
+
+body[data-v="tonni"] .layers {
+  display: block;
+  /* The edge reflection is the one layer that extends past the pane. */
+  overflow: visible;
+}
+
+/* The generator rounds every layer to the pane; the two that sit inside another
+ * ring, or outside the pane, override this below. Without it the emboss and
+ * refraction bands run square around the corners while everything else curves. */
+body[data-v="tonni"] .layers i {
+  border-radius: var(--r);
+}
+
+/* The ring mask: paint the border box, punch out the content box, and what
+ * survives is the padding band. Every layer that wants a band sets its own
+ * border (how far in the band starts) and padding (how wide it is). */
+body[data-v="tonni"] .layers i:nth-child(1),
+body[data-v="tonni"] .layers i:nth-child(2),
+body[data-v="tonni"] .layers i:nth-child(3),
+body[data-v="tonni"] .layers i:nth-child(7) {
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0) content-box;
+  mask-composite: exclude;
+}
+
+/* Edge reflection. Pulled outward by the blur radius and given a border of the
+ * same width, so the padding box lands exactly on the pane edge while the
+ * element it blurs reaches 16px beyond it — this ring samples what is *beside*
+ * the glass. Nothing else here does that. */
+body[data-v="tonni"] .layers i:nth-child(1) {
+  z-index: 4;
+  margin: calc(var(--total-strength) * -1);
+  border-radius: calc(var(--r) + var(--total-strength));
+  border: var(--total-strength) solid transparent;
+  padding: var(--edge-width);
+  backdrop-filter: blur(var(--total-strength)) brightness(1.2) saturate(1.2);
+}
+
+/* Emboss. The outermost band of the pane proper, and the most violent filter in
+ * the stack — a 24px blur inverted a quarter, hue-rotated and pushed to 2.3
+ * contrast, which is what puts a dark line under the bright rim. */
+body[data-v="tonni"] .layers i:nth-child(2) {
+  z-index: 2;
+  border: 0 solid transparent;
+  padding: var(--emboss-width);
+  backdrop-filter: blur(calc(var(--total-strength) * 1.5)) invert(0.25) brightness(1.11)
+    saturate(1.2) hue-rotate(-10deg) contrast(2.3);
+}
+
+/* Refraction — the band immediately inside the emboss, and the load-bearing
+ * idea. No blur at all: a tenth of an inversion and half again the contrast,
+ * which darkens what was light and lightens what was dark in a 3.6px ring. That
+ * tonal reversal is the same signal a real bevel sends, arrived at without
+ * knowing where any pixel came from. */
+body[data-v="tonni"] .layers i:nth-child(3) {
+  z-index: 2;
+  border: var(--emboss-width) solid transparent;
+  padding: var(--refraction-width);
+  backdrop-filter: invert(var(--invert)) brightness(1.2) contrast(1.5);
+}
+
+/* The flat interior, inset past both rings and rounded to match. */
+body[data-v="tonni"] .layers i:nth-child(4) {
+  z-index: 2;
+  margin: calc(var(--emboss-width) + var(--refraction-width));
+  border-radius: calc(var(--r) - (var(--emboss-width) + var(--refraction-width)));
+  backdrop-filter: blur(var(--extra-blur)) brightness(1.25);
+}
+
+/* Blend pass one, over everything above: a small blur whose only job is to stop
+ * the four bands reading as four steps. */
+body[data-v="tonni"] .layers i:nth-child(5) {
+  z-index: 3;
+  backdrop-filter: blur(calc((var(--softness) * 0.2) + (var(--extra-blur) * 0.2)));
+}
+
+/* Blend pass two, above the rings rather than among them: contrast and
+ * saturation recovered across the whole pane after all that blurring. */
+body[data-v="tonni"] .layers i:nth-child(6) {
+  z-index: 8;
+  backdrop-filter: blur(calc(var(--edge-width) * 0.4)) contrast(1.6) saturate(1.5);
+}
+
+/* The specular hairline: 1px, brightened and saturated rather than painted, so
+ * it takes its colour from whatever is behind that pixel. */
+body[data-v="tonni"] .layers i:nth-child(7) {
+  z-index: 12;
+  border: 0 solid transparent;
+  padding: 1px;
+  backdrop-filter: brightness(1.2) contrast(1.6) saturate(1.2);
+}
+
+/* ==================================================== the frosted counterparts */
+
+/* What `F` turns on. Frost is blur and tint, so every block here replaces the
+ * pane's `backdrop-filter` and its background and touches nothing else: the rim,
+ * the shadow, the map and the geometry are the variant's own either way. That is
+ * the point — the question this toggle answers is whether a material still reads
+ * as itself once there is ground under the text.
+ *
+ * Four variants have no block at all, because they are already frosted at their
+ * own defaults: `current` (blur 22px over 44% dark), `apple` (28px over 55%),
+ * `turbulence` (3px under white at 0.25) and `css-shine` (2px under white at
+ * 0.15). The attribute still lands on them; there is simply nothing to change.
+ *
+ * Of the six that do, two are their source's own published frosted configuration
+ * and four are not. Where they are not, the frost is **one recipe used for all of
+ * them** — blur 22px, saturate 210%, brightness 0.74 over rgba(12,12,16,0.44),
+ * which is the frost the shipping header wears. Stating it once and reusing it is
+ * deliberate: four separately invented frosts would turn this page into a
+ * comparison of frosts rather than of materials. glass.js says per variant which
+ * of the two you are looking at, and the state line is coloured by it. */
+
+/* --- no frosted values published: this page's frost, over their own optics --- */
+
+body[data-frost="on"][data-v="sdf"] .glass,
+body[data-frost="on"][data-v="kube"] .glass,
+body[data-frost="on"][data-v="studio"] .glass {
+  background-color: rgba(12, 12, 16, 0.44);
+  backdrop-filter: blur(22px) saturate(210%) brightness(0.74) var(--glass-refract, );
+}
+
+/* --- rdev/liquid-glass-react: its own `overLight`, which is its frosted mode --- */
+
+/* Four consequences, all from src/index.tsx: the blur constant goes 4 → 12, so the
+ * default `blurAmount` 0.0625 now reads 12 + 0.0625 × 32; the shadow is the one it
+ * writes when overLight is true; two black layers come on; and `displacementScale`
+ * is halved, which glass.js does through `gain` because a stylesheet cannot.
+ *
+ * No tint here, and that is theirs — the ground under the text is those two layers
+ * rather than a background colour. */
+body[data-frost="on"][data-v="rdev"] .glass {
+  backdrop-filter: blur(14px) saturate(140%) var(--glass-refract, );
+  box-shadow: 0 16px 70px rgba(0, 0, 0, 0.75);
+}
+
+/* The two layers it draws only when overLight: flat black at 0.2, then black again
+ * at full opacity through `overlay`, which darkens what is light behind the pane
+ * and leaves what is already dark alone. Two of the seven stack elements, which
+ * exist for TonniTools and are inert on every other variant. */
+body[data-frost="on"][data-v="rdev"] .layers {
+  display: block;
+}
+
+body[data-frost="on"][data-v="rdev"] .layers i:nth-child(1) {
+  background: #000;
+  opacity: 0.2;
+}
+
+body[data-frost="on"][data-v="rdev"] .layers i:nth-child(2) {
+  background: #000;
+  mix-blend-mode: overlay;
+}
+
+/* --- ybouane/liquidglass: its site's "Frosted Panel" example --- */
+
+/* `blurAmount: 0.25` and nothing else — see the arithmetic in glass.js for why that
+ * is 2.6px here. The `saturate(100%)` is still doing the job it does in the clear
+ * block: holding the declaration open so glass.js can read the url() back. Their
+ * tint stays 0, so this pane is frosted and still has no tint under its text. */
+body[data-frost="on"][data-v="ybouane"] .glass {
+  backdrop-filter: blur(2.6px) saturate(100%) var(--glass-refract, );
+}
+
+/* --- TonniTools: this page's frost, through the generator's own two controls --- */
+
+/* Extra Blur rather than a blur bolted on top, because in this material the radius
+ * is not one number: `--extra-blur` feeds `--total-strength`, which sets the edge
+ * reflection's reach and the emboss's radius as well as the interior's blur. Its
+ * refraction ring keeps no blur at all, as it ships. Tinting is the background, and
+ * on this variant it is the only thing between white text and a pale photograph. */
+body[data-frost="on"][data-v="tonni"] .glass {
+  --extra-blur: 22px;
+  background: rgba(12, 12, 16, 0.44);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-v="rdev"] .glass {
+    transition: none;
+  }
+}

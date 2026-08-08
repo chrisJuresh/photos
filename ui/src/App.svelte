@@ -3,18 +3,29 @@
   // sheet, one paging contract, one reveal. The sidebar and the rule bar are
   // what triage adds, and they are the surface that goes away when triage is
   // done.
+  //
+  // The grid is the mode this opens in, and it has no sidebar: its chrome is the
+  // fixed header, which carries the filters, the sort, and the way into triage.
   import { onMount, untrack } from "svelte";
   import { api, count, debounce, sequencer } from "./lib/api.js";
   import { PHOTOS_ROOT, SCREENS, decisionOf, folderOf, isUnder } from "./lib/screens.js";
   import Counts from "./lib/Counts.svelte";
+  import Header from "./lib/Header.svelte";
   import Probe from "./lib/Probe.svelte";
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
   import Sheet from "./lib/Sheet.svelte";
   import Table from "./lib/Table.svelte";
   import Tree from "./lib/Tree.svelte";
+  import Tuner from "./lib/Tuner.svelte";
 
-  let mode = $state("triage");
+  // `/tune` is the grid with the material's controls bolted on: the same header
+  // over the same photographs, which is the only place the material can honestly
+  // be judged. Read once from the path rather than kept in state — there is no
+  // way into or out of it except the address bar, deliberately.
+  const tuning = location.pathname === "/tune";
+
+  let mode = $state("grid");
   let index = $state(0);
   let root = $state(null); // screen 6's drill-down
   let rows = $state([]);
@@ -40,6 +51,16 @@
   // tree keeps its own expansion state and App does not have to know it.
   let treeVersion = $state(0);
 
+  // --- the grid's own state ------------------------------------------------
+  // The filter vocabulary, fetched once: the server builds it once per process
+  // because it cannot change while a read-only process runs.
+  let facets = $state(null);
+  // dimension name -> the values ticked in it. A dimension absent from here is
+  // one nobody has touched, which is not the same as one with nothing ticked —
+  // and both mean "do not send it", so an untouched filter never reaches the URL.
+  let filters = $state({});
+  let sort = $state("newest");
+
   const screen = $derived(SCREENS[index]);
   const showTable = $derived(screen.table !== false);
   // Whether the sidebar offers something to choose from — the aggregate table on
@@ -48,10 +69,25 @@
   // condition is about the picker and not about the table.
   const showPicker = $derived(showTable || screen.tree === true);
   const showSheet = $derived(screen.sheet !== false && (candidate !== null || !showPicker));
+  // What the grid asks the server for, and what a filter change comes to. Built
+  // once so the sheet key and the request cannot disagree about the selection:
+  // the key IS the request, so a filter that changes the answer always resets the
+  // sheet and one that does not never does.
+  const gridQuery = $derived({
+    sort,
+    ...Object.fromEntries(
+      Object.entries(filters).filter(([, values]) => values.length > 0),
+    ),
+  });
+
   // Changing this is what tells the sheet to start over. The screen is in it
   // because two screens can produce the same predicate and still be different
   // places to be.
-  const sheetKey = $derived(`${mode}:${index}:${JSON.stringify(candidate)}`);
+  const sheetKey = $derived(
+    mode === "grid"
+      ? `grid:${JSON.stringify(gridQuery)}`
+      : `triage:${index}:${JSON.stringify(candidate)}`,
+  );
 
   // What a bulk exclude would actually write. Not simply the checked rows: one
   // the saved set already excludes is dropped here, because a second identical
@@ -127,7 +163,7 @@
   // --- loading a screen ----------------------------------------------------
 
   async function loadRows(live = false) {
-    if (!showTable) {
+    if (mode !== "triage" || !showTable) {
       rows = [];
       return;
     }
@@ -144,18 +180,32 @@
   // the effect depends on the value it clears — picking a row set a candidate,
   // which re-ran this, which set it straight back to null.
   //
-  // `files` is deliberately untouched: it reports the saved rule set, so
-  // changing screen cannot change it, and re-fetching would spend 25 s arriving
-  // back at the number already on screen.
+  // `mode` is in it because none of this is triage's to fetch until triage is on
+  // screen, and the grid is what opens: `/api/triage/files` alone is ~2.9 s of
+  // SQL that nobody looking at the grid asked for. Arriving at triage is what
+  // runs it, which is why the effect reads the mode rather than the mount doing
+  // it once.
+  //
+  // `files` is fetched once and then deliberately untouched: it reports the saved
+  // rule set, so changing screen cannot change it, and re-fetching would spend
+  // 25 s arriving back at the number already on screen.
+  let filesFetched = false;
+
   $effect(() => {
     void index;
+    void mode;
     untrack(() => {
       picked = null;
       candidate = null;
       root = null;
       clearChecked();
+      if (mode !== "triage") return;
       loadRows();
       recount.now();
+      if (!filesFetched) {
+        filesFetched = true;
+        recountFiles();
+      }
     });
   });
 
@@ -165,12 +215,25 @@
   $effect(() => {
     void root;
     untrack(() => {
+      if (mode !== "triage") return;
       clearChecked(); // the rows are a different level; the keys do not carry over
       loadRows();
     });
   });
 
-  onMount(recountFiles);
+  // The filter vocabulary. Once, on mount, and never again: it is the whole
+  // library's shape, so nothing the reader does here can change it. Cheap enough
+  // to fetch even if triage is where you end up — the server built it before it
+  // began serving.
+  onMount(() => {
+    guard(async () => {
+      facets = await api.facets();
+    });
+  });
+
+  function selectFilter(dimension, values) {
+    filters = { ...filters, [dimension]: values };
+  }
 
   // --- editing ------------------------------------------------------------
 
@@ -356,7 +419,9 @@
 
   function fetchPage(cursor) {
     if (mode === "grid") {
-      return api.photos({ kind: "image", limit: 500, ...(cursor || {}) });
+      // No `kind` unless the reader picked one: the server's default is still
+      // photography, which is `image` and `raw_image` both and no video.
+      return api.photos({ limit: 500, ...gridQuery, ...(cursor || {}) });
     }
     return api.page(candidate, cursor);
   }
@@ -366,14 +431,33 @@
   }
 </script>
 
-<div class="shell">
-  <aside class="side">
-    <div class="modes">
-      <button class:on={mode === "triage"} onclick={() => (mode = "triage")}>triage</button>
-      <button class:on={mode === "grid"} onclick={() => (mode = "grid")}>grid</button>
-    </div>
+{#if mode === "grid"}
+  <Header
+    {facets}
+    selected={filters}
+    {sort}
+    total={sheet.total}
+    loading={sheet.loading}
+    onselect={selectFilter}
+    onsort={(next) => (sort = next)}
+    onclear={() => (filters = {})}
+    ontriage={() => (mode = "triage")}
+  />
+{/if}
 
-    {#if mode === "triage"}
+{#if tuning}
+  <Tuner />
+{/if}
+
+<div class="shell" class:bare={mode === "grid"}>
+  {#if mode === "triage"}
+    <aside class="side">
+      <!-- The sidebar only exists in triage, so it needs one control: the way
+           back. Going the other way is the header's Triage button. -->
+      <div class="modes">
+        <button onclick={() => (mode = "grid")}>← grid</button>
+      </div>
+
       <nav>
         {#each SCREENS as entry, i}
           <button class="nav" class:on={i === index} onclick={() => (index = i)}>
@@ -384,7 +468,7 @@
 
       {#if showTable}
         <div class="tablehead">
-          {#if screen.drill && root}
+            {#if screen.drill && root}
             <button onclick={clearCandidate.bind(null, true)}>← all roots</button>
             <span class="muted">inside {root}</span>
           {:else if screen.relive}
@@ -428,12 +512,8 @@
         ondelete={removeRule}
         onmove={moveRule}
       />
-    {:else}
-      <p class="muted pad">
-        The read-only grid: every photo, newest first, click to reveal in Explorer.
-      </p>
-    {/if}
-  </aside>
+    </aside>
+  {/if}
 
   <div class="main">
     {#if mode === "triage"}
@@ -506,45 +586,52 @@
 </div>
 
 {#if failed}
-  <div class="status">{failed}</div>
+  <div class="status" class:bare={mode === "grid"}>{failed}</div>
 {/if}
 
 <style>
   .modes {
     display: flex;
-    gap: 4px;
-    margin-bottom: 10px;
+    gap: var(--s-1);
+    margin-bottom: var(--s-4);
   }
 
   nav {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-bottom: 12px;
+    gap: 1px;
+    margin-bottom: var(--s-4);
   }
 
   .nav {
+    justify-content: flex-start;
+    gap: 0;
     text-align: left;
+    font-weight: 400;
+    padding: 0 var(--s-2);
     background: none;
     border-color: transparent;
   }
 
   .nav .n {
     display: inline-block;
-    width: 1.6em;
+    width: 1.8em;
     color: var(--dim);
+    font-variant-numeric: tabular-nums;
   }
 
-  button.on {
-    background: #23303f;
-    border-color: var(--accent);
+  button.on,
+  button.on:hover {
+    background: var(--picked);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    color: var(--text);
   }
 
   .tablehead {
     display: flex;
-    gap: 8px;
+    gap: var(--s-2);
     align-items: center;
-    margin-bottom: 6px;
+    margin-bottom: var(--s-2);
     flex-wrap: wrap;
   }
 
@@ -554,32 +641,32 @@
      this. */
   .bulkbar {
     display: flex;
-    gap: 8px;
-    align-items: baseline;
+    gap: var(--s-2);
+    align-items: center;
     flex-wrap: wrap;
-    padding: 5px 7px;
-    margin-bottom: 2px;
-    font-size: 12px;
-    border: 1px solid var(--accent);
-    border-radius: 3px;
-    background: #1a222d;
+    padding: var(--s-2) var(--s-3);
+    margin-bottom: var(--s-2);
+    font-size: var(--fs-200);
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    border-radius: var(--r-2);
+    background: var(--picked);
   }
 
   .sheetbar {
     display: flex;
-    gap: 12px;
+    gap: var(--s-3);
     align-items: baseline;
-    padding: 4px 0 6px;
-    font-size: 11px;
+    padding: var(--s-1) 0 var(--s-2);
+    font-size: var(--fs-100);
     flex-wrap: wrap;
   }
 
   .hint {
-    color: #55555e;
+    color: var(--faint);
   }
 
   .pad {
-    padding: 4px 0;
+    padding: var(--s-1) 0;
   }
 
   .muted {

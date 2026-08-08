@@ -57,26 +57,29 @@
 
 <style>
   .rules {
-    margin-top: 14px;
+    margin-top: var(--s-5);
     border-top: 1px solid var(--line);
-    padding-top: 8px;
+    padding-top: var(--s-3);
   }
 
   .head {
-    font-size: 11px;
+    font-size: var(--fs-100);
+    font-weight: 600;
     letter-spacing: 0.08em;
-    margin-bottom: 6px;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: var(--s-2);
   }
 
   .empty {
-    font-size: 12px;
+    font-size: var(--fs-200);
   }
 
   .rule {
     border-left: 2px solid var(--keep);
-    padding: 3px 0 3px 7px;
-    margin-bottom: 4px;
-    font-size: 12px;
+    padding: var(--s-1) 0 var(--s-1) var(--s-2);
+    margin-bottom: 5px;
+    font-size: var(--fs-200);
   }
 
   .rule.exclude {
@@ -94,16 +97,19 @@
   }
 
   .row.sub {
-    font-size: 11px;
-    margin-top: 1px;
+    font-size: var(--fs-100);
+    margin-top: 2px;
   }
 
   .pos {
     color: var(--dim);
-    min-width: 1.5em;
+    min-width: 1.6em;
+    font-variant-numeric: tabular-nums;
   }
 
+  /* The predicate is the rule, character for character. */
   .pred {
+    font-family: var(--mono);
     word-break: break-all;
     flex: 1;
   }
@@ -121,7 +127,18 @@
   }
 
   button {
-    padding: 0 6px;
+    min-height: 0;
+    padding: 1px 6px;
+    font-size: var(--fs-100);
     line-height: 1.5;
+    background: none;
+    border-color: transparent;
+    color: var(--dim);
+  }
+
+  button:hover:not(:disabled) {
+    background: var(--raised);
+    border-color: var(--line);
+    color: var(--text);
   }
 </style>

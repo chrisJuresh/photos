@@ -2,7 +2,7 @@
 
 Nine extensions nobody photographs in, each written as one `exclude` rule at
 `seq` 0..8 in `state.sqlite3`. Storing them as rows rather than as a list in code
-is the whole point: the step `PLAN.md` called the only irreversible one before
+is the whole point: the step `archive/PLAN.md` called the only irreversible one before
 the source is gone now reverses by deleting a row, and it uses the same ordered,
 first-match-wins engine every later triage decision will use.
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 from photolib import db, migrate
 
-# In PLAN.md's order. Adding to this list is a decision about what never gets
+# In archive/PLAN.md's order. Adding to this list is a decision about what never gets
 # looked at again, so it stays exactly the nine formats with no judgement call in
 # them: vector graphics, TypeScript, Outlook messages, cursors, icons, DirectX
 # textures, X bitmaps, Python bytecode, and v1's `.file` catch-all. Everything

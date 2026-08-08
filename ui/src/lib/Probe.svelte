@@ -9,7 +9,7 @@
   // The button does not run the probe either, and that is not squeamishness:
   // the probe writes file.width into the CATALOG, while every triage write
   // reaches state.sqlite3 through a connection that cannot see the catalog at
-  // all, and its reads land on the USB HDD whose contention PLAN.md measures in
+  // all, and its reads land on the USB HDD whose contention archive/PLAN.md measures in
   // whole megabytes per second. It reports, and names the one command to run.
   import { api, count } from "./api.js";
 
@@ -64,18 +64,18 @@
 <style>
   .probe {
     display: flex;
-    gap: 8px;
-    align-items: baseline;
+    gap: var(--s-2);
+    align-items: center;
     flex-wrap: wrap;
-    margin: 6px 0 10px;
-    font-size: 12px;
+    margin: 0 0 var(--s-4);
+    font-size: var(--fs-200);
   }
 
   code {
-    background: #0c0c0e;
+    background: var(--sunken);
     border: 1px solid var(--line);
-    border-radius: 2px;
-    padding: 0 4px;
+    border-radius: var(--r-1);
+    padding: 2px 6px;
   }
 
   .muted {

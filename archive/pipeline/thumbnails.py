@@ -1,6 +1,6 @@
 """Copies MediaVault's 384px WebP derivatives onto the NVMe as grid thumbnails.
 
-`PLAN.md` § "Storage layout" puts the grid thumbnail at
+`archive/PLAN.md` § "Storage layout" puts the grid thumbnail at
 `E:\\photolib\\thumb\\<aa>\\<sha256>.webp` -- *adopted from MediaVault, not
 regenerated*. This module is that adoption and nothing else. It decodes nothing,
 encodes nothing, and creates no thumbnail that does not already exist: the

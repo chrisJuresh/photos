@@ -127,7 +127,7 @@
 
 <style>
   .bar {
-    padding: 6px 0 8px;
+    padding: 0 0 var(--s-3);
   }
 
   .fields {
@@ -138,17 +138,20 @@
   }
 
   .value {
-    min-width: 26rem;
+    min-width: min(26rem, 100%);
+    font-family: var(--mono);
+    font-size: var(--fs-200);
   }
 
   .echo {
-    margin-top: 3px;
-    font-size: 11px;
+    margin-top: var(--s-2);
+    font-family: var(--mono);
+    font-size: var(--fs-100);
   }
 
   .none {
     display: flex;
-    gap: 8px;
+    gap: var(--s-2);
     flex-wrap: wrap;
   }
 

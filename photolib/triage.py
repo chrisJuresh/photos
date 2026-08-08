@@ -1,6 +1,6 @@
 """The triage rule engine: ordered rules, first match wins, overrides beat all.
 
-The model `PLAN.md` specifies, and nothing more. A rule is one structured
+The model `archive/PLAN.md` specifies, and nothing more. A rule is one structured
 predicate -- a `(column, operator, value)` tuple -- plus a decision. Rules
 evaluate top-down and the first match wins, which is what lets a rule set say
 "exclude everything under `node_modules`, except this one folder": put the

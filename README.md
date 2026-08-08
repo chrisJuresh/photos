@@ -32,7 +32,7 @@ except `/api/triage/*`, which writes the rule set to `state.sqlite3`.
 | `archive/pipeline/` | The one-shot build pipeline that produced the vault — 16 modules, run to completion between 2026-08-01 and 2026-08-07. Still importable, still tested, not needed to serve the website. |
 | `archive/v1/` | The previous implementation, read-only reference, under a safety hold. |
 | `archive/v1-docs/` | One file per `archive/v1/` feature. Start at `archive/v1-docs/INDEX.md`. |
-| `PLAN.md`, `BUILD-PROMPTS.md` | Dated records of how the build actually went. The commands quoted inside them are as they were run at the time, under the pre-archive module paths. |
+| `archive/PLAN.md`, `archive/BUILD-PROMPTS.md` | Dated records of how the build actually went. The commands quoted inside them are as they were run at the time, under the pre-archive module paths. |
 
 `archive/pipeline/` depends on `photolib` for `config`, `db`, `migrate`, `triage` and `reveal`.
 The arrow never points the other way: `photolib.grid` imports nothing from `archive`.
@@ -63,5 +63,5 @@ reasoning, and what broke in `archive/v1/` when each was only a convention.
 ## Two known gaps
 
 There is no procedure yet for adding photos after the build, and no backup of `G:\vault`.
-Both are deferred on purpose — `PLAN.md` "Open decisions" 5. The architecture was audited
+Both are deferred on purpose — `archive/PLAN.md` "Open decisions" 5. The architecture was audited
 against future import on 2026-08-02 and needs no change to support it.

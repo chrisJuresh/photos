@@ -5,7 +5,7 @@ filter that actually settles the 54,899 `.png`, and dimensions are the one thing
 it needs that files outside MediaVault do not have: 641,764 of 787,798 `file`
 rows have never had their bytes read, so `width` is NULL for all of them.
 
-`PLAN.md` puts this between screen 2 and screen 3 deliberately, and that
+`archive/PLAN.md` puts this between screen 2 and screen 3 deliberately, and that
 position is the whole cost argument. Screens 0-2 need only path and extension
 and run on the full inventory with no reads at all; whatever they remove, this
 never opens. Run it *after* those decisions are saved, not before.
@@ -138,7 +138,7 @@ def pending(
         the triage write surface is handed a connection with no `ATTACH` of the
         catalog precisely so "triage writes metadata only" is a fact about the
         connection rather than a convention somebody maintains;
-      * the reads land on `G:`, the USB HDD whose contention `PLAN.md` measures
+      * the reads land on `G:`, the USB HDD whose contention `archive/PLAN.md` measures
         in whole megabytes per second, at whatever moment a request arrives;
       * and on this corpus it would buy nothing -- the worklist is 25 files,
         all of them unreadable cache blobs, so the probe stores zero rows.

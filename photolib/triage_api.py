@@ -210,7 +210,7 @@ def set_override(conn: sqlite3.Connection, payload: dict) -> tuple[int, dict]:
     """Per-file decision, keyed on content. `POST /api/triage/override`.
 
     Keyed on `sha256` and never on `photo.id`, so it survives every re-group and
-    re-ingest -- `PLAN.md`'s rule for anything recording a human decision. There
+    re-ingest -- `archive/PLAN.md`'s rule for anything recording a human decision. There
     is no path in the body: the client names bytes, not a file.
     """
     sha256 = _field(payload, "sha256", (str,))

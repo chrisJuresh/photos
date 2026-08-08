@@ -6,7 +6,7 @@ substrate, and the vault restores from restic through `origins.jsonl`. The triag
 rules and per-file overrides do not: they are the output of a human looking at
 1.37M files, and every future favourite and rating lands in the same file.
 
-`PLAN.md` labels it *Irreplaceable* and nothing in the build order copied it
+`archive/PLAN.md` labels it *Irreplaceable* and nothing in the build order copied it
 anywhere, so losing `E:` after triage meant doing triage again.
 
 Two things this does not do, deliberately. It is **not** an off-site backup --

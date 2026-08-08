@@ -496,7 +496,7 @@ def test_nothing_is_written_to_the_manifest(vault: Vault, conn, tmp_path):
 
 
 def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
-    """PLAN.md lists three catalog tables; the import adds none of its own.
+    """archive/PLAN.md lists three catalog tables; the import adds none of its own.
 
     Migration 005 adds the triage survey, which is a derived projection rebuilt
     by `archive.pipeline.triage_survey`; 006 adds Phase 4's promotion ledger; 007 adds

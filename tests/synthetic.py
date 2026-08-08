@@ -17,6 +17,7 @@ import base64
 import hashlib
 import random
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from photolib import migrate
@@ -99,6 +100,88 @@ def corpus(
     conn = sqlite3.connect(catalog_db)
     try:
         insert(conn, rows)
+    finally:
+        conn.close()
+    return rows
+
+
+# One burst: a three-frame bracket, a second body shooting through it, and a
+# lone frame half a minute later. That is the shape the real corpus's 3/6/9/12
+# spine is made of, and the second body is what proves a run is per camera
+# rather than per moment.
+#
+# (camera, seconds into the burst, taken_src, stack)
+BURST_PLAN = (
+    ("Cam A", 0, "exif:DateTimeOriginal", "bracket"),
+    ("Cam A", 1, "exif:DateTimeOriginal", "bracket"),
+    ("Cam A", 2, "exif:DateTimeOriginal", "bracket"),
+    ("Cam B", 0, "exif:DateTimeOriginal", "second body"),
+    ("Cam B", 1, "exif:DateTimeOriginal", "second body"),
+    ("Cam C", 30, "exif:DateTimeOriginal", "lone"),
+)
+
+# Every seventh burst also carries a frame `capture_time` dated from mtime --
+# same body, chronologically inside the bracket. It is never stacked, and it
+# must not split the bracket around it.
+GUESSED = ("Cam A", 1, "mtime", "guessed")
+
+# Bursts are an hour apart, so no window the slider offers can merge two of
+# them and the expected grouping is a property of the plan alone.
+BURST_SPACING = 3600
+BURST_START = "2025-05-01T12:00:00"
+
+
+def bursts(catalog_db: Path, state_db: Path, *, groups: int = 12) -> list[tuple]:
+    """A migrated pair holding `groups` bursts, and the grouping they must yield.
+
+    Returns (photo_id, sha, camera, sort_key, taken_src, stack, size) per row,
+    where `stack` names the set the row belongs to at any window the slider
+    offers. A test computes what it expects from that rather than from the
+    endpoint it is testing.
+
+    File sizes are scattered rather than ascending, so an alternate sort really
+    does interleave the members of a stack -- which is the whole reason the
+    non-time sorts cannot collapse runs as they page.
+    """
+    migrate.apply(catalog_db, state_db)
+    start = datetime.fromisoformat(BURST_START)
+    shapes = [(4000, 3000), (3000, 4000), (2000, 2000)]
+
+    rows = []
+    for group in range(groups):
+        plan = list(BURST_PLAN) + ([GUESSED] if group % 7 == 0 else [])
+        for camera, offset, taken_src, stack in plan:
+            photo_id = len(rows) + 1
+            when = start + timedelta(seconds=group * BURST_SPACING + offset)
+            rows.append(
+                (
+                    photo_id,
+                    sha_of(f"burst-{photo_id}"),
+                    camera,
+                    when.strftime("%Y-%m-%dT%H:%M:%S"),
+                    taken_src,
+                    f"{group}:{stack}",
+                    (photo_id * 37) % 997 + 1,
+                )
+            )
+
+    conn = sqlite3.connect(catalog_db)
+    try:
+        conn.execute("BEGIN")
+        for photo_id, sha, camera, sort_key, taken_src, _, size in rows:
+            width, height = shapes[photo_id % len(shapes)]
+            conn.execute(
+                "INSERT INTO file (sha256, size, ext, kind, width, height, taken_at, "
+                "taken_src, camera, vault_relpath, state, feature_ver) "
+                "VALUES (?, ?, '.jpg', 'image', ?, ?, ?, ?, ?, ?, 'adopted', 'test')",
+                (sha, size, width, height, sort_key, taken_src, camera,
+                 f"objects\\{sha[:2]}\\{sha}.blob"),
+            )
+            conn.execute(
+                "INSERT INTO photo (id, rep_sha256, sort_key) VALUES (?, ?, ?)",
+                (photo_id, sha, sort_key),
+            )
+        conn.execute("COMMIT")
     finally:
         conn.close()
     return rows

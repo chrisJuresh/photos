@@ -1,7 +1,10 @@
 """The grid and the triage screens: one server, two modes of one client.
 
     GET  /                                                the page
-    GET  /api/photos?before=&before_id=&limit=&kind=      a keyset page
+    GET  /tune                                            the page, plus glass controls
+    GET  /glass                                           the material comparison
+    GET  /api/photos?before=&before_id=&limit=&<filters>  a keyset page
+    GET  /api/facets                                      what can be filtered by
     GET  /t/<sha256>.webp                                 a thumbnail, immutable
     POST /api/reveal {"id": N} | {"origin": N}            select it in Explorer
     GET  /api/triage/*                                    the survey, read-only
@@ -21,14 +24,28 @@ small:
   * `file.width`/`height` come back with the page, so justified rows lay out
     before a single image is requested. No measuring, no layout shift.
   * every page carries `total`, so the client can give the scrollbar its final
-    length while it still holds only the first page. Counted once per process,
-    because it is 1.07 s and it cannot change while the server runs.
+    length while it still holds only the first page. It is 230-400 ms whatever
+    the filter, because a count has to visit every tile, so it is memoised per
+    filter set -- once per selection the reader makes, never once per page. It
+    cannot go stale: every connection here is read-only.
   * thumbnail URLs are content hashes, so `immutable` is honest and the browser
     stops asking after the first pass. `F47` is that header on a URL whose
     meaning can change.
   * paging is keyset on the pair `(sort_key, id)`, never OFFSET. 90.5% of photo
     rows share a sort_key with another row and the largest single tie is 9,143,
-    so a one-column cursor cannot page through the library at all.
+    so a one-column cursor cannot page through the library at all. An alternate
+    ordering pages on `(its own key, id)` the same way -- see `photolib.browse`.
+
+`stack=<seconds>` collapses each run of consecutive captures from one camera
+into one tile, so a page carries covers rather than frames and each one says how
+many it stands for. The two default sorts pay nothing for it beyond the tiles
+they read: a run is contiguous in `photo_sort` order, so a page collapses its
+own as it streams. The other eight cannot, and buy one grouping pass per
+selection instead.
+
+What can be filtered and sorted by lives in `photolib.browse`, so the vocabulary
+can be read, measured and tested without a server. This module keeps the query
+string, the envelope, and the security posture, and holds no filter of its own.
 """
 
 from __future__ import annotations
@@ -45,27 +62,52 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from photolib import db, reveal as reveal_module, triage_api
+from photolib import browse, db, reveal as reveal_module, triage_api
 from photolib.config import load, thumb_path
 
 DEFAULT_PORT = 8770  # v1 used 8765 for the dashboard and 8766 for the review API
 
-# `kind` is a query parameter from the first commit even though it is the only
-# filter, so later facets extend the contract instead of renegotiating it.
+# `kind` was a query parameter from the first commit, before there was a second
+# filter, so the later facets in `photolib.browse` extended that contract instead
+# of renegotiating it. It still parses here because its one irregularity is its
+# own: `image` means still photography and expands to cover raw.
 KINDS = frozenset({"image", "raw_image", "video"})
 DEFAULT_KINDS = ("image", "raw_image")
 
 DEFAULT_LIMIT = 500
 MAX_LIMIT = 1000
 
+# How many tiles a stacked page asks for per cover it wants. 24,534 tiles
+# collapse to 10,948 at a four-second window — 2.24 each — but the recent end of
+# the library is the bracketed end and runs nearer 3.6, so a first page wants
+# more headroom than the average. `_rows` steps rather than fetches, so asking
+# for more than the page needs costs nothing and asking for too little costs a
+# second round trip.
+TILES_PER_COVER = 6
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 # `bundle.js` and `bundle.css` are built from `ui/src` by `npm run build` and
 # committed, so the server runs from a clean checkout with no node toolchain.
 # `index.html` is hand-written and is not a build output.
+#
+# `/glass` is the material comparison — ten published liquid-glass
+# implementations over the real grid, each at its own source's default settings,
+# flipped through with the arrow keys. It is
+# hand-written, it is not part of the bundle, and it reads `/api/photos` and
+# `/t/` like any other client. Nothing else imports it and the app never links
+# to it: it is for choosing the header's material and for nothing else.
+#
+# `/tune` is the settled material's control panel and serves the same document
+# as `/`, because it is the same client: the app reads the path once and mounts
+# a panel of sliders over the grid. Nothing links to it either.
 STATIC_ROUTES = {
     "/": ("index.html", "text/html; charset=utf-8"),
+    "/tune": ("index.html", "text/html; charset=utf-8"),
     "/bundle.js": ("bundle.js", "text/javascript; charset=utf-8"),
     "/bundle.css": ("bundle.css", "text/css; charset=utf-8"),
+    "/glass": ("glass.html", "text/html; charset=utf-8"),
+    "/glass.css": ("glass.css", "text/css; charset=utf-8"),
+    "/glass.js": ("glass.js", "text/javascript; charset=utf-8"),
 }
 
 # 64 lowercase hex characters cannot traverse, cannot be absolute and cannot
@@ -74,11 +116,12 @@ STATIC_ROUTES = {
 # database round-trip — one query per thumbnail would dominate first paint.
 THUMB_ROUTE = re.compile(r"^/t/([0-9a-f]{64})\.webp$")
 
-# A bound parameter, so this is a size budget rather than injection defence. It
-# admits an ISO timestamp and the '-' sentinel that undated photos sort on.
-CURSOR_KEY = re.compile(r"^[0-9T:+.Z-]{1,32}$")
-CURSOR_ID = re.compile(r"^[0-9]{1,19}$")
 LIMIT_VALUE = re.compile(r"^[0-9]{1,5}$")
+
+# How many distinct filter sets a session may bank a `total` for. Each is one
+# integer against a small tuple, so this is not a memory bound -- it is a bound
+# on a dict whose keys come from the query string.
+MAX_TOTALS = 512
 
 MAX_REVEAL_BODY = 1024
 # A rule body carries a predicate value -- a directory path or an `in` list --
@@ -181,91 +224,213 @@ def parse_limit(values: list[str]) -> int:
     return min(max(int(raw), 1), MAX_LIMIT)
 
 
-def parse_cursor(before: list[str], before_id: list[str]) -> tuple[str, int] | None:
-    """The keyset cursor, or None for the first page.
+def build_assignment(conn: sqlite3.Connection, query: browse.Query) -> tuple:
+    """Every stack of one selection as `(cover id, sort key, size)`, in order.
 
-    Both halves or neither: a half cursor has no defensible interpretation.
+    One pass, ~380 ms; the caller memoises it. Only the eight sorts that cannot
+    stream ever ask for it — see `GridServer.assignment`.
     """
-    if not before and not before_id:
-        return None
-    if not before or not before_id:
-        raise BadRequest("cursor")
-    key, identifier = before[-1], before_id[-1]
-    if not CURSOR_KEY.match(key) or not CURSOR_ID.match(identifier):
-        raise BadRequest("cursor")
-    return key, int(identifier)
+    sql, params = browse.assignment_sql(query)
+    covers: list[list] = []
+    seen: dict[int, int] = {}  # stack -> the index of its cover
+    for photo_id, key, stack in conn.execute(sql, params):
+        index = seen.get(stack)
+        if index is None:
+            # First member in this ordering, so this is the stack's cover.
+            seen[stack] = len(covers)
+            covers.append([photo_id, key, 1])
+        else:
+            covers[index][2] += 1
+    return tuple(tuple(cover) for cover in covers)
 
 
-def page_sql(kinds: tuple[str, ...], cursor: tuple[str, int] | None) -> tuple[str, list]:
-    """The page query and its parameters, minus the LIMIT value.
-
-    The placeholders are generated from the *count* of already-validated kinds;
-    no token from the query string reaches the SQL text. The first page omits
-    the cursor predicate entirely rather than binding a magic high-water key.
-    """
-    where = ["f.kind IN ({})".format(", ".join("?" * len(kinds)))]
-    params: list = list(kinds)
-    if cursor is not None:
-        where.append("(p.sort_key, p.id) < (?, ?)")
-        params += [cursor[0], cursor[1]]
-    sql = (
-        "SELECT p.id, f.sha256, f.width, f.height, f.thumbhash, p.sort_key\n"
-        "FROM photo AS p\n"
-        "JOIN file AS f ON f.sha256 = p.rep_sha256\n"
-        f"WHERE {' AND '.join(where)}\n"
-        "ORDER BY p.sort_key DESC, p.id DESC\n"
-        "LIMIT ?"
-    )
-    return sql, params
+def _photo(row) -> dict:
+    return {
+        "id": row[0],
+        "s": row[1],
+        "w": row[2],
+        "h": row[3],
+        # Always present, null until step 9 computes ThumbHash. A key that
+        # gains a value is not a contract change; a key that appears is.
+        "th": base64.b64encode(row[4]).decode("ascii") if row[4] is not None else None,
+    }
 
 
-def page(
-    conn: sqlite3.Connection,
-    kinds: tuple[str, ...],
-    cursor,
-    limit: int,
-    *,
-    total: int | None = None,
-) -> dict:
-    """One keyset page, with an honest end-of-stream marker.
+def _plain_page(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int):
+    """One keyset page of tiles, and whether another follows.
 
     Reads `limit + 1` rows and returns `limit`. Whether the extra row existed is
     what sets `next`, so exhaustion is a fact rather than an inference — a page
     that happens to hold exactly `limit` rows is not the end, and deriving it
     that way is a bug that only reproduces at particular corpus sizes.
-
-    `total` is how many rows the whole query has, which the client needs in order
-    to give the scrollbar its final length on the first page instead of growing
-    it under the reader on every page. It is carried rather than computed here:
-    it costs 1.07 s and it is the same number for every page, so it is counted
-    once per process — see `GridServer.kind_totals`.
     """
-    sql, params = page_sql(kinds, cursor)
+    sql, params = browse.page_sql(query, cursor)
     rows = conn.execute(sql, [*params, limit + 1]).fetchall()
     has_more = len(rows) > limit
     rows = rows[:limit]
-    photos = [
-        {
-            "id": row[0],
-            "s": row[1],
-            "w": row[2],
-            "h": row[3],
-            # Always present, null until step 9 computes ThumbHash. A key that
-            # gains a value is not a contract change; a key that appears is.
-            "th": base64.b64encode(row[4]).decode("ascii") if row[4] is not None else None,
-        }
-        for row in rows
-    ]
     following = None
     if has_more and rows:
         following = {"before": rows[-1][5], "before_id": rows[-1][0]}
-    return {
+    return [_photo(row) for row in rows], following
+
+
+def _rows(conn: sqlite3.Connection, query: browse.Query, cursor, chunk: int):
+    """Tiles in the page's order, refetching from the keyset cursor as needed.
+
+    A stacked page cannot know up front how many tiles it takes to fill: that is
+    the ratio it exists to change. So it reads in chunks off the same cursor the
+    client would have used, which keeps every read a `photo_sort` page.
+
+    Stepped rather than fetched, because `photo_sort` supplies the order and the
+    plan carries no temp b-tree — so a row the page never reaches is a row
+    SQLite never visits, and an over-generous chunk costs nothing. Fetching the
+    chunk instead read 3,000 tiles to serve a 1,805-tile page.
+    """
+    while True:
+        sql, params = browse.page_sql(query, cursor)
+        seen, row = 0, None
+        for row in conn.execute(sql, [*params, chunk]):
+            seen += 1
+            yield row
+        if seen < chunk:
+            return
+        cursor = (row[5], row[0])
+
+
+def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int):
+    """One page of covers, collapsing runs as the tiles arrive.
+
+    The two default sorts read in capture order, so a run's members arrive in
+    one pass and the cover is the first of them the page sees — the newest frame
+    on `newest`, the oldest on `oldest`. Each camera keeps its own open run, so
+    a second body shooting at the same moment interleaves without splitting
+    anything.
+
+    A page ends at a *clean cut*: the first tile more than the window away from
+    the last one that could stack. Every earlier tile is further away still, so
+    no run can straddle the boundary and every stack is returned whole, on one
+    page, exactly once. Reaching `limit` is what starts looking for that cut
+    rather than what ends the page, so a page can carry a few covers more than
+    it asked for — the alternative is splitting a burst across two pages.
+
+    The cut is measured on where a tile sits and not on whether it may stack.
+    A selection holding nothing stackable — `dated=mtime`, say — has no run to
+    close, and a cut that only fired on stackable tiles would never fire and
+    serve the whole selection as one page.
+    """
+    window = query.stack
+    covers: list[dict] = []
+    runs: dict = {}  # camera -> [seconds of its last tile, index of its cover]
+    frontier = None  # the last tile that could stack, in seconds
+    last = None  # the last tile this page consumed, which is what `next` names
+    has_more = False
+
+    for row in _rows(conn, query, cursor, limit * TILES_PER_COVER):
+        camera = row[browse.CAMERA]
+        seconds, stackable = row[browse.SECONDS], row[browse.STACKABLE]
+        if len(covers) >= limit and (
+            frontier is None or seconds is None or abs(seconds - frontier) > window
+        ):
+            has_more = True
+            break
+        run = runs.get(camera) if stackable else None
+        if run is not None and abs(seconds - run[0]) <= window:
+            run[0] = seconds
+            covers[run[1]]["n"] += 1
+        else:
+            covers.append({**_photo(row), "n": 1})
+            if stackable:
+                runs[camera] = [seconds, len(covers) - 1]
+        if stackable:
+            frontier = seconds
+        last = row
+
+    following = None
+    if has_more and last is not None:
+        following = {"before": last[browse.KEY], "before_id": last[0]}
+    return covers, following
+
+
+def _assigned(
+    conn: sqlite3.Connection, query: browse.Query, cursor, limit: int, covers
+):
+    """One page of covers, sliced out of an assignment computed in one pass.
+
+    The eight non-time sorts cannot stream: a stack's members are scattered
+    through the ordering, so there is no run to collapse. `covers` is every
+    stack in this sort's order, first member first, computed once per selection
+    — see `GridServer.assignment`. Paging is then a slice, and the cursor is
+    found by walking to it rather than by looking it up, so a key that survived
+    a round trip through the query string compares the way SQL would.
+    """
+    start = 0
+    if cursor is not None:
+        descending = query.ordering.descending
+        while start < len(covers):
+            here = (covers[start][1], covers[start][0])
+            if here < cursor if descending else here > cursor:
+                break
+            start += 1
+    wanted = covers[start:start + limit]
+    rows = _by_id(conn, [cover[0] for cover in wanted])
+    photos = [{**_photo(rows[photo_id]), "n": size} for photo_id, _, size in wanted]
+    following = None
+    if wanted and start + limit < len(covers):
+        following = {"before": wanted[-1][1], "before_id": wanted[-1][0]}
+    return photos, following
+
+
+def _by_id(conn: sqlite3.Connection, ids: list[int]) -> dict:
+    """The page's tiles, by primary key. The ids come from `photo`, not a request."""
+    if not ids:
+        return {}
+    sql = (
+        "SELECT p.id, f.sha256, f.width, f.height, f.thumbhash "
+        "FROM photo AS p JOIN file AS f ON f.sha256 = p.rep_sha256 "
+        f"WHERE p.id IN ({', '.join('?' * len(ids))})"
+    )
+    return {row[0]: row for row in conn.execute(sql, ids)}
+
+
+def page(
+    conn: sqlite3.Connection,
+    query: browse.Query,
+    cursor,
+    limit: int,
+    *,
+    total: int | None = None,
+    assignment: tuple | None = None,
+) -> dict:
+    """One page, stacked or not, with an honest end-of-stream marker.
+
+    `total` is how many *tiles* the whole query has, which the client needs in
+    order to give the scrollbar its final length on the first page instead of
+    growing it under the reader on every page. It is carried rather than
+    computed here: it costs 230-400 ms and it is the same number for every page
+    of one selection, so it is counted once per selection — see
+    `GridServer.total`.
+
+    With stacking on the envelope echoes `stack`, the window it grouped at, and
+    every photo gains `n`, its stack's size. With stacking off neither key is
+    there and the page is byte for byte what it was before stacking existed.
+    """
+    if query.stack is None:
+        photos, following = _plain_page(conn, query, cursor, limit)
+    elif query.ordering.indexed:
+        photos, following = _streamed(conn, query, cursor, limit)
+    else:
+        photos, following = _assigned(conn, query, cursor, limit, assignment)
+    envelope = {
         "photos": photos,
         "next": following,
-        "kind": list(kinds),
+        "kind": list(query.kinds),
+        "sort": query.sort,
         "limit": limit,
         "total": total,
     }
+    if query.stack is not None:
+        envelope["stack"] = query.stack
+    return envelope
 
 
 def reveal_relpath(conn: sqlite3.Connection, photo_id: int) -> tuple | None:
@@ -318,7 +483,9 @@ class GridServer(ThreadingHTTPServer):
         self.roots = roots
         self.spawn = spawn
         self._local = threading.local()
-        self._totals: dict[str, int] | None = None
+        self._facets: dict | None = None
+        self._totals: dict[browse.Query, int] = {}
+        self._assignments: dict[browse.Query, tuple] = {}
         self._totals_lock = threading.Lock()
         super().__init__(address, handler)
         port = self.server_address[1]
@@ -343,28 +510,72 @@ class GridServer(ThreadingHTTPServer):
             self._local.conn = conn
         return conn
 
+    def facets(self) -> dict:
+        """The filter vocabulary, built once and served from memory after.
+
+        Every dimension the header offers, with a count per value, from one pass
+        over the tile set — ~700 ms over the real corpus. Thirteen GROUP BY
+        queries would be ~250 ms each, because each one visits every tile.
+
+        Every connection in this process is read-only, so the answer cannot
+        change while the server runs. Counted under the lock rather than around
+        it, so two threads arriving together pay for one pass and not two;
+        `main` warms it before the browser opens, which is why no request ever
+        waits on it.
+        """
+        with self._totals_lock:
+            if self._facets is None:
+                self._facets = browse.facets(self.connection())
+            return self._facets
+
     def kind_totals(self) -> dict[str, int]:
-        """`photo` rows per media kind, counted once and served from memory after.
+        """`photo` rows per media kind. A view of `facets`, not a second query."""
+        return self.facets()["kinds"]
+
+    def total(self, query: browse.Query) -> int:
+        """How many tiles one selection holds, counted once per selection.
 
         The sheet reserves scrollbar height for the pages it has not asked for
         yet, so it needs the size of the whole answer while it still holds only
-        the first page. There is no index on `file.kind`, so this is one index
-        lookup per tile — 1.07 s when `photo` held one row per file, and 24,536
-        lookups since Phase 5 made a tile a group. Every connection in this
-        process is read-only, so the answer cannot change while the server runs.
-        Counted under the lock rather than around it, so two threads arriving
-        together pay for one query and not two; `main` warms it before the
-        browser opens, which is why no request ever waits on it.
+        the first page. A count visits every tile whatever the filter is —
+        230-400 ms — and it is the same number for every page of one selection,
+        so paying it per page would put it in front of every scroll.
+
+        Memoised on the `Query` itself: it is frozen and its fields are sorted
+        tuples, so two requests that mean the same selection are the same key
+        however the query string was spelled. The stacking window is dropped
+        from the key first, because this counts tiles and no window changes how
+        many there are. The cap is on the number of distinct keys a session can
+        bank, because those keys come from a query string; when it is reached
+        the oldest is dropped, and the only cost of being wrong about which is
+        one recount.
+        """
+        key = query.unstacked()
+        with self._totals_lock:
+            if key not in self._totals:
+                sql, params = browse.count_sql(key)
+                if len(self._totals) >= MAX_TOTALS:
+                    del self._totals[next(iter(self._totals))]
+                self._totals[key] = self.connection().execute(sql, params).fetchone()[0]
+            return self._totals[key]
+
+    def assignment(self, query: browse.Query) -> tuple:
+        """How one selection stacks, grouped once per selection and window.
+
+        Asked for only by the eight sorts that cannot collapse runs as they
+        page. The pass is ~380 ms — the same order as a `total`, and paid for
+        the same reason: it is the same answer for every page of one selection,
+        so paying it per page would put it in front of every scroll. Same cap
+        and same eviction as the count memo, on keys that come from a query
+        string. One entry is a tuple per stack, ~2 MB over the real corpus,
+        which is why the cap is on the number of selections and not on bytes.
         """
         with self._totals_lock:
-            if self._totals is None:
-                self._totals = dict(
-                    self.connection().execute(
-                        "SELECT f.kind, count(*) FROM photo AS p "
-                        "JOIN file AS f ON f.sha256 = p.rep_sha256 GROUP BY f.kind"
-                    )
-                )
-            return self._totals
+            if query not in self._assignments:
+                if len(self._assignments) >= MAX_TOTALS:
+                    del self._assignments[next(iter(self._assignments))]
+                self._assignments[query] = build_assignment(self.connection(), query)
+            return self._assignments[query]
 
     def state_writer(self) -> sqlite3.Connection:
         """This thread's write connection -- to `state.sqlite3` and nothing else.
@@ -448,6 +659,8 @@ class GridHandler(BaseHTTPRequestHandler):
             self._static(path)
         elif path == "/api/photos":
             self._photos(query)
+        elif path == "/api/facets":
+            self._json(200, self.server.facets())
         elif thumbnail:
             self._thumbnail(thumbnail.group(1))
         elif path in triage_api.READ_ROUTES:
@@ -501,19 +714,27 @@ class GridHandler(BaseHTTPRequestHandler):
     def _photos(self, query: str) -> None:
         params = parse_qs(query, keep_blank_values=True)
         try:
-            kinds = parse_kinds(params.get("kind", []))
             limit = parse_limit(params.get("limit", []))
-            cursor = parse_cursor(params.get("before", []), params.get("before_id", []))
-        except BadRequest as exc:
+            selection = browse.parse(params, kinds=parse_kinds(params.get("kind", [])))
+            cursor = browse.parse_cursor(
+                selection.ordering, params.get("before", []), params.get("before_id", [])
+            )
+        except (BadRequest, browse.BadFilter) as exc:
             self._fail(400, exc.field)
             return
-        totals = self.server.kind_totals()
         payload = page(
             self.server.connection(),
-            kinds,
+            selection,
             cursor,
             limit,
-            total=sum(totals.get(kind, 0) for kind in kinds),
+            total=self.server.total(selection),
+            # Only the sorts that cannot stream: a default sort collapses its
+            # own runs as it pages, so it must never pay for a grouping pass.
+            assignment=(
+                self.server.assignment(selection)
+                if selection.stack is not None and not selection.ordering.indexed
+                else None
+            ),
         )
         self._json(200, payload)
 
@@ -699,9 +920,10 @@ def main(argv: list[str] | None = None) -> int:
     counts = server.connection().execute(
         "SELECT kind, count(*) FROM file GROUP BY kind ORDER BY kind"
     ).fetchall()
-    # Counted here rather than on the first request, which would put its 1.07 s
+    # Built here rather than on the first request, which would put its ~700 ms
     # in front of the first paint the reader sees.
     totals = server.kind_totals()
+    dimensions = server.facets()["dimensions"]
     print(f"grid on {url}")
     print(f"  host allowlist  {sorted(server.allowed_hosts)}")
     print(f"  catalog         {roots.catalog_db}")
@@ -710,6 +932,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  triage root     {roots.photos_root}")
     print("  kinds           " + ", ".join(f"{kind} {count:,}" for kind, count in counts))
     print("  grid photos     " + ", ".join(f"{kind} {n:,}" for kind, n in sorted(totals.items())))
+    print(
+        "  filters         "
+        + ", ".join(f"{d['name']} {len(d['options'])}" for d in dimensions)
+    )
     if args.open:
         import webbrowser
 

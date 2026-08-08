@@ -1,19 +1,197 @@
-/* Carried over from the step 6 grid: the empty tile is a colour, never an
-   image, because .gitignore excludes every raster format and a placeholder that
-   needs a network request defeats the point. */
+/* The design system: every colour, size, radius and step used anywhere in the
+   client is named here, and nothing downstream invents one. Two consequences
+   worth knowing before changing a value — the triage components are all styled
+   from these tokens, so a palette change reaches them without being edited into
+   each; and the type scale is a scale, so a size that is not on it is a mistake
+   rather than a preference. */
 :root {
-  --bg: #101012;
-  --panel: #17171a;
-  --line: #2a2a30;
-  --tile-empty: #1d1d21;
-  --tile-missing: #232327;
-  --text: #e8e8ea;
-  --dim: #8a8a93;
+  /* --------------------------------------------------------------- surface */
+  /* The page itself is one of two extremes — black here, white under
+     [data-theme="light"] at the foot of this block — because the ground behind a
+     photograph should be an absence rather than a colour. Nothing else in the
+     palette is pure: the panels keep a trace of blue, because a dead neutral
+     grey next to a warm print reads as a fault in the screen, and photographs
+     stay the only saturated thing on the page. */
+  --bg: #000;
+  --panel: #121215;
+  --raised: #191920;
+  --sunken: #08080a;
+  --line: #24242c;
+  --line-soft: #1b1b21;
+  --line-strong: #34343e;
+  --tile-empty: #17171b;
+  --tile-missing: #1e1e24;
+  --btn-hover: #22222b;
+  --btn-active: #1c1c24;
+
+  /* ------------------------------------------------------------------ ink */
+  /* Three weights, and only three. Primary is not pure white: #fff on a dark
+     field haloes, and the photographs are what should be the brightest thing
+     here. */
+  --text: #edeef2;
+  --text-2: #a9aab4;
+  --dim: #74757f;
+  --faint: #4a4b53;
+
+  /* ---------------------------------------------------------------- accent */
   --accent: #6ea8fe;
-  --keep: #4a9e6a;
-  --drop: #b4442e;
-  --error: #b4442e;
-  --side: 360px;
+  --accent-ink: #06121f;
+  /* The selected-row wash. One colour for "this is the thing you picked",
+     wherever it is picked. */
+  --picked: #1e2b3b;
+  --keep: #4caf7d;
+  --drop: #e0644a;
+  --error: #e0644a;
+
+  /* ------------------------------------------------------------------ type */
+  /* The interface is a sans, and the mono is kept for the things that are
+     literally strings — paths, extensions, rule predicates, hashes — where the
+     shape of a character is information. system-ui is Segoe UI Variable Text on
+     Windows 11, SF on macOS: the text the rest of the machine is set in, and the
+     only good face available with `default-src 'none'` and no font-src. */
+  --font: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", SFMono-Regular, Menlo,
+    Consolas, monospace;
+
+  --fs-100: 11px; /* counts, badges, captions */
+  --fs-200: 12px; /* secondary rows, tables, chips */
+  --fs-300: 13px; /* the default */
+  --fs-400: 15px; /* the tally, and anything that is the answer */
+  --fs-500: 19px; /* the screen title */
+
+  --lh-tight: 1.25;
+  --lh: 1.5;
+
+  /* ---------------------------------------------------------------- metric */
+  /* A 4px step. Every padding and gap in the client is one of these. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 28px;
+  --s-7: 40px;
+
+  --r-1: 6px;
+  --r-2: 9px;
+  --r-3: 14px;
+  --r-4: 22px;
+  --r-pill: 999px;
+
+  /* One control height everywhere, so a row of mixed controls has one baseline
+     and one silhouette. */
+  --ctl: 30px;
+  --ctl-sm: 24px;
+
+  --side: 340px;
+  /* The header's margin from the top, and its margin from the left and right.
+     It floats over the photographs rather than being a lid on them, and the two
+     are separate numbers because only one of them has a photograph scrolling
+     under it. lib/glass.js writes both, and `/tune` moves them; the literals
+     here are the same values, so the paint before the script has run is the
+     same page. */
+  --header-top: 14px;
+  --header-side: 650px;
+  /* The bar never gets narrower than a row of pills. Past the point where the
+     side margin would squeeze it below this, the margin gives way instead —
+     which is what keeps the shipped 650 from collapsing the header on a window
+     narrower than 1720px. */
+  --bar-min: 420px;
+  /* The gap between the header's bottom edge and the first row of tiles. The
+     same 14 as the inset below, so what the grid keeps under the header is what
+     it keeps from every other edge of the window. */
+  --page-top: 14px;
+  /* What the sheet keeps from the left, right and bottom of the window. Not one
+     of the tuned settings and deliberately not tied to `--header-side`: moving
+     the floating bar in from the edge is a judgement about the bar, and dragging
+     every photograph in the grid sideways with it is not what that judgement was
+     about. The header's margin moves; the photographs' does not. */
+  --page-inset: 14px;
+  /* How much room the fixed header needs at the top of the sheet. This value is
+     the unwrapped bar, so the first paint is already right; the header replaces
+     it with its measured height, because the chips wrap when several filters are
+     on and a constant would put the first row of photographs under them. */
+  --header-h: 56px;
+
+  /* ----------------------------------------------------------------- glass */
+  /* The parts of the header's material that depend on which way the page is
+     set: the tint it lays over the backdrop, how far it dims or lifts what
+     shows through, and the ink of the controls that sit on it. Everything else
+     — the rim, the refraction, the shadow — is light falling on a pane, and
+     light falls the same way whichever palette is on.
+
+     Both tints are written to `:root` by lib/glass.js and the palette picks one,
+     so nothing in the script has to know that `data-theme` flipped. The literals
+     here are only what shows before it has run. */
+  --glass-tint: var(--glass-tint-dark, rgba(255, 255, 255, 0));
+  --glass-tint-sheet: var(--glass-tint-sheet-dark, rgba(255, 255, 255, 0.22));
+  --glass-bright: 0.88;
+  --glass-bright-sheet: 0.6;
+  --glass-ink: #fff;
+  /* The fill behind a control on glass and the ink written on it. Separate from
+     the tint because they answer a different question: the tint decides how much
+     of the photograph survives, and these two decide whether the words on top of
+     it can still be read when the answer is "most of it". Both are tunable at
+     `/tune`; the literals are what shows before lib/glass.js has run. */
+  --glass-ctl: var(--glass-ctl-dark, rgba(255, 255, 255, 0.08));
+  --glass-text: var(--glass-text-dark, #edeef2);
+  /* The count's own ground and ink. Same material, same optics, its own two
+     colours — it is the only pane up there carrying an answer rather than
+     controls, and `/tune` can move it without moving the bar. It has been moved:
+     the count keeps a tint the bar above has given up entirely. */
+  --glass-tint-tally: var(--glass-tint-tally-dark, rgba(16, 16, 21, 0.32));
+  --glass-text-tally: var(--glass-text-tally-dark, #edeef2);
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* The other half of the toggle. Only what has to change changes: the surfaces,
+   the ink on them, the glass, and the colours that are read as text. The
+   metrics, the type scale, the radii and the ease are the same page set the
+   other way up.
+ *
+ * Three hues are replaced rather than reused, all for the same reason — on
+ * white they are all under 3:1. The accent is a link and a selected pill;
+ * `keep` and `drop` say how many files a rule takes, in words, on the panel. */
+:root[data-theme="light"] {
+  --bg: #fff;
+  --panel: #f5f5f8;
+  --raised: #ffffff;
+  --sunken: #f0f0f4;
+  --line: #d8d8e0;
+  --line-soft: #e7e7ed;
+  --line-strong: #b6b7c1;
+  --tile-empty: #eaeaef;
+  --tile-missing: #dfdfe6;
+  --btn-hover: #eeeef3;
+  --btn-active: #e3e3ea;
+
+  --text: #15151a;
+  --text-2: #52535c;
+  --dim: #797a84;
+  --faint: #a4a5ae;
+
+  --accent: #1f6feb;
+  --accent-ink: #ffffff;
+  --picked: #dde8fb;
+  --keep: #1a7a4c;
+  --drop: #c23c26;
+  --error: #c23c26;
+
+  /* A pale pane over a dark photograph is the hard case here, and what carries
+     it is no longer the tint: at 0.13 the pane is nearly clear, and it is the
+     control fill below — an all but opaque pill — that gives near-black text a
+     ground over a black interior. */
+  --glass-tint: var(--glass-tint-light, rgba(255, 255, 255, 0.13));
+  --glass-tint-sheet: var(--glass-tint-sheet-light, rgba(255, 255, 255, 0.441));
+  --glass-bright: 1.08;
+  --glass-bright-sheet: 1.2;
+  --glass-ink: #14141a;
+  --glass-ctl: var(--glass-ctl-light, rgba(255, 255, 255, 0.81));
+  --glass-text: var(--glass-text-light, #1c1c1c);
+  --glass-tint-tally: var(--glass-tint-tally-light, rgba(255, 255, 255, 0.82));
+  --glass-text-tally: var(--glass-text-tally-light, #1c1c1c);
 }
 
 * {
@@ -28,43 +206,221 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: var(--fs-300) / var(--lh) var(--font);
   overflow-y: scroll; /* never let the scrollbar appearing change the width */
+  -webkit-font-smoothing: antialiased;
 }
 
+/* Digits that do not change width. Every number on this page sits next to
+   another one that is about to replace it. */
+strong,
+.num,
+.n,
+td.num {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- controls */
+
 button {
-  font: inherit;
-  color: inherit;
-  background: #212127;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: var(--ctl);
+  padding: 0 var(--s-3);
+  font: 500 var(--fs-300) / 1 var(--font);
+  color: var(--text);
+  background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 3px 9px;
+  border-radius: var(--r-2);
   cursor: pointer;
+  transition:
+    background 120ms var(--ease),
+    border-color 120ms var(--ease),
+    color 120ms var(--ease);
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: var(--btn-hover);
+  border-color: var(--line-strong);
+}
+
+button:active:not(:disabled) {
+  background: var(--btn-active);
 }
 
 button:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: default;
 }
 
 input,
 select {
-  font: inherit;
-  color: inherit;
-  background: #0c0c0e;
+  min-height: var(--ctl);
+  padding: 0 var(--s-2);
+  font: var(--fs-300) / 1 var(--font);
+  color: var(--text);
+  background: var(--sunken);
   border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 3px 6px;
+  border-radius: var(--r-2);
 }
 
-/* ------------------------------------------------------------------ shell */
+input:focus,
+select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* A path, an extension, a rule predicate: things whose characters matter one by
+   one rather than as a word. */
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: var(--fs-200);
+}
+
+/* ------------------------------------------------------------------- glass */
+
+/* Liquid glass, for rendering above photographs: iyinchao/liquid-glass-studio,
+ * reduced to what a backdrop filter can carry. lib/glass.js holds the settings,
+ * the optics and the reduction; everything here reads the custom properties it
+ * writes, so the whole material is one object and `/tune` edits it live.
+ *
+ * The problem this solves is not "make it translucent". It is that whatever is
+ * behind the header changes completely as the reader scrolls — a white sky, then
+ * a black interior — and the text on it has to stay legible through both without
+ * the material looking painted on.
+ *
+ *   1. the backdrop is blurred, saturated and dimmed. The dimming is what makes
+ *      this work over a bright photograph: blur alone leaves a pale wash that
+ *      white text disappears into. Dimming rather than covering with an opaque
+ *      scrim keeps the colours behind it readable as colours. Set light, the
+ *      same step goes the other way — it lifts, and the tint above it is
+ *      heavier, because that is the direction dark text needs. The saturation,
+ *      `--glass-saturate`, is the one stage here that is neither upstream's nor
+ *      the palette's: it multiplies the chroma of the photograph behind the pane
+ *      and at a high enough value that is what the reader sees instead of the
+ *      glass, so it is tunable at `/tune` and one number covers the bar and the
+ *      panels alike. The dimming is not, because which way it goes is the
+ *      theme's decision and not a property of the material.
+ *   2. it is refracted, in the slot `blurEdge` puts it in — `--glass-pre` before
+ *      the blur or `--glass-post` after it, exactly one of which holds the
+ *      `url()` the `refract` action measured. That is the difference between
+ *      glass and frost. It is absent until measured and stays absent outside
+ *      Chromium; everything else here is the complete material without it.
+ *   3. a tint, `--glass-tint`, which is studio's `tint` control and is the one
+ *      part of this material the theme decides.
+ *   4. the rim, in two rings the shader draws as one per-pixel falloff:
+ *      `::before` is fresnel, a flat wash whose width is `refFresnelRange`, and
+ *      `::after` is glare, a conic gradient with two opposite lobes and two dark
+ *      notches between them. Light catching the edge, which the displacement
+ *      cannot draw because bending is not shining. `--glass-glare` is written
+ *      per pane rather than on `:root`, because what it varies with is the
+ *      surface normal and a wide bar's rim does not turn the way a square's
+ *      does — lib/glass.js's `glare()` has the whole of that.
+ *   5. one shadow — `--glass-shadow-geometry` and `--glass-shadow-alpha`, the
+ *      second of them multiplied by `--glass-lift` — so the pane sits above the
+ *      page. It is two properties rather than one finished `rgba()` because the
+ *      lift has to scale the alpha without re-parsing the offsets: a pane that
+ *      has nothing behind it but the page casts nothing, and Header.svelte is
+ *      where a floating pane finds out whether it is over a photograph.
+ *
+ * `--glass-text` is the ink of everything written on it and `--glass-ctl` the
+ * fill behind each control, both tunable and both per theme. They are the answer
+ * to a clear pane: at a low tint the words need their own ground, and a pill is
+ * where it goes.
+ */
+
+/* How much of its shadow a pane is carrying: 0 with nothing behind it to cast
+   one on, 1 once it is over a photograph. Registered rather than left an
+   ordinary custom property because Header.svelte interpolates it — an
+   unregistered one has no type to interpolate through, so it would step from 0
+   to 1 rather than arrive. It does not inherit and starts at 1, so every pane
+   that says nothing about it — the panels, which hang below the bar with
+   photographs behind them whatever the scroll is — keeps the whole of the shadow
+   `/tune` set. */
+@property --glass-lift {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+.glass {
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--glass-radius, var(--r-4));
+  /* Upstream's `shapeRoundness`, through the logarithm lib/glass.js takes: this
+     property's argument is log₂ of the superellipse exponent, so 1 is the
+     ordinary circular corner and is what an engine without the property draws
+     anyway. Hence the fallback, and hence 1 rather than the exponent's 2. */
+  corner-shape: superellipse(var(--glass-roundness, 1));
+  color: var(--glass-text);
+  background-color: var(--glass-tint);
+  backdrop-filter: var(--glass-pre, ) blur(var(--glass-blur, 2px))
+    saturate(var(--glass-saturate, 130%)) brightness(var(--glass-bright)) var(--glass-post, );
+  box-shadow: var(--glass-shadow-geometry, 0 10px 25px)
+    rgba(0, 0, 0, calc(var(--glass-shadow-alpha, 0.5) * var(--glass-lift)));
+}
+
+/* Two identical masks, one clipped to the content box, subtracted from the
+   other: what survives is the padding, which is the border. A real border
+   cannot hold a gradient, and an outline cannot follow a radius. The blur runs
+   before the mask, so it softens the ring inwards and is clipped outwards —
+   which is the direction a fresnel falloff goes. */
+.glass::before,
+.glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  corner-shape: inherit;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.glass::before {
+  padding: var(--glass-fresnel-w, 0.4px);
+  background: var(--glass-fresnel, rgba(255, 255, 255, 0.11));
+  filter: blur(var(--glass-fresnel-blur, 0.32px));
+}
+
+.glass::after {
+  padding: var(--glass-glare-w, 1.1px);
+  background: var(--glass-glare, none);
+  filter: blur(var(--glass-glare-blur, 1.1px));
+}
+
+/* ------------------------------------------------------------------- shell */
 
 .shell {
   padding-left: var(--side);
+}
+
+/* The grid has no sidebar: the header holds everything it used to. The top pad
+   is what the fixed bar occupies plus whatever gap `/tune` asks for after it, so
+   the first row of photographs starts below the bar and every later row scrolls
+   under it. */
+.shell.bare {
+  padding-left: 0;
+}
+
+.shell.bare .main {
+  padding: calc(var(--header-top) + var(--header-h) + var(--page-top))
+    var(--page-inset) var(--page-inset);
 }
 
 .side {
@@ -74,17 +430,18 @@ select {
   bottom: 0;
   width: var(--side);
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--panel);
   border-right: 1px solid var(--line);
-  padding: 10px;
+  padding: var(--s-4);
   z-index: 10;
 }
 
 .main {
-  padding: 0 4px 4px;
+  padding: var(--s-4) var(--s-5) var(--s-5);
 }
 
-/* ------------------------------------------------------------------ tiles */
+/* ------------------------------------------------------------------- tiles */
 
 #canvas {
   position: relative;
@@ -107,6 +464,7 @@ select {
   top: 0;
   left: 0;
   overflow: hidden;
+  border-radius: 3px;
   background-color: var(--tile-empty);
   background-size: cover;
   background-position: center;
@@ -120,7 +478,7 @@ select {
   object-fit: cover; /* a fallback aspect crops, it never shifts */
   display: block;
   opacity: 0;
-  transition: opacity 120ms linear;
+  transition: opacity 140ms var(--ease);
 }
 
 .tile.loaded img {
@@ -144,11 +502,12 @@ select {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 3px 5px;
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--dim);
-  background: rgba(0, 0, 0, 0.72);
+  padding: var(--s-1) 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-2);
+  background: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.82));
   word-break: break-all;
   max-height: 100%;
   overflow: hidden;
@@ -157,23 +516,39 @@ select {
 
 .tile.loaded .tile-path {
   opacity: 0;
-  transition: opacity 120ms linear;
+  transition: opacity 140ms var(--ease);
 }
 
 .tile:hover .tile-path {
   opacity: 1;
 }
 
-.chip {
+/* The two corner chips. One decides this file and the other decides the
+   directory it is in, so they sit in opposite corners and cannot be reached by
+   the same mis-click. */
+.chip,
+.dirchip {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 5px;
+  min-height: 0;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  border-radius: var(--r-1);
+  color: var(--text-2);
+  background: rgba(0, 0, 0, 0.68);
+  border-color: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(6px);
+}
+
+.chip {
+  right: 5px;
   min-width: 22px;
-  padding: 1px 6px;
-  font-size: 11px;
-  line-height: 1.5;
-  background: rgba(0, 0, 0, 0.75);
-  color: var(--dim);
+}
+
+.dirchip {
+  left: 5px;
 }
 
 .chip[data-state="include"] {
@@ -182,27 +557,9 @@ select {
   border-color: var(--keep);
 }
 
-.chip[data-state="exclude"] {
-  background: var(--drop);
-  color: #fff;
-  border-color: var(--drop);
-}
-
-/* The folder chip, opposite corner from the override chip: one decides this file
-   and the other decides the directory it is in, and they must not be reachable
-   by the same mis-click. Red means the saved rules already exclude that folder,
-   which is also when it is disabled. */
-.dirchip {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  padding: 1px 6px;
-  font-size: 11px;
-  line-height: 1.5;
-  background: rgba(0, 0, 0, 0.75);
-  color: var(--dim);
-}
-
+/* Red means the saved rules already exclude that folder, which is also when it
+   is disabled. */
+.chip[data-state="exclude"],
 .dirchip[data-state="exclude"] {
   background: var(--drop);
   color: #fff;
@@ -212,9 +569,11 @@ select {
 /* ------------------------------------------------------------------ chrome */
 
 h1 {
-  font-size: 13px;
+  font-size: var(--fs-500);
   font-weight: 600;
-  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+  line-height: var(--lh-tight);
+  margin: 0 0 var(--s-2);
 }
 
 .muted {
@@ -222,18 +581,27 @@ h1 {
 }
 
 .blurb {
-  color: var(--dim);
-  margin: 0 0 8px;
-  max-width: 90ch;
+  color: var(--text-2);
+  margin: 0 0 var(--s-2);
+  max-width: 78ch;
 }
 
 .status {
   position: fixed;
-  left: calc(var(--side) + 8px);
-  bottom: 8px;
-  padding: 6px 10px;
+  left: calc(var(--side) + var(--s-3));
+  bottom: var(--s-3);
+  max-width: calc(100vw - var(--side) - var(--s-6));
+  padding: var(--s-2) var(--s-3);
+  font-weight: 500;
   background: var(--error);
   color: #fff;
-  border-radius: 3px;
+  border-radius: var(--r-2);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.7);
   z-index: 20;
+}
+
+/* No sidebar to clear in grid mode. */
+.status.bare {
+  left: var(--page-inset);
+  max-width: calc(100vw - var(--page-inset) * 2 - var(--s-4));
 }

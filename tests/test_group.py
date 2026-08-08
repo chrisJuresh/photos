@@ -157,6 +157,86 @@ def test_only_published_files_become_tiles(conn: sqlite3.Connection) -> None:
     assert pending not in reps
 
 
+def override(conn: sqlite3.Connection, sha256: str, decision: str = "exclude") -> None:
+    """The row `POST /api/triage/override` writes, as it writes it."""
+    conn.execute(
+        "INSERT INTO state.triage_override (sha256, decision, created_at) VALUES (?, ?, 'now')",
+        (sha256, decision),
+    )
+
+
+def test_an_override_excluded_published_file_is_not_a_tile(conn: sqlite3.Connection) -> None:
+    """The post-promotion decision: Phase 4 will never revisit a published row."""
+    kept = add(conn, "kept", paths=("dcim\\IMG_0001.JPG",))
+    condemned = add(conn, "condemned", paths=("dcim\\IMG_0002.JPG",))
+    override(conn, condemned)
+
+    report = rebuild(conn)
+
+    assert tiles(conn) == {kept}
+    assert condemned not in {row[0] for row in conn.execute("SELECT sha256 FROM photo_member")}
+    assert report.kept_files == 1
+    assert report.overridden == 1
+
+
+def test_an_override_of_include_leaves_a_published_file_alone(conn: sqlite3.Connection) -> None:
+    """Only 'exclude' hides a tile. An 'include' is about a file the rules excluded."""
+    kept = add(conn, "kept", paths=("dcim\\IMG_0001.JPG",))
+    override(conn, kept, "include")
+
+    report = rebuild(conn)
+
+    assert tiles(conn) == {kept}
+    assert report.overridden == 0
+
+
+def test_clearing_an_override_puts_the_tile_back(conn: sqlite3.Connection) -> None:
+    """The reversal path: the decision is a row, and the vault object never moved."""
+    kept = add(conn, "kept", paths=("dcim\\IMG_0001.JPG",))
+    condemned = add(conn, "condemned", paths=("dcim\\IMG_0002.JPG",))
+    override(conn, condemned)
+    rebuild(conn)
+
+    conn.execute("DELETE FROM state.triage_override WHERE sha256 = ?", (condemned,))
+    rebuild(conn)
+
+    assert tiles(conn) == {kept, condemned}
+
+
+def test_an_override_hides_one_half_of_a_pair_and_not_the_tile(
+    conn: sqlite3.Connection,
+) -> None:
+    """A pair's other half is still a photograph, and still its own tile."""
+    jpeg, raw = lumix(conn, 96)
+    override(conn, jpeg)
+
+    rebuild(conn)
+
+    assert tiles(conn) == {raw}
+    assert members_of(conn, raw) == {raw}
+
+
+def test_extend_will_not_group_an_override_excluded_file(conn: sqlite3.Connection) -> None:
+    """The incremental path reads the same kept set, or the two would disagree."""
+    kept = add(conn, "kept", paths=("dcim\\IMG_0001.JPG",))
+    rebuild(conn)
+    condemned = add(conn, "later", paths=("dcim\\IMG_0002.JPG",))
+    override(conn, condemned)
+
+    extend(conn, [condemned])
+
+    assert tiles(conn) == {kept}
+
+
+def test_rebuild_refuses_a_kept_set_every_override_excludes(conn: sqlite3.Connection) -> None:
+    """An empty grid because of a decision is a different refusal from an unrun Phase 4."""
+    only = add(conn, "kept", paths=("dcim\\IMG_0001.JPG",))
+    override(conn, only)
+
+    with pytest.raises(GroupRefused, match="triage override"):
+        rebuild(conn)
+
+
 def test_rebuild_refuses_an_empty_kept_set(conn: sqlite3.Connection) -> None:
     """Nothing published means Phase 4 has not run, not that the grid is empty."""
     add(conn, "junk", paths=("node_modules\\a.js",), state="excluded", ext=".js")

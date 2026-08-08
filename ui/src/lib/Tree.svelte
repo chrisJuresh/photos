@@ -191,22 +191,22 @@
 
 <style>
   .tree {
-    font-size: 12px;
+    font-size: var(--fs-200);
   }
 
   .row {
     display: flex;
     align-items: center;
     gap: 3px;
-    border-bottom: 1px solid #202024;
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .row:hover {
-    background: #202027;
+    background: var(--raised);
   }
 
   .row.picked {
-    background: #23303f;
+    background: var(--picked);
   }
 
   /* An excluded folder can still be here when an include rule below it keeps
@@ -224,11 +224,10 @@
      would make each of these 60px wide. */
   .twisty {
     flex: none;
-    width: 15px;
+    width: 16px;
+    min-height: 0;
     padding: 0;
-    font: inherit;
-    font-size: 10px;
-    line-height: 18px;
+    font: 10px/20px var(--font);
     text-align: center;
     color: var(--dim);
     background: none;
@@ -237,28 +236,32 @@
 
   .twisty:hover:not(:disabled) {
     color: var(--text);
+    background: none;
     border: none;
   }
 
   .leaf {
     display: inline-block;
-    color: #3a3a42;
+    color: var(--faint);
   }
 
   .name {
     flex: 1;
     min-width: 0;
-    padding: 1px 2px;
-    font: inherit;
+    min-height: 0;
+    justify-content: flex-start;
+    padding: 2px 3px;
+    font: var(--fs-200) / 1.4 var(--mono);
     text-align: left;
     color: inherit;
     background: none;
     border: none;
-    border-radius: 2px;
+    border-radius: 3px;
     word-break: break-all;
   }
 
   .name:hover:not(.root) {
+    background: none;
     border: none;
     color: var(--accent);
   }
@@ -272,7 +275,7 @@
     text-align: right;
     white-space: nowrap;
     color: var(--dim);
-    font-size: 11px;
+    font-size: var(--fs-100);
   }
 
   .size {
@@ -281,11 +284,13 @@
 
   .drop {
     flex: none;
-    padding: 0 5px;
-    font-size: 11px;
+    min-height: 0;
+    padding: 1px 6px;
+    font-size: var(--fs-100);
     line-height: 1.5;
     color: var(--dim);
     background: none;
+    border-color: transparent;
   }
 
   .drop:hover:not(:disabled) {
@@ -295,7 +300,7 @@
   }
 
   .note {
-    font-size: 11px;
+    font-size: var(--fs-100);
     color: var(--dim);
     padding-bottom: 2px;
   }

@@ -34,7 +34,7 @@ until step 14 and every derivative in it is checksummed in the manifest, so
 rewriting one in place would turn a verified tree into 1,486 checksum mismatches
 -- the signal reserved for real corruption. The repaired files are written to
 the destinations the new build actually reads: the 1536px substrate to
-`deriv_root`, matching `PLAN.md` § "Storage layout", and the 384px grid tile
+`deriv_root`, matching `archive/PLAN.md` § "Storage layout", and the 384px grid tile
 over step 5's copy on `thumb_root`. That is **2,972 files, not 5,944**: the 192
 and 768 tiers exist only inside MediaVault, no part of this build reads them,
 and both regenerate from the repaired 1536 in seconds if they are ever wanted.
@@ -470,7 +470,7 @@ def repair_set(assets: dict[str, Asset]) -> dict[str, Asset]:
 
 
 def deriv_path(deriv_root: Path, sha256: str) -> Path:
-    """`<deriv_root>\\<aa>\\<bb>\\<sha256>.webp`, per PLAN.md's storage layout."""
+    """`<deriv_root>\\<aa>\\<bb>\\<sha256>.webp`, per archive/PLAN.md's storage layout."""
     return deriv_root / sha256[:2] / sha256[2:4] / f"{sha256}.webp"
 
 
@@ -925,7 +925,7 @@ def regression(
     number rather than an omission.
 
     **(3) also has no reference at all for `.arw`, which this run established.**
-    `PLAN.md` exception D says to prefer `asset_extended_metadata` over
+    `archive/PLAN.md` exception D says to prefer `asset_extended_metadata` over
     `assets.width/height`, and that is right for `.rw2` (12,568/12,568 portrait
     at a transposing tag) and `.jpg` (16,880/16,895). For `.arw` it is
     1,483/1,483 *landscape* at a transposing tag -- AEM carries the raw embedded
@@ -1210,7 +1210,7 @@ def _print_regression(result: dict, gap: dict, arw: dict) -> None:
         print(
             "          asset_extended_metadata for these agrees with the raster as it stood "
             "BEFORE\n          this run turned it, so the reading was never orientation-"
-            "corrected and cannot\n          referee the published shape. PLAN.md exception D "
+            "corrected and cannot\n          referee the published shape. archive/PLAN.md exception D "
             "prefers AEM over\n          assets.width/height, which holds for .rw2 and .jpg and "
             "does NOT hold here.\n          Direction for these is assertion 2 above, which "
             "passed."

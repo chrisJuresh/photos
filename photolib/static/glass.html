@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Glass lab · photolib</title>
+    <link rel="stylesheet" href="/glass.css" />
+  </head>
+
+  <!-- `data-v` is the whole switch: every implementation is a block of CSS and a
+       filter builder keyed on this one attribute, so flipping between them is a
+       single attribute write and nothing re-mounts. Set here as well as by the
+       script so the first paint is already a real material. -->
+  <body data-v="current" data-frost="off">
+    <div class="topbar">
+      <!-- The bar carries the same content as the real header — the tally, the
+           two menus, two filter chips and the Triage button — so what you are
+           comparing is the material and not the layout. -->
+      <div class="glass bar" id="bar">
+        <!-- Stacked backdrop layers, for the one variant whose material is a
+             stack rather than a single filter: TonniTools uses all seven. Every
+             other variant leaves them without a backdrop-filter, which renders
+             nothing. -->
+        <div class="layers" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="tally">
+          <strong>24,536</strong><span class="muted">photos</span>
+        </div>
+        <div class="controls">
+          <button class="menu" type="button">Newest first<span class="caret">▾</span></button>
+          <button class="menu on" type="button">Filters<span class="badge">2</span><span class="caret">▾</span></button>
+          <div class="chips">
+            <button class="fchip" type="button"><span class="muted">Camera</span>ILCE-7M3<span class="x">×</span></button>
+            <button class="fchip" type="button"><span class="muted">Year</span>2019<span class="x">×</span></button>
+            <button class="clear" type="button">Clear all</button>
+          </div>
+        </div>
+        <button class="triage" type="button">Triage</button>
+      </div>
+
+      <!-- A second, deeper pane. Glass that works on a 56px bar can fall apart on
+           a tall panel of dense text, which is the other place the material has
+           to hold. `p` toggles it. -->
+      <div class="glass sheet" id="sheet" hidden>
+        <div class="layers" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <section>
+          <h2>Camera</h2>
+          <div class="options">
+            <button class="option on" type="button">ILCE-7M3<span class="n">8,411</span></button>
+            <button class="option" type="button">DMC-GX80<span class="n">6,204</span></button>
+            <button class="option" type="button">iPhone 13 Pro<span class="n">3,977</span></button>
+            <button class="option" type="button">Canon EOS 60D<span class="n">1,502</span></button>
+          </div>
+        </section>
+        <section>
+          <h2>Year</h2>
+          <div class="options">
+            <button class="option" type="button">2023<span class="n">2,910</span></button>
+            <button class="option" type="button">2021<span class="n">3,344</span></button>
+            <button class="option on" type="button">2019<span class="n">4,128</span></button>
+            <button class="option" type="button">2016<span class="n">2,003</span></button>
+          </div>
+        </section>
+        <section>
+          <h2>Orientation</h2>
+          <div class="options">
+            <button class="option" type="button">Landscape<span class="n">18,220</span></button>
+            <button class="option" type="button">Portrait<span class="n">5,918</span></button>
+            <button class="option" type="button">Square<span class="n">398</span></button>
+          </div>
+        </section>
+        <section>
+          <h2>Grade</h2>
+          <div class="options">
+            <button class="option" type="button">Excellent<span class="n">4,006</span></button>
+            <button class="option" type="button">Good<span class="n">11,882</span></button>
+            <button class="option" type="button">Soft<span class="n">2,441</span></button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <main class="grid" id="grid"></main>
+
+    <!-- Deliberately not glass. The control surface has to be the one thing on
+         screen you are not judging. -->
+    <footer class="switcher">
+      <div class="nav">
+        <button id="prev" type="button" title="Previous (←)">←</button>
+        <span class="idx" id="idx">1 / 10</span>
+        <button id="next" type="button" title="Next (→)">→</button>
+        <!-- The frost toggle. Not a per-variant control: one switch, and each
+             variant's own frosted settings are what it turns on. -->
+        <button id="frost" type="button" aria-pressed="false" title="Frosted (F)">
+          Frosted
+        </button>
+      </div>
+      <div class="about">
+        <div class="line">
+          <strong id="name">…</strong>
+          <span class="tag" id="tag"></span>
+          <span class="support" id="support"></span>
+          <a id="source" href="#" target="_blank" rel="noreferrer noopener">source</a>
+        </div>
+        <p class="note" id="note"></p>
+        <!-- What the toggle is doing on this variant, and whose numbers they are —
+             the whole page rests on saying which values came from the source. -->
+        <p class="frost" id="frost-state"></p>
+      </div>
+      <div class="keys">
+        <kbd>←</kbd><kbd>→</kbd> variant · <kbd>1</kbd>–<kbd>9</kbd> jump ·
+        <kbd>P</kbd> panel · <kbd>F</kbd> frosted · <kbd>S</kbd> synthetic backdrop
+      </div>
+    </footer>
+
+    <p class="warn" id="warn" hidden></p>
+
+    <script type="module" src="/glass.js"></script>
+  </body>
+</html>

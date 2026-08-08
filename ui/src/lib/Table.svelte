@@ -114,23 +114,26 @@
   .agg {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--fs-200);
   }
 
   th {
     text-align: left;
-    font-weight: 500;
+    font-size: var(--fs-100);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     color: var(--dim);
     border-bottom: 1px solid var(--line);
-    padding: 3px 4px;
+    padding: var(--s-1) 5px;
     position: sticky;
     top: 0;
     background: var(--panel);
   }
 
   td {
-    padding: 2px 4px;
-    border-bottom: 1px solid #202024;
+    padding: 3px 5px;
+    border-bottom: 1px solid var(--line-soft);
     vertical-align: top;
   }
 
@@ -139,7 +142,10 @@
     white-space: nowrap;
   }
 
+  /* The row's identity is a literal string — a path, an extension, a segment —
+     so it is set in the mono face like every other literal here. */
   .key {
+    font-family: var(--mono);
     word-break: break-all;
   }
 
@@ -155,25 +161,26 @@
     display: block;
     width: 14px;
     height: 14px;
+    min-height: 0;
     padding: 0;
-    margin: 1px 0 0;
-    font: inherit;
-    font-size: 11px;
-    line-height: 12px;
+    margin: 2px 0 0;
+    font: 600 10px/12px var(--font);
     text-align: center;
     color: transparent;
-    background: #0c0c0e;
-    border: 1px solid var(--line);
-    border-radius: 2px;
+    background: var(--sunken);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
   }
 
-  .tick.on {
-    color: #fff;
+  .tick.on,
+  .tick.on:hover {
+    color: var(--accent-ink);
     background: var(--accent);
     border-color: var(--accent);
   }
 
   .tick:hover {
+    background: var(--sunken);
     border-color: var(--accent);
   }
 
@@ -206,11 +213,11 @@
   }
 
   tr.clickable:hover td {
-    background: #202027;
+    background: var(--raised);
   }
 
   tr.picked td {
-    background: #23303f;
+    background: var(--picked);
   }
 
   /* The scope badge is not decoration. Screen 1's leaderboard is costed over
@@ -220,11 +227,13 @@
   .scope {
     display: inline-block;
     margin-left: 6px;
-    padding: 0 4px;
+    padding: 0 5px;
+    font-family: var(--font);
     font-size: 10px;
+    line-height: 15px;
     color: var(--dim);
     border: 1px solid var(--line);
-    border-radius: 2px;
+    border-radius: var(--r-1);
     white-space: nowrap;
   }
 </style>

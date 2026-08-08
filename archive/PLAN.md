@@ -1133,7 +1133,7 @@ blocking task.**
 > | 3 | Phase D complete: all 9 top-level units verified, `repo_hash` 1,374,298, per-file agreement **recomputed from the raw hash columns** at 1,374,289 agree / 9 differ / 0 unhashed. The 251,087 adopted hashes re-asserted against the fresh disk hashes: 251,087 agreed, 0 disagreed |
 > | 4 | Off-site **re-measured today**, not re-read: 24,840 files hashed server-side, 24,839 self-verify against their own filenames, the single exception `config`, which is not content-addressed. 0 files on the server that are not local; 4 local-only, exactly the top-up's 2 packs + 1 index + snapshot `1e80c50e`. All 39 top-up files dumped back out of that snapshot and re-hashed, 39/39 |
 >
-> **Four corrections the run produced, in `BUILD-PROMPTS.md` step 13 in full.** Check 2's third
+> **Four corrections the run produced, in `archive/BUILD-PROMPTS.md` step 13 in full.** Check 2's third
 > clause is a tautology forced by `origin.path`'s `UNIQUE` constraint and passes only on
 > substituted evidence. `subtree.state = 'verified'` means "no hard stop", not "dumped
 > everything" — Phase E's gate is what actually establishes completeness. The full `--read-data`
@@ -2152,7 +2152,7 @@ later.**
    card dump costs.
 
    > **Verdict, 2026-08-02: defer it. The architecture was audited against future import and
-   > nothing needs changing now.** Continue through `BUILD-PROMPTS.md` as written. The audit:
+   > nothing needs changing now.** Continue through `archive/BUILD-PROMPTS.md` as written. The audit:
    >
    > | what later import needs | what already provides it | verdict |
    > |---|---|---|

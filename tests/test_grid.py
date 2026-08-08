@@ -17,7 +17,9 @@ from pathlib import Path
 import pytest
 import synthetic
 
-from photolib import db, migrate
+from photolib import browse, db, migrate
+from photolib import grid as grid_module
+from photolib.browse import SORTS, BadFilter, page_sql, parse_cursor
 from photolib.grid import (
     DEFAULT_KINDS,
     MAX_LIMIT,
@@ -25,11 +27,17 @@ from photolib.grid import (
     GridHandler,
     GridServer,
     Roots,
-    page_sql,
-    parse_cursor,
     parse_kinds,
     parse_limit,
 )
+
+NEWEST = SORTS["newest"]
+
+
+def selection(**params) -> browse.Query:
+    """A `browse.Query` from the query-string form the client would send."""
+    values = {key: value if isinstance(value, list) else [value] for key, value in params.items()}
+    return browse.parse(values, kinds=parse_kinds(values.get("kind", [])))
 
 
 # -- harness -------------------------------------------------------------
@@ -85,7 +93,9 @@ def get_json(port: int, path: str, **kwargs) -> dict:
 def make_grid(tmp_path: Path):
     started: list[GridServer] = []
 
-    def factory(*, count: int = 40, tie: int = 0, thumbnails: int = 0) -> Grid:
+    def factory(
+        *, count: int = 40, tie: int = 0, thumbnails: int = 0, bursts: int = 0
+    ) -> Grid:
         # Step 14 promoted the objects, so the base a relpath joins to and the
         # containment root are both the vault root now. They stay two fields
         # because they are two questions -- see `Roots`.
@@ -101,7 +111,10 @@ def make_grid(tmp_path: Path):
         (roots.reveal_root).mkdir(parents=True, exist_ok=True)
         roots.thumb_root.mkdir(parents=True, exist_ok=True)
         roots.photos_root.mkdir(parents=True, exist_ok=True)
-        rows = synthetic.corpus(roots.catalog_db, roots.state_db, count=count, tie=tie)
+        if bursts:
+            rows = synthetic.bursts(roots.catalog_db, roots.state_db, groups=bursts)
+        else:
+            rows = synthetic.corpus(roots.catalog_db, roots.state_db, count=count, tie=tie)
         synthetic.write_thumbnails(roots.thumb_root, [row[1] for row in rows[:thumbnails]])
 
         spawns: list = []
@@ -179,8 +192,8 @@ def test_bad_limit_is_refused(value):
 
 
 def test_a_half_cursor_is_refused():
-    assert parse_cursor([], []) is None
-    assert parse_cursor(["2019-07-04T11:22:33"], ["5"]) == ("2019-07-04T11:22:33", 5)
+    assert parse_cursor(NEWEST, [], []) is None
+    assert parse_cursor(NEWEST, ["2019-07-04T11:22:33"], ["5"]) == ("2019-07-04T11:22:33", 5)
     for before, before_id in (
         (["2019-07-04T11:22:33"], []),
         ([], ["5"]),
@@ -188,31 +201,128 @@ def test_a_half_cursor_is_refused():
         (["2019-07-04T11:22:33"], ["abc"]),
         (["photo'"], ["5"]),
     ):
-        with pytest.raises(BadRequest):
-            parse_cursor(before, before_id)
+        with pytest.raises(BadFilter):
+            parse_cursor(NEWEST, before, before_id)
 
 
 def test_the_undated_sentinel_is_a_valid_cursor():
     """Undated photos sort on '-', which the cursor has to be able to carry."""
-    assert parse_cursor([synthetic.UNDATED], ["1"]) == ("-", 1)
+    assert parse_cursor(NEWEST, [synthetic.UNDATED], ["1"]) == ("-", 1)
 
 
-def test_the_page_query_uses_the_photo_sort_index(tmp_path):
-    """No index on file.kind, so a planner that drives from `file` scans it all."""
+def test_a_cursor_is_validated_against_the_selected_sort():
+    """A timestamp cursor handed to `largest` would page through nothing.
+
+    SQLite compares text against an integer by storage class, so `('2019-…', 5)
+    < (f.size, p.id)` is not a mistake it reports -- it is a page that silently
+    ends. Which is why the key half is parsed by the sort that will bind it, and
+    comes back typed.
+    """
+    assert parse_cursor(SORTS["largest"], ["4194304"], ["5"]) == (4194304, 5)
+    assert parse_cursor(SORTS["best"], ["0.1965"], ["5"]) == (0.1965, 5)
+    assert parse_cursor(SORTS["worst"], ["-1000000000.0"], ["5"]) == (-1e9, 5)
+    for sort, key in (
+        ("largest", "2019-07-04T11:22:33"),
+        ("largest", "1.5"),
+        ("newest", "1e9"),
+        ("best", "0.1 or 1=1"),
+        ("best", "nan"),
+    ):
+        with pytest.raises(BadFilter):
+            parse_cursor(SORTS[sort], [key], ["5"])
+
+
+@pytest.fixture
+def planner(tmp_path):
+    """A migrated, empty database, for asking the planner what it would do."""
     catalog, state = tmp_path / "catalog.sqlite3", tmp_path / "state.sqlite3"
     migrate.apply(catalog, state)
     conn = db.connect(catalog, state, read_only=True)
-    try:
-        for cursor in (None, ("2019-07-04T11:22:33", 5)):
-            sql, params = page_sql(DEFAULT_KINDS, cursor)
-            plan = " ".join(
-                str(row) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, [*params, 501])
-            )
-            assert "photo_sort" in plan
-            assert "TEMP B-TREE" not in plan
-            assert "SCAN file" not in plan
-    finally:
-        conn.close()
+    yield conn
+    conn.close()
+
+
+def plan_for(conn, query, cursor=None) -> str:
+    sql, params = page_sql(query, cursor)
+    return " ".join(str(row) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, [*params, 501]))
+
+
+def test_the_page_query_uses_the_photo_sort_index(planner):
+    """No index on file.kind, so a planner that drives from `file` scans it all."""
+    for cursor in (None, ("2019-07-04T11:22:33", 5)):
+        plan = plan_for(planner, selection(), cursor)
+        assert "photo_sort" in plan
+        assert "TEMP B-TREE" not in plan
+        assert "SCAN file" not in plan
+
+
+# Every filter, one at a time, in the form the header sends. A value that has to
+# exist in the corpus is not needed here: the planner is being asked about the
+# shape of the query, not about the answer.
+EVERY_FILTER = [
+    {"kind": "video"},
+    {"ext": ".jpg"},
+    {"ext": ["", ".jpg"]},
+    {"camera": "Panasonic DMC-GX80"},
+    {"camera": ""},
+    {"camera": ["", "SONY NEX-5N"]},
+    {"lens": "LUMIX G 42.5/F1.7"},
+    {"year": "2025"},
+    {"year": "2024,2025"},
+    {"month": "7"},
+    {"month": ["7", "8"]},
+    {"orient": "portrait"},
+    {"orient": "landscape,portrait,square,unknown"},
+    {"res": "huge"},
+    {"size": "5to20mb"},
+    {"grade": "best"},
+    {"grade": "unscored"},
+    {"gps": "yes"},
+    {"gps": "no"},
+    {"pair": "pair"},
+    {"pair": "single"},
+    {"dup": "dup"},
+    {"dup": "unique"},
+    {"dated": "exif"},
+    {"root": "lumix f 7-15-26 sd"},
+    {"root": ["a", "b"]},
+]
+
+
+@pytest.mark.parametrize("params", EVERY_FILTER, ids=lambda p: "+".join(sorted(p)))
+def test_every_filter_keeps_the_default_sort_on_the_index(planner, params):
+    """The property that makes a filtered page 9-15 ms instead of 230.
+
+    `photo_sort` supplies the order, so the query stops as soon as it has filled
+    a page rather than sorting the library and taking the first 500 -- which is
+    also why no filter here needs an index of its own.
+    """
+    plan = plan_for(planner, selection(**params))
+    assert "photo_sort" in plan, plan
+    assert "TEMP B-TREE" not in plan, plan
+    assert "SCAN file" not in plan, plan
+
+
+@pytest.mark.parametrize("name", sorted(SORTS))
+def test_every_sort_pages_without_scanning_file(planner, name):
+    """An alternate ordering sorts `photo` -- 230-290 ms, the price of the sort --
+    but it must still reach `file` by its primary key and never scan it."""
+    query = selection(sort=name)
+    for cursor in (None, parse_cursor(SORTS[name], ["0"] if SORTS[name].cursor != "time" else ["-"], ["5"])):
+        plan = plan_for(planner, query, cursor)
+        assert "SCAN file" not in plan, plan
+        if SORTS[name].indexed:
+            assert "photo_sort" in plan and "TEMP B-TREE" not in plan, plan
+
+
+def test_a_filter_set_is_one_key_however_it_is_spelled():
+    """The `total` memo is keyed on the parsed selection, so two spellings of one
+    selection are one count and not two."""
+    assert selection(year="2024,2025") == selection(year=["2025", "2024"])
+    assert selection(kind="image") == selection(kind="image,raw_image")
+    assert selection(camera=["a", "b", "a"]) == selection(camera=["b", "a"])
+    assert selection(year="2024") != selection(year="2025")
+    assert selection(sort="largest") != selection(sort="smallest")
 
 
 # -- paging --------------------------------------------------------------
@@ -338,6 +448,440 @@ def test_kind_selects_over_http(grid):
     assert comma == stills
 
 
+def test_the_facets_route_serves_the_whole_vocabulary(grid):
+    body = get_json(grid.port, "/api/facets")
+    assert body["total"] == 40
+    assert body["kinds"] == {"image": 35, "raw_image": 5}  # every ninth is raw
+    names = [dimension["name"] for dimension in body["dimensions"]]
+    assert names[:3] == ["kind", "year", "month"]
+    assert set(names) >= {"camera", "ext", "orient", "size", "grade", "gps", "pair", "dup"}
+    for dimension in body["dimensions"]:
+        assert set(dimension) == {"name", "title", "hint", "options"}
+        assert dimension["title"]
+        for option in dimension["options"]:
+            assert set(option) == {"value", "label", "count"}
+    # The sorts come with the vocabulary, so the client hardcodes no ordering.
+    assert [entry["value"] for entry in body["sorts"]] == list(SORTS)
+    assert all(entry["label"] for entry in body["sorts"])
+
+
+def test_the_facets_route_is_built_once_for_the_life_of_the_server(grid):
+    """~700 ms over the real corpus, and it cannot change: every connection here
+    is read-only. `main` warms it before the browser opens."""
+    first = grid.server.facets()
+    get_json(grid.port, "/api/facets")
+    assert grid.server.facets() is first
+    assert grid.server.kind_totals() is first["kinds"]
+
+
+def test_filters_select_over_http(grid):
+    """The synthetic corpus is every 9th photo raw and five shapes in rotation, so
+    an orientation and an extension are both real predicates over it."""
+    everything = get_json(grid.port, "/api/photos?kind=image,raw_image,video&limit=1000")
+    portrait = get_json(grid.port, "/api/photos?kind=image,raw_image,video&orient=portrait&limit=1000")
+    square = get_json(grid.port, "/api/photos?kind=image,raw_image,video&orient=square&limit=1000")
+    assert 0 < len(portrait["photos"]) < len(everything["photos"])
+    assert all(photo["h"] > photo["w"] for photo in portrait["photos"])
+    assert all(photo["w"] == photo["h"] for photo in square["photos"])
+    # Two values of one dimension widen rather than narrow.
+    both = get_json(
+        grid.port, "/api/photos?kind=image,raw_image,video&orient=portrait,square&limit=1000"
+    )
+    assert len(both["photos"]) == len(portrait["photos"]) + len(square["photos"])
+
+
+def test_the_total_follows_the_whole_filter_set(grid):
+    """Not just `kind`: a scrollbar sized for the unfiltered library under a
+    filter that removes four fifths of it is a bar that lies."""
+    for query in ("", "&orient=portrait", "&orient=square", "&ext=.jpg", "&size=under1mb"):
+        body = get_json(grid.port, f"/api/photos?kind=image,raw_image,video&limit=1000{query}")
+        assert body["total"] == len(body["photos"]), query
+
+
+def test_a_total_is_counted_once_per_filter_set(grid):
+    """Memoised on the parsed selection, so paging does not recount, and two
+    spellings of one selection do not count twice."""
+    counted = []
+    original = GridServer.total
+
+    def spy(server, query):
+        counted.append(query)
+        return original(server, query)
+
+    GridServer.total = spy
+    try:
+        for url in (
+            "/api/photos?limit=5&orient=portrait",
+            "/api/photos?limit=5&orient=portrait",  # same selection, again
+            "/api/photos?limit=5&orient=portrait&kind=image,raw_image",  # the default kind
+            "/api/photos?limit=5&orient=square",  # a different one
+        ):
+            get_json(grid.port, url)
+    finally:
+        GridServer.total = original
+    assert len(counted) == 4  # asked four times...
+    assert len(set(counted)) == 2  # ...for two distinct selections
+    assert len(grid.server._totals) == 2  # ...and counted twice
+
+
+def test_sorting_over_http_reorders_and_still_pages(grid):
+    newest = get_json(grid.port, "/api/photos?limit=1000")
+    largest = get_json(grid.port, "/api/photos?limit=1000&sort=largest")
+    assert largest["sort"] == "largest"
+    assert newest["sort"] == "newest"
+    assert {photo["id"] for photo in largest["photos"]} == {
+        photo["id"] for photo in newest["photos"]
+    }
+    # Every synthetic file is one byte, so `largest` is a total tie broken by id.
+    assert [photo["id"] for photo in largest["photos"]] == sorted(
+        (photo["id"] for photo in largest["photos"]), reverse=True
+    )
+
+
+def test_a_cursor_is_validated_by_the_sort_that_will_bind_it(grid):
+    """The client sends the cursor back verbatim, so it is parsed against the sort
+    named in the same request and not against the default.
+
+    Only one direction of the mismatch is structural: a timestamp is not an
+    integer, so `sort=largest` refuses it. The reverse -- a numeric key reaching
+    the timestamp ordering -- is a size budget and not a type check, and the
+    client cannot produce it anyway: changing the sort resets the sheet, which
+    drops the cursor with it.
+    """
+    body = get_json(grid.port, "/api/photos?limit=5")
+    cursor = f"before={body['next']['before']}&before_id={body['next']['before_id']}"
+    status, _, payload = http_request(grid.port, "GET", f"/api/photos?limit=5&sort=largest&{cursor}")
+    assert status == 400
+    assert json.loads(payload) == {"error": "cursor"}
+    assert get_json(grid.port, f"/api/photos?limit=5&{cursor}")["photos"]
+
+    # ...and a cursor is carried by every sort that has one to carry.
+    for name in SORTS:
+        first = get_json(grid.port, f"/api/photos?limit=5&sort={name}")
+        following = first["next"]
+        second = get_json(
+            grid.port,
+            f"/api/photos?limit=5&sort={name}"
+            f"&before={following['before']}&before_id={following['before_id']}",
+        )
+        assert second["photos"], name
+        assert not ({photo["id"] for photo in second["photos"]}
+                    & {photo["id"] for photo in first["photos"]}), name
+
+
+# -- stacking ------------------------------------------------------------
+
+
+@pytest.fixture
+def stacked(make_grid) -> Grid:
+    """Twelve bursts: 74 tiles that collapse to 38 stacks at any window."""
+    return make_grid(bursts=12)
+
+
+def expected_stacks(rows) -> dict[str, list[int]]:
+    """The grouping the corpus was built to produce, from the plan and not the
+    endpoint. See `synthetic.bursts`."""
+    stacks: dict[str, list[int]] = {}
+    for row in rows:
+        stacks.setdefault(row[5], []).append(row[0])
+    return stacks
+
+
+def walk_stacked(port: int, query: str, limit: int = 500):
+    """Page a stacked selection to exhaustion. Returns [(cover id, size)]."""
+    covers: list[tuple[int, int]] = []
+    cursor = None
+    for _ in range(200):
+        url = f"/api/photos?limit={limit}&{query}"
+        if cursor:
+            url += f"&before={cursor['before']}&before_id={cursor['before_id']}"
+        body = get_json(port, url)
+        covers += [(photo["id"], photo["n"]) for photo in body["photos"]]
+        cursor = body["next"]
+        if cursor is None:
+            return covers
+    raise AssertionError("paging did not terminate")
+
+
+def test_a_stacked_page_returns_one_tile_per_stack(stacked):
+    """The gate: fewer tiles out than in, each standing for the frames it
+    collapsed, and every frame accounted for exactly once."""
+    groups = expected_stacks(stacked.rows)
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4")
+
+    assert body["stack"] == 4
+    assert body["total"] == len(stacked.rows) == 74  # tiles, which stacking cannot change
+    assert len(body["photos"]) == len(groups) == 38
+    assert sum(photo["n"] for photo in body["photos"]) == len(stacked.rows)
+    assert all(
+        set(photo) == {"id", "s", "w", "h", "th", "n"} for photo in body["photos"]
+    )
+
+
+def test_every_returned_photo_carries_its_own_stacks_size(stacked):
+    groups = expected_stacks(stacked.rows)
+    by_cover = {members[0]: members for members in groups.values()}  # newest first
+    covers = walk_stacked(stacked.port, "stack=4")
+
+    # A cover stands for its whole set, and a tile in no set is a stack of one.
+    assert {photo_id: size for photo_id, size in covers} == {
+        max(members): len(members) for members in by_cover.values()
+    }
+    assert sorted(size for _, size in covers) == sorted(
+        len(members) for members in groups.values()
+    )
+
+
+def test_paging_a_stacked_selection_returns_each_stack_exactly_once(stacked):
+    """Every page size, including ones that land a boundary inside a burst.
+
+    A stack straddling a boundary is what breaks a naive collapse: half of it
+    comes back on one page and the other half becomes its own cover on the next.
+    Both halves would show up here, as a cover count that grew and sizes that
+    did not add up.
+    """
+    whole = walk_stacked(stacked.port, "stack=4", limit=1000)
+    assert len(whole) == 38
+    for limit in (1, 2, 3, 5, 7, 13, 37):
+        paged = walk_stacked(stacked.port, "stack=4", limit=limit)
+        assert paged == whole, limit
+        assert len({photo_id for photo_id, _ in paged}) == len(paged), limit
+        assert sum(size for _, size in paged) == len(stacked.rows), limit
+
+
+def test_a_stack_straddling_a_page_boundary_comes_back_whole(stacked):
+    """Proved rather than assumed: the first page of a three-cover request ends
+    inside the first burst, so the boundary really does fall in a run."""
+    first = get_json(stacked.port, "/api/photos?limit=3&stack=4")
+    assert first["next"] is not None
+    # Three covers asked for, and the page ran on to the end of the run it was
+    # in rather than splitting it -- so the sizes on this page are complete.
+    assert [photo["n"] for photo in first["photos"]] == [1, 3, 2]
+    second = get_json(
+        stacked.port,
+        f"/api/photos?limit=3&stack=4&before={first['next']['before']}"
+        f"&before_id={first['next']['before_id']}",
+    )
+    assert not ({photo["id"] for photo in first["photos"]}
+                & {photo["id"] for photo in second["photos"]})
+
+
+def test_a_page_of_tiles_that_cannot_stack_still_ends(stacked):
+    """`dated=mtime` selects only tiles the window excludes, so there is never an
+    open run to close. A page that looked for its cut among stackable tiles
+    alone would never find one and would serve the whole selection at once."""
+    guessed = [row[0] for row in stacked.rows if row[4] == "mtime"]
+    assert len(guessed) == 2
+
+    body = get_json(stacked.port, "/api/photos?limit=1&stack=4&dated=mtime")
+    assert len(body["photos"]) == 1
+    assert body["next"] is not None
+    assert dict(walk_stacked(stacked.port, "stack=4&dated=mtime", limit=1)) == {
+        photo_id: 1 for photo_id in guessed
+    }
+
+
+@pytest.mark.parametrize("limit", [1, 2, 5])
+def test_a_page_carries_close_to_the_covers_it_asked_for(stacked, limit):
+    """A page runs past `limit` only to the end of the run it is in, so the
+    overshoot is the size of one burst rather than the size of the library."""
+    body = get_json(stacked.port, f"/api/photos?limit={limit}&stack=10")
+    assert limit <= len(body["photos"]) <= limit + 3
+    assert body["limit"] == limit
+
+
+@pytest.mark.parametrize("name", sorted(SORTS))
+def test_every_sort_stacks_the_same_frames(stacked, name):
+    """Grouping is by capture time and camera, so the ordering cannot change it.
+    Which member is the cover does change: it is the first one the page sees."""
+    groups = expected_stacks(stacked.rows)
+    covers = walk_stacked(stacked.port, f"stack=4&sort={name}", limit=7)
+    assert len(covers) == len(groups)
+    assert len({photo_id for photo_id, _ in covers}) == len(covers)
+    assert sum(size for _, size in covers) == len(stacked.rows)
+    # Each cover is a member of the set whose size it reports.
+    members = {photo_id: stack for stack, ids in groups.items() for photo_id in ids}
+    assert {members[photo_id] for photo_id, _ in covers} == set(groups)
+
+
+def test_an_alternate_sort_names_a_different_cover_and_orders_by_the_sort(stacked):
+    """The eight non-time sorts scatter a stack's members through the ordering,
+    which is why they cannot collapse runs as they page.
+
+    The cover is still the first member the page sees, which on `largest` is the
+    stack's biggest file rather than its newest frame -- so the covers are a
+    different set of tiles from the ones the default sort names, and they come
+    back in file-size order.
+    """
+    groups = expected_stacks(stacked.rows)
+    holds = {photo_id: stack for stack, ids in groups.items() for photo_id in ids}
+    size = {row[0]: row[6] for row in stacked.rows}
+
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4&sort=largest")
+    covers = [photo["id"] for photo in body["photos"]]
+    assert len(covers) == 38
+    assert covers == sorted(covers, key=lambda photo_id: (size[photo_id], photo_id),
+                            reverse=True)
+    for photo_id in covers:
+        assert size[photo_id] == max(size[member] for member in groups[holds[photo_id]])
+
+    # ...and that is a different set of tiles from what `newest` draws.
+    by_time = [photo["id"] for photo in get_json(
+        stacked.port, "/api/photos?limit=1000&stack=4")["photos"]]
+    assert set(covers) != set(by_time)
+
+
+def test_a_wider_window_merges_and_a_narrower_one_does_not_split_a_bracket(stacked):
+    """Every window the slider offers holds this corpus's plan: the bursts are an
+    hour apart and their frames a second apart, so 1 and 10 agree."""
+    for window in (1, 4, 10):
+        body = get_json(stacked.port, f"/api/photos?limit=1000&stack={window}")
+        assert len(body["photos"]) == 38, window
+        assert body["stack"] == window
+
+
+def test_a_guessed_date_is_never_stacked(stacked):
+    """Two of the twelve bursts carry an mtime-dated frame from the same body,
+    chronologically inside the bracket. Each is its own stack of one, and the
+    bracket around it is still three."""
+    guessed = [row[0] for row in stacked.rows if row[4] == "mtime"]
+    brackets = [row[5] for row in stacked.rows if row[5].endswith("bracket")]
+    assert len(guessed) == 2 and len(set(brackets)) == 12
+
+    covers = dict(walk_stacked(stacked.port, "stack=10"))
+    for photo_id in guessed:
+        assert covers[photo_id] == 1
+    assert sorted(covers.values()) == [1] * 14 + [2] * 12 + [3] * 12
+
+
+def test_a_filter_applies_before_stacking(stacked):
+    """A stack forms over whatever the selection holds. Portrait keeps one frame
+    in three, so the bracket it splits is three stacks of one where it was one
+    of three -- which is correct, not a defect."""
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4&orient=portrait")
+    assert 0 < len(body["photos"]) < 38
+    assert body["total"] == sum(photo["n"] for photo in body["photos"])
+
+
+def test_stacking_off_returns_what_it_returned_before_stacking_existed(stacked):
+    body = get_json(stacked.port, "/api/photos?limit=1000")
+    assert set(body) == {"photos", "next", "kind", "sort", "limit", "total"}
+    assert set(body["photos"][0]) == {"id", "s", "w", "h", "th"}
+    assert len(body["photos"]) == body["total"] == len(stacked.rows)
+
+
+@pytest.mark.parametrize("value", ["0", "11", "-1", "4.5", "four", "", "%3Cscript%3E"])
+def test_a_malformed_window_is_refused_by_name(stacked, value):
+    status, _, body = http_request(stacked.port, "GET", f"/api/photos?stack={value}")
+    assert status == 400
+    assert json.loads(body) == {"error": "stack"}
+    assert b"script" not in body
+
+
+def test_the_default_sort_still_pages_on_the_index_with_stacking_on(planner):
+    """The property that keeps a stacked page a page rather than a grouping pass.
+
+    `photo_sort` supplies the order, so the read stops as soon as the covers are
+    collected. Stacking adds two columns to the row and nothing to the WHERE, so
+    the plan must be the plan it was without it.
+    """
+    for params in ({"stack": "4"}, {"stack": "4", "orient": "portrait"},
+                   {"stack": "10", "sort": "oldest"}):
+        for cursor in (None, ("2019-07-04T11:22:33", 5)):
+            plan = plan_for(planner, selection(**params), cursor)
+            assert "photo_sort" in plan, plan
+            assert "TEMP B-TREE" not in plan, plan
+            assert "SCAN file" not in plan, plan
+
+
+def test_a_default_sort_never_runs_the_grouping_pass(stacked):
+    """The property the whole streaming design exists for. A default sort
+    collapses its own runs as it pages, so it must not compute -- or bank -- an
+    assignment at any window, on the first page or any other."""
+    built = []
+    original = grid_module.build_assignment
+
+    def spy(conn, query):
+        built.append(query)
+        return original(conn, query)
+
+    grid_module.build_assignment = spy
+    try:
+        for url in (
+            "/api/photos?limit=5&stack=4",
+            "/api/photos?limit=5&stack=4&sort=oldest",
+            "/api/photos?limit=5&stack=10",
+        ):
+            body = get_json(stacked.port, url)
+            assert body["photos"]
+    finally:
+        grid_module.build_assignment = original
+    assert built == []
+    assert stacked.server._assignments == {}
+
+
+def test_an_assignment_is_computed_once_per_selection(stacked):
+    """~380 ms over the real corpus and the same answer for every page of one
+    selection, so paging must not recompute it -- and two windows are two
+    selections, because the window is what it groups by."""
+    built = []
+    original = grid_module.build_assignment
+
+    def spy(conn, query):
+        built.append(query)
+        return original(conn, query)
+
+    grid_module.build_assignment = spy
+    try:
+        for url in (
+            "/api/photos?limit=5&stack=4&sort=largest",
+            "/api/photos?limit=5&stack=4&sort=largest",  # the same one, again
+            "/api/photos?limit=5&stack=4&sort=best",  # a different sort
+            "/api/photos?limit=5&stack=6&sort=largest",  # a different window
+        ):
+            get_json(stacked.port, url)
+    finally:
+        grid_module.build_assignment = original
+    assert len(built) == 3
+    assert len(stacked.server._assignments) == 3
+    # ...and the window is not part of what a tile count is keyed on, because no
+    # window changes how many tiles there are. Two sorts here, so two counts --
+    # not one per window.
+    assert len(stacked.server._totals) == 2
+    assert all(key.stack is None for key in stacked.server._totals)
+
+
+def test_an_alternate_sort_banks_its_assignment_under_the_count_memos_cap(stacked):
+    """Same cap, same eviction: the keys come from a query string, so the number
+    of distinct ones a session can bank is bounded and the oldest goes first."""
+    from photolib.grid import MAX_TOTALS
+
+    for window in range(browse.MIN_WINDOW, browse.MAX_WINDOW + 1):
+        get_json(stacked.port, f"/api/photos?limit=1&stack={window}&sort=largest")
+    assert len(stacked.server._assignments) == 10 <= MAX_TOTALS
+    assert all(entry for entry in stacked.server._assignments.values())
+    assert all(key.sort == "largest" for key in stacked.server._assignments)
+
+
+@pytest.mark.parametrize(
+    "query, field",
+    [
+        ("orient=sideways", "orient"),
+        ("sort=cheapest", "sort"),
+        ("year=202x", "year"),
+        ("month=13", "month"),
+        ("grade=%3Cscript%3E", "grade"),
+        ("size=1MB", "size"),
+        ("kind=nope", "kind"),
+    ],
+)
+def test_a_rejected_filter_names_the_field_and_echoes_nothing(grid, query, field):
+    status, _, body = http_request(grid.port, "GET", f"/api/photos?{query}")
+    assert status == 400
+    assert json.loads(body) == {"error": field}
+    assert b"script" not in body
+
+
 def test_a_rejected_kind_is_not_echoed_back(grid):
     status, _, body = http_request(grid.port, "GET", "/api/photos?kind=image,%3Cscript%3E")
     assert status == 400
@@ -449,6 +993,20 @@ def test_index_is_served_without_inline_script(grid):
     assert b"<script>" not in body
 
 
+def test_tune_serves_the_same_document_as_the_grid(grid):
+    """`/tune` is the grid plus the glass controls, and it is the same client.
+
+    The app decides which by reading `location.pathname`, so the two paths must
+    return byte-identical HTML — a `/tune` that 404s or that serves something
+    else is a panel nobody can reach, and no JavaScript test runs here.
+    """
+    _, _, index = http_request(grid.port, "GET", "/")
+    status, headers, body = http_request(grid.port, "GET", "/tune")
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert body == index
+
+
 def test_the_built_bundle_is_committed_and_current(grid):
     """The two build outputs are checked in, so a clean checkout runs without npm.
 
@@ -464,7 +1022,7 @@ def test_the_built_bundle_is_committed_and_current(grid):
 
 
 @pytest.mark.parametrize(
-    "path", ["/", "/bundle.js", "/bundle.css", "/api/photos", "/t/x.webp", "/nope"]
+    "path", ["/", "/tune", "/bundle.js", "/bundle.css", "/api/photos", "/t/x.webp", "/nope"]
 )
 def test_security_headers_are_on_every_response(grid, path):
     _, headers, _ = http_request(grid.port, "GET", path)

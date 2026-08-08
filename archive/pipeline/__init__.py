@@ -2,7 +2,7 @@
 
 Every module here ran to completion between 2026-08-01 and 2026-08-07 and is not
 needed to serve the grid. They stay importable and tested rather than frozen,
-because the deferred work in `PLAN.md` "Open decisions" 5 -- a procedure for
+because the deferred work in `archive/PLAN.md` "Open decisions" 5 -- a procedure for
 adding photos after the build -- will reuse `decode`, `features` and `phase2b`.
 
 Shared infrastructure stayed behind in `photolib`: `config`, `db`, `migrate`,

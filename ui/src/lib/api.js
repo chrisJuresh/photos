@@ -5,11 +5,22 @@
 // real predicate covering 641,764 paths in this corpus — the files with no
 // extension — and treating "" as absent would make screen 2's largest row the
 // one row you cannot click.
+//
+// An array becomes one repeated parameter per value, which is the form
+// `photolib.browse` reads for a filter: a camera name or a source root can
+// contain anything, so joining them on a comma would make the separator part of
+// a value. An empty array contributes nothing, so an untouched filter is absent
+// from the URL rather than present and empty.
 /** @param {Record<string, any>} params */
 function query(params) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null) search.set(key, String(value));
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) search.append(key, String(item));
+    } else {
+      search.set(key, String(value));
+    }
   }
   const text = search.toString();
   return text ? "?" + text : "";
@@ -54,6 +65,11 @@ export function candidateParams(rule) {
 export const api = {
   // --- reads
   photos: (params) => get("/api/photos", params),
+
+  // Every dimension the header offers, its values, and how many photographs each
+  // holds. One request per session: the server builds it once, because it is
+  // ~700 ms and it cannot change while a read-only process runs.
+  facets: () => get("/api/facets"),
 
   // Paths and bytes, 216-297 ms over the full corpus. The only call on the
   // keystroke path.
@@ -118,7 +134,7 @@ export function debounce(fn, ms) {
 
 const UNITS = ["B", "KB", "MB", "GB", "TB"];
 
-/** Decimal GB, as PLAN.md's tables use. */
+/** Decimal GB, as archive/PLAN.md's tables use. */
 export function bytes(value) {
   let size = Number(value) || 0;
   let unit = 0;

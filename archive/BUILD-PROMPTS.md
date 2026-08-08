@@ -22,14 +22,14 @@ verdicts.
 >   **12h50m** anyway — the time went into hashing and per-file verification, not `--force`.
 >   Step 7's top-up gave the repo its second read, but **`--force` is a scrub, not a tax on
 >   every pass**: it defeats change detection, which only applies to files already in a parent
->   snapshot. **Adding new photos never needs it.** See PLAN.md "Phase 0" for the table.
+>   snapshot. **Adding new photos never needs it.** See archive/PLAN.md "Phase 0" for the table.
 >
 > Numbering is otherwise unchanged, so every "step N" reference elsewhere still resolves — but
-> **only within this file.** `PLAN.md`'s build-order table numbers independently and is offset:
+> **only within this file.** `archive/PLAN.md`'s build-order table numbers independently and is offset:
 > its row 11 is this file's step 13b, row 12 is step 14, and **row 13 is step 16**, the
 > post-promotion sweep. This file's step 13 — the deletion gate — is not a row in that table at
-> all; it is `PLAN.md`'s "Gate" section. On 2026-08-04 a question about "step 13" was answered
-> against `PLAN.md` row 13, and the answer was recorded there, leaving this file's step 13
+> all; it is `archive/PLAN.md`'s "Gate" section. On 2026-08-04 a question about "step 13" was answered
+> against `archive/PLAN.md` row 13, and the answer was recorded there, leaving this file's step 13
 > untouched. Say which document you mean.
 
 ---
@@ -70,7 +70,7 @@ check costs only tokens.
 
   **Re-examined 2026-08-05 and kept, with one constraint the step did not originally carry.**
   After the 2026-08-04 corrections, three of its four checks are *re-reads of numbers recorded by
-  steps 7, 9 and 12* rather than fresh work. A fan-out whose refuters read `PLAN.md` and this file
+  steps 7, 9 and 12* rather than fresh work. A fan-out whose refuters read `archive/PLAN.md` and this file
   will agree with the summary and report convergence — the same false-convergence failure that
   took step 4 off this list, and the worst available disguise for "a check that looks clean". So
   the fan-out is bound to primary evidence: `E:\photolib\phase0.sqlite3`'s per-subtree Phase D
@@ -99,19 +99,19 @@ irreversible-adjacent, but it is neither a search nor a design space: the shape 
 promotion record, and `photolib/phase2a.py:317-368` already runs one reader, resumes off a
 persisted state column, and exits hard on a mismatch. Its ~2 h is disk bandwidth, and `G:`
 exclusivity serialises anything wanting real data, so a fleet would queue behind one reader. Its
-genuine difficulty is a single scoping decision, written out in `PLAN.md` "Phase 4" — one focused
+genuine difficulty is a single scoping decision, written out in `archive/PLAN.md` "Phase 4" — one focused
 reviewer against that choice, not a fan-out. **Put the review effort on step 14, the thing being
-checked, rather than on the check**: Phase 4 is where `PLAN.md` records two runs that permanently
+checked, rather than on the check**: Phase 4 is where `archive/PLAN.md` records two runs that permanently
 destroyed data, and step 14 already runs in plan mode first, which is where that effort belongs.
 
 Never run steps **3, 5, 7, 9, 12, 14 or 16** under ultracode. All but 16 are a single process
-holding one lock file by invariant 6 — a fan-out of writers is precisely the job ledger `PLAN.md`
+holding one lock file by invariant 6 — a fan-out of writers is precisely the job ledger `archive/PLAN.md`
 refuses to build — and every one of them is disk-bound on one USB HDD head, so parallel agents buy
 no throughput at all. Step 16 writes nothing but is exclusive on `G:` and bandwidth-bound for the
 same reason; see the paragraph above for why its difficulty is not the kind a fan-out addresses.
 Where a fan-out is used at all, it reads; the main session stays the only writer.
 
-Steps **0, 2, 6, 8, 10, 11, 15 and 16** are fully specified by `PLAN.md`. Extra agents on those
+Steps **0, 2, 6, 8, 10, 11, 15 and 16** are fully specified by `archive/PLAN.md`. Extra agents on those
 mostly generate proposals to add things the plan deliberately excludes. Step 6's `/api/reveal` is
 better served by a targeted security review after it builds than by a fan-out while it does.
 
@@ -152,7 +152,7 @@ better served by a targeted security review after it builds than by a fan-out wh
   exceeds the cache, or do not quote the number.
 
 If a session proposes a job ledger, a worker runtime, a materialized projection table, an ORM,
-or a plugin seam — that is v1 reappearing. Say no; `PLAN.md` § "Explicitly not building" lists
+or a plugin seam — that is v1 reappearing. Say no; `archive/PLAN.md` § "Explicitly not building" lists
 them.
 
 ---
@@ -193,9 +193,9 @@ process listings.
 
 ---
 
-## Amendments to PLAN.md
+## Amendments to archive/PLAN.md
 
-Six corrections found while sequencing this. `PLAN.md` has been updated to match; they are
+Six corrections found while sequencing this. `archive/PLAN.md` has been updated to match; they are
 listed here so you know why the prompts read the way they do.
 
 1. ~~**`origin.content_key` → `restic_key` + `origin.sha256`.**~~ **SUPERSEDED by step 1's
@@ -229,7 +229,7 @@ listed here so you know why the prompts read the way they do.
 **Effort:** `low` · ~10 min
 
 ```text
-Read PLAN.md. Do not read anything in docs/ or v1/ for this step.
+Read archive/PLAN.md. Do not read anything in docs/ or v1/ for this step.
 
 Set up the root of this repository to build in, and nothing more.
 
@@ -253,7 +253,7 @@ Set up the root of this repository to build in, and nothing more.
    staging_root, deriv_root, meta_root, thumb_root, catalog_db, state_db, reveal_root.
    reveal_root starts as the MediaVault objects directory; step 14 changes it.
    Add one non-path entry, restic_password_command, whose value is the string given in
-   BUILD-PROMPTS.md "Setup". Step 7 reads it from here rather than hardcoding it.
+   archive/BUILD-PROMPTS.md "Setup". Step 7 reads it from here rather than hardcoding it.
 
 4. Print the version of python, node, exiftool, ffmpeg, ffprobe and restic on PATH and
    record them in TOOLING.md with today's date.
@@ -275,7 +275,7 @@ code has no drive letter outside it.
 
 # Step 1 — Three premise spikes — ✅ **DONE 2026-08-01**
 
-**Do not re-run this.** The verdicts are folded into `PLAN.md`; the prompt is kept for the
+**Do not re-run this.** The verdicts are folded into `archive/PLAN.md`; the prompt is kept for the
 record. Summary of what they found, because steps 7, 9 and 14 all read them:
 
 - **SPIKE A — restic blob lists: REFUTED, fatally.** The node shape is exactly as assumed and
@@ -311,13 +311,13 @@ store is **22–35 MB/s**, so every hour estimate in the original build was 3–
 ```text
 Run this step under ultracode.
 
-Read PLAN.md sections "Phase 0", "Phase 2a — Adopt MediaVault and verify", and "Phase 4 —
+Read archive/PLAN.md sections "Phase 0", "Phase 2a — Adopt MediaVault and verify", and "Phase 4 —
 Promote". Do not read docs/. Do not run any v1/ code.
 
 Three independent premise checks. Run them CONCURRENTLY — they touch nothing in common. Write
 throwaway scripts in the scratchpad, not the repo. Everything here is read-only against
 G:\MediaVault; the only writes are inside throwaway directories you create and clean up. You are
-the only one who edits PLAN.md.
+the only one who edits archive/PLAN.md.
 
 SPIKE A — restic blob lists
   Create a throwaway restic repo in the scratchpad with a throwaway password (not mine).
@@ -356,7 +356,7 @@ uncertain. Attack SPIKE B hardest: its verdict is what authorises step 14 to unl
 one passing hardlink test is thin evidence for a filesystem behaviour. Report each verdict with
 the evidence that settled it, and say plainly which ones survived only weakly.
 
-Finally: if any verdict contradicts PLAN.md, amend the affected section of PLAN.md and tell me
+Finally: if any verdict contradicts archive/PLAN.md, amend the affected section of archive/PLAN.md and tell me
 exactly what changed.
 
 Finally, commit and push before you stop. The whole build lives on one branch,
@@ -369,7 +369,7 @@ anything uncommitted on purpose, say which and why.
 </details>
 
 **Gate: passed.** Three verdicts in writing, each attacked by independent readers, all three
-contradicting `PLAN.md` and all three folded back into it. Worth recording that the gate's own
+contradicting `archive/PLAN.md` and all three folded back into it. Worth recording that the gate's own
 predicted failure branches were all wrong: "A fails → fall back to size-grouping" (that fallback
 is 20× mis-costed), "B fails → Phase 4 becomes a copy" (B's mechanism passed; its *ordering*
 failed), "C fails → step 9 grows by a full regeneration" (the evidence says targeted repair).
@@ -382,7 +382,7 @@ Anticipating the failure is not the same as anticipating its shape.
 **Effort:** `medium` · ~45 min
 
 ```text
-Read PLAN.md "Storage layout" and "Schema". Read docs/database-schema.md ONLY for its
+Read archive/PLAN.md "Storage layout" and "Schema". Read docs/database-schema.md ONLY for its
 migration contract — you are not reproducing v1's 68 tables and must not import any of them.
 
 Build both databases and the migration runner.
@@ -391,9 +391,9 @@ Build both databases and the migration runner.
   table, each migration applied inside one transaction. It refuses to run while any other
   writer holds the lock (invariant 6) and refuses to run against a database whose recorded
   version is ahead of the files it can see.
-- Migration 001 creates catalog.sqlite3 exactly as PLAN.md specifies: origin, file, photo, and
+- Migration 001 creates catalog.sqlite3 exactly as archive/PLAN.md specifies: origin, file, photo, and
   their indexes. Nothing more. Note `origin` has NO restic_key column — step 1's SPIKE A killed
-  that key and PLAN.md's Schema section is already corrected. It carries `nlink` and `file_id`
+  that key and archive/PLAN.md's Schema section is already corrected. It carries `nlink` and `file_id`
   instead. If you find a draft anywhere that still mentions restic_key, it is stale.
 - Migration 002 creates state.sqlite3: triage_rule, triage_override. Nothing more.
 - A db module that opens catalog and ATTACHes state as `state`, with WAL, foreign_keys ON, and
@@ -403,7 +403,7 @@ Build both databases and the migration runner.
 
 Constraints:
 - Every path comes from step 0's config loader. No drive letter in any module.
-- Do not add tables PLAN.md does not list — no run_id, no job ledger, no projections, no
+- Do not add tables archive/PLAN.md does not list — no run_id, no job ledger, no projections, no
   materialized views. If you think one is needed, tell me instead of adding it.
 - Import nothing from v1/.
 
@@ -426,7 +426,7 @@ is refused actually passes.
 **Effort:** `medium` · ~1 h, mostly the 1.22 GB sidecar read
 
 ```text
-Read PLAN.md "What MediaVault already provides", "Phase 2a", and the Schema section. This step
+Read archive/PLAN.md "What MediaVault already provides", "Phase 2a", and the Schema section. This step
 reads v1's DATA, never v1's code.
 
 Import everything that costs no large I/O.
@@ -450,7 +450,7 @@ Import everything that costs no large I/O.
 
 4. Import asset_extended_metadata ONLY: capture time and its source tag, camera, lens, GPS,
    and anything else that lands in a `file` column. Do NOT import asset_features,
-   photo_entities, photo_user_state, stack_*, junk_*, or any projection table — PLAN.md
+   photo_entities, photo_user_state, stack_*, junk_*, or any projection table — archive/PLAN.md
    explains why each is empty, partial, or filler.
 
 5. If the manifest carries raw exiftool output per asset, write it to
@@ -484,7 +484,7 @@ EXIF null sentinels plus 7 odd formats, and a null sentinel is not a date. The a
 ignored, so the failure the gate was written to catch did not happen. ~45 min, 37 of them the
 sidecar read.
 
-Two things the prompt got wrong, both now measured and recorded in `PLAN.md` § build order:
+Two things the prompt got wrong, both now measured and recorded in `archive/PLAN.md` § build order:
 
 - **The `records` sidecars are the *slow* path, not the cheap one.** Reading 146,034 of them
   sustained ~65/s for 37 min. The manifest scan the prompt was avoiding reads the same rows in
@@ -502,14 +502,14 @@ Two things the prompt got wrong, both now measured and recorded in `PLAN.md` § 
 
 **Effort:** `high` · ~45 min
 
-`PLAN.md` calls this the highest-risk part of the build. It is the single thing v1 got wrong
+`archive/PLAN.md` calls this the highest-risk part of the build. It is the single thing v1 got wrong
 that made its library unusable. The filename-pattern space reads as unknown at the start, but it
 is enumerable rather than searchable — masking digit runs and grouping turns discovery into one
 deterministic pass whose coverage is provable by arithmetic. What stays genuinely worth
 attacking is the coverage number, because that is the exact shape of v1's failure.
 
 ```text
-Read PLAN.md's paragraphs on date resolution ("Date resolution is the highest-risk part of the
+Read archive/PLAN.md's paragraphs on date resolution ("Date resolution is the highest-risk part of the
 build...") and Phase 5's capture-time chain. Do not read docs/.
 
 Resolve capture time for every adopted file, then create the `photo` rows.
@@ -624,7 +624,7 @@ Three things worth carrying forward:
 **Effort:** `medium` · ~20–40 min, disk-bound
 
 ```text
-Read PLAN.md "Storage layout" and the derivative row of the Phase 2a table.
+Read archive/PLAN.md "Storage layout" and the derivative row of the Phase 2a table.
 
 Copy the existing 384px WebP derivatives out of the MediaVault derivative tree to
 <thumb_root>\<aa>\<sha256>.webp. One sequential pass.
@@ -645,7 +645,7 @@ Copy the existing 384px WebP derivatives out of the MediaVault derivative tree t
 
 Report: copied, skipped-missing, checksum mismatches, total bytes, wall time, and the
 throughput you achieved so I can calibrate the 420 GB pass in step 9. That calibration matters
-more than it used to: PLAN.md's original 110 MB/s was a sequential nominal and the real figure
+more than it used to: archive/PLAN.md's original 110 MB/s was a sequential nominal and the real figure
 measured 22-35 MB/s, so step 9 was re-estimated from 1.5-2 h to 5-6 h. Your number here is the
 check on that.
 
@@ -691,7 +691,7 @@ So: **2–3 h, not 5–6.** Three things this settles.
   number cannot serve both passes. A large-file-only probe on the same disk read 117.9 MB/s;
   the same disk does 0.9 MB/s on 9.8 KB files. Neither is wrong and neither is step 9's number.
 
-**`420.17 GB` in `PLAN.md` is binary — 420.17 GiB = 451.2 decimal GB**, and `sum(size_bytes)`
+**`420.17 GB` in `archive/PLAN.md` is binary — 420.17 GiB = 451.2 decimal GB**, and `sum(size_bytes)`
 over `assets` confirms it to three digits. Anything dividing by a MB/s figure must use 451.2e9,
 or it undercuts the projection by 7%; the hours in the table above already do. Flagged because
 the two readings differ by 31 GB and look for all the world like a data gap.
@@ -715,7 +715,7 @@ Two notes for later steps:
 This is the deliverable you asked for, and it arrives before any expensive pass runs.
 
 ```text
-Read PLAN.md "Grid" in full. Read docs/review-api.md ONLY for its security-posture section.
+Read archive/PLAN.md "Grid" in full. Read docs/review-api.md ONLY for its security-posture section.
 Do not copy code from v1/ — read it for what went wrong, not for what to reuse.
 
 Build the read-only grid. One process, four routes, no framework, no bundler:
@@ -840,7 +840,7 @@ index on `file.kind` and a planner that drove the join from `file` would scan it
 
 **Do not re-run this.** Ran in 12h50m against a ~10.2 h estimate. `photolib/inventory.py` and
 `photolib/restic_repo.py` implement it as five resumable subcommands (`a`–`e`); the work
-database is `E:\photolib\phase0.sqlite3` and is regenerable. Results are folded into `PLAN.md`
+database is `E:\photolib\phase0.sqlite3` and is regenerable. Results are folded into `archive/PLAN.md`
 "Phase 0"; the prompt is kept below for the record.
 
 **The gate passed. Zero same-size same-mtime hash disagreements across all 1,374,328 files.**
@@ -873,7 +873,7 @@ computed disk hash — not a sample.
   40; `dump --archive tar` 44.5 MB/s in high-dedup `10tb arch backup` against 110.5 in
   low-dedup `a52s`; `check --read-data` 1h56m for all 24,785 packs.
 
-**Five things the prompt asserted that turned out otherwise.** Each is corrected in `PLAN.md`:
+**Five things the prompt asserted that turned out otherwise.** Each is corrected in `archive/PLAN.md`:
 
 1. **`dump --archive tar` names members by their full snapshot path** (`G/photos/<rel>`), not
    relative to the dumped node. Caught with a five-member probe before Phase B. A
@@ -930,13 +930,13 @@ Every estimate in this file is a one-off migration cost. The architecture was au
 future import on 2026-08-02 and **needs no change now**: import requires no schema migration,
 the walk and hash helpers are already root-parameterised, dedup is a primary-key lookup, and
 `state` is content-keyed so re-grouping cannot disturb triage decisions. **Carry on from step 8
-as written.** See PLAN.md "Open decisions" 5 for the audit and the three things worth deciding
+as written.** See archive/PLAN.md "Open decisions" 5 for the audit and the three things worth deciding
 early — deliberately not designed yet.
 
 <details><summary>Original prompt, for the record</summary>
 
 ```text
-Read PLAN.md "Phase 0" in full (rewritten 2026-08-01 for the SECOND time — read the current
+Read archive/PLAN.md "Phase 0" in full (rewritten 2026-08-01 for the SECOND time — read the current
 text, not a summary, and not any recollection of the --force version) plus the "Gate" section.
 
 The restic password is already set up and verified as a DPAPI blob, and is reached by passing
@@ -964,7 +964,7 @@ G:\ResticPhotos, snapshot ce88f697 (newest), enumerated 2026-08-01:
   Repo format 2, single chunker_polynomial 3ecd3d7919bbcf, NO snapshot carries an `original`
   field, so no restic copy has ever touched it.
   Repo size on disk 436,175,270,064 bytes = 436.18 decimal GB = 406.22 GiB, in 24,840 pack
-  files. PLAN.md's "406.22 GB" is GiB; reading it as decimal understates by 7.4%.
+  files. archive/PLAN.md's "406.22 GB" is GiB; reading it as decimal understates by 7.4%.
   The snapshot's single root entry is "G", with "photos" one level below. dump's path argument
   must have NO LEADING SLASH: "/", "." and "/photos" all fail with the misleading
   `path "\\C:" not found in snapshot`. Bare "G" works, and so do deeper slash-separated paths
@@ -1204,7 +1204,7 @@ Two failure modes this run hit and that a re-run must not reintroduce, both now 
 **Effort:** `low` · ~10 min
 
 ```text
-Read PLAN.md "Phase 1".
+Read archive/PLAN.md "Phase 1".
 
 Pure SQL over origin and file. Zero I/O.
 
@@ -1241,7 +1241,7 @@ files / 4.77 GB** were excluded, not ~41,700 / 0.5 GB. The estimate was counted 
 146,034 adopted assets, where the same nine rules take **41,658 files / 0.64 GB** and reproduce
 the prediction to the file; over Phase 0's full 787,798-row `file` table `.pyc` is 59,516 rather
 than 7, `.file` 1,148 rather than 498, and `.msg` 367 rather than 198. **685,812 files / 544.14 GB
-survive to triage.** See `PLAN.md` "Phase 1" for the per-extension table. A step-8 re-run that
+survive to triage.** See `archive/PLAN.md` "Phase 1" for the per-extension table. A step-8 re-run that
 reports ~41,700 is reading the adopted subset, not the inventory.
 
 Rules match `file.ext`, the extension of the deduplicated byte sequence, so a sha with several
@@ -1271,7 +1271,7 @@ the largest single I/O in the project
 
 **Done 2026-08-03. Gate met: 0 hash mismatches across 146,034 objects.** 451.2 GB in
 **3h50m28s at 32.6 MB/s**, 4h55m for all four passes. The ARW repair is **2,972 files, not
-5,944** — see `PLAN.md` "Phase 2a" for why writing over MediaVault's checksummed copies was the
+5,944** — see `archive/PLAN.md` "Phase 2a" for why writing over MediaVault's checksummed copies was the
 wrong move and where the pixels went instead. 103,207 assets carry pHash, dHash, ThumbHash and
 18 quality scalars with **0 decode timeouts, 0 decode errors, 0 checksum mismatches**.
 
@@ -1286,7 +1286,7 @@ tree-ordered walk still beat the random sample by ~20%, as step 5 predicted.
 - **`asset_extended_metadata.width/height` is not orientation-corrected for `.arw`** —
   1,483/1,483 landscape at a transposing tag, against 12,568/12,568 correct for `.rw2`. So
   exception D's substitute has its own hole, and the ARW rows have no corrected dimension
-  source in the manifest at all. Recorded in `PLAN.md`; the regression check detects it per
+  source in the manifest at all. Recorded in `archive/PLAN.md`; the regression check detects it per
   asset and reports "no usable reference" rather than a pass or a failure.
 - **The shipped ThumbHash decoder was correct**, now proven rather than assumed:
   `tests/test_features.py` runs `thumbHashToDataURL` itself under node against hashes from the
@@ -1301,7 +1301,7 @@ re-derives it from the persisted scalars in seconds, so a change of policy never
 47-minute decode.
 
 ```text
-Read PLAN.md "Phase 2a" in full (it was rewritten on 2026-08-01 — read the current text),
+Read archive/PLAN.md "Phase 2a" in full (it was rewritten on 2026-08-01 — read the current text),
 including the adopt-objective/recompute-subjective paragraph and the resolved orientation
 section. Read docs/preprocessing.md ONLY for its list of quality scalars — as a SPECIFICATION
 of what to compute, never as code to import and never as values to adopt.
@@ -1310,7 +1310,7 @@ One long pass. It will be killed and restarted; design for that from the first l
 
 A. Re-hash every MediaVault object and compare against its filename, which IS its SHA-256.
    146,034 objects, 420.17 GiB = 451.2 decimal GB, and the only large read in the project.
-   Use 451.2e9 in any MB/s projection: PLAN.md's "420.17 GB" is binary, and reading it as
+   Use 451.2e9 in any MB/s projection: archive/PLAN.md's "420.17 GB" is binary, and reading it as
    decimal undercuts the estimate by 7%. Record pass or fail per asset. Any mismatch is a hard
    error, listed by name — never silently skipped, never repaired.
 
@@ -1479,7 +1479,7 @@ here because each one contradicts a sentence that used to be in it.
   rectangles, and that is a fact about the corpus rather than a bug to fix.
 
 ```text
-Read PLAN.md "Triage" in full. No UI in this step.
+Read archive/PLAN.md "Triage" in full. No UI in this step.
 
 - Rule engine: ordered triage_rule rows evaluated top-down, first match wins, triage_override
   rows beating every rule. Predicates are STRUCTURED — (column, operator, value) tuples —
@@ -1553,7 +1553,7 @@ source rather than the minified bundle.
   `verdict.params` as one unit fed the first *extension* to the directory CTE. It matched no
   directories and the worklist silently kept every path a `dir_segment` rule had excluded. Step
   10 measured 25 correctly because the prefilter is nine `ext` rules; the bug fires the moment
-  screen 1 saves anything, which is exactly where `PLAN.md` puts the probe. `Verdict` now carries
+  screen 1 saves anything, which is exactly where `archive/PLAN.md` puts the probe. `Verdict` now carries
   `dir_params` and `case_params` separately.
 - **`long_edge is null` was unexpressible as a candidate**, because the query-string parser tested
   the integer column before the operator and demanded a digit. That is screen 3's `unknown` band —
@@ -1571,7 +1571,7 @@ shape of a *set* of roots tried until one passes.
 ceremony: `probe.store` writes `file.width` into the **catalog**, while every triage write reaches
 `state.sqlite3` through a connection that cannot see the catalog at all — a handler that wrote it
 would dissolve that guarantee for every future handler. Its reads also land on `G:`, the USB HDD
-whose contention `PLAN.md` measures in whole megabytes per second. And it would buy nothing: the
+whose contention `archive/PLAN.md` measures in whole megabytes per second. And it would buy nothing: the
 worklist is 25 files, all unreadable cache blobs, so the probe stores zero rows.
 `GET /api/triage/probe` counts in SQL and names the command.
 
@@ -1587,11 +1587,11 @@ hidden (`document.hidden === true`), suspending both `requestAnimationFrame` and
 viewport geometry instead.
 
 ```text
-Read PLAN.md "Triage" — the screen table in particular. Reuse the grid from step 6: same
+Read archive/PLAN.md "Triage" — the screen table in particular. Reuse the grid from step 6: same
 virtualised component, same keyset paging, same thumbnails, same reveal. Triage is a mode of
 the same app, not a second app.
 
-Eight screens in PLAN.md's order — 0 no image content, 1 container directories, 2 file type,
+Eight screens in archive/PLAN.md's order — 0 no image content, 1 container directories, 2 file type,
 3 dimensions, 4 exact-dimension clusters, 5 EXIF camera presence, 6 source folder, 7 remainder.
 
 Step 10 built the engine, the survey, the eight screen queries, the probe and /api/triage/*.
@@ -1743,7 +1743,7 @@ gaining `total`, and `/api/triage/counts` gaining `page_paths`; both are additio
 objects, so the step billed as the only one that reads the photos root read none of it, and
 `G:\vault\.staging` was never created. Population 1: **1,252 of 1,659 decoded**; the 407 failures
 are 406 files under 50 KB — 295 of them TypeScript source named `.mts` — plus one truncated DNG.
-See `PLAN.md` § "Phase 2b" for the full result, including the two subprocess bounds that fired on
+See `archive/PLAN.md` § "Phase 2b" for the full result, including the two subprocess bounds that fired on
 real files and the `edit_likelihood` scalar found dead at 1.0 corpus-wide.
 
 **Steps 13–16 below were written before this ran and three of them need the corrections marked
@@ -1751,7 +1751,7 @@ real files and the `edit_likelihood` scalar found dead at 1.0 corpus-wide.
 written cannot pass.
 
 ```text
-Read PLAN.md "Phase 2b" in full.
+Read archive/PLAN.md "Phase 2b" in full.
 
 This is the only step that reads the photos root, and it reads it read-only. Nothing there is
 written, moved, renamed or deleted.
@@ -1861,14 +1861,14 @@ is a check that looks clean.
 a3server, which made the sentence above false and handed a fan-out an external write to race on;
 that re-copy is step 13b's job and 13b already carries it, so check 4 now only establishes *whether*
 they are stale. And because three of the four checks re-read earlier steps' recorded numbers, the
-refutation pass is bound to primary evidence rather than to this file or `PLAN.md` — see the
+refutation pass is bound to primary evidence rather than to this file or `archive/PLAN.md` — see the
 "Effort ladder" section for why that is the difference between a fan-out that verifies and one that
 merely agrees.
 
 ```text
 Run this step under ultracode.
 
-Read PLAN.md "Gate: G:\photos becomes deletable".
+Read archive/PLAN.md "Gate: G:\photos becomes deletable".
 
 Run all FOUR checks and give me a report I can sign off on. This step changes no files — locally
 or on a3server — and neither does anything you spawn: every agent in this step is a reader. Its
@@ -1996,7 +1996,7 @@ uncertain.
 
 ⚠ REVISED 2026-08-05. This is the part that decides whether the fan-out is worth its tokens.
 Checks 1, 3 and 4 re-read results recorded by steps 9, 7 and 7 rather than producing new evidence.
-A refuter that reads PLAN.md or BUILD-PROMPTS.md will agree with the summary and report
+A refuter that reads archive/PLAN.md or archive/BUILD-PROMPTS.md will agree with the summary and report
 convergence — which is this gate's own failure mode wearing the costume of a pass. So:
 
   - NO REFUTER MAY ESTABLISH A PASS FROM A SUMMARY in either markdown file. Bind each one to the
@@ -2047,7 +2047,7 @@ partition on one USB enclosure, so until this step lands there is no copy anywhe
 story does not function at all.
 
 ```text
-Read PLAN.md's Gate section and the origins.jsonl row of the storage table.
+Read archive/PLAN.md's Gate section and the origins.jsonl row of the storage table.
 
 Export <vault_root>\origins.jsonl: one line per distinct file —
   {sha256, ext, size, taken_at, taken_src, paths: [every original path under G:\photos]}
@@ -2137,11 +2137,11 @@ The only step in the project that deletes. It operates on 420 GB with one other 
 excluded unlinks (15.5 GB), 0 staging renames, 146,034 objects, with the object tree set-equal to
 the catalog both directions and every promotion classifying S0. The three preconditions were
 re-derived from artifacts rather than read out of a document: step 13's four checks
-(`PLAN.md` "Gate"), step 13b's four server-side hash confirmations (`PLAN.md` "Step 11"), and
+(`archive/PLAN.md` "Gate"), step 13b's four server-side hash confirmations (`archive/PLAN.md` "Step 11"), and
 `G:\vault\origins.jsonl` at 300,300,043 bytes on disk — which `promote.preflight` now re-checks
 itself, so the gate is code and not a habit.
 
-Four things worth carrying, all of them measured (see `PLAN.md` § "Phase 4" for the numbers):
+Four things worth carrying, all of them measured (see `archive/PLAN.md` § "Phase 4" for the numbers):
 the orphaned-derivative projection in the prompt below is high — 66,106 tiles, not ~107,658,
 because step 5 only copied derivatives v1 had actually built; the object-tree enumeration is
 917 s cold, so budget ~1.5 h rather than ~1.3 h; 31 of the unlinks are decided by an *override*
@@ -2150,7 +2150,7 @@ rather than by a rule, so the log's reason field has to express that; and `file.
 it, which they now have.
 
 ```text
-Read PLAN.md "Phase 4" in full — it was rewritten on 2026-08-01 and the current text is the
+Read archive/PLAN.md "Phase 4" in full — it was rewritten on 2026-08-01 and the current text is the
 spec. Read step 13's report and step 13b's upload confirmation.
 
 STOP AND TELL ME, do not proceed, if any of these is untrue:
@@ -2314,7 +2314,7 @@ Then run step 16 before you call this done.
 **Effort:** `high` · ~15 min, pure DB
 
 ```text
-Read PLAN.md "Phase 5".
+Read archive/PLAN.md "Phase 5".
 
 Pure database work. Minutes, not hours.
 
@@ -2399,12 +2399,12 @@ background · ~~4–5 h~~ **~2 h** · **not ultracode**
 focused reviewer is the right one.** There is no search and no design space — the shape is
 `phase2a` pass `a` with the vault name substituted for the object path and the expected digest read
 from the promotion record. The hours are disk bandwidth. The whole of the difficulty is a scoping
-decision, and `PLAN.md` "Phase 4" now carries it: in-flight scoping is sound only if promotion
+decision, and `archive/PLAN.md` "Phase 4" now carries it: in-flight scoping is sound only if promotion
 persists intent for every state including COLLISION and the half-linked case; missing, mismatched
 and not-yet-promoted are three distinct exit conditions; and this sweep opens names step 14 has
 just set read-only, while CPython passes no `FILE_SHARE_DELETE`, so it must never run concurrently
 with promotion or repair. Review that scoping choice adversarially and leave the rest at normal
-effort. Note this step is `PLAN.md` build-order **row 13**, not this file's step 13 — that
+effort. Note this step is `archive/PLAN.md` build-order **row 13**, not this file's step 13 — that
 collision is what sent the 2026-08-04 answer into the wrong document.
 
 Step 14 destroys directory entries and verifies nothing. A wrong-bytes survivor is
@@ -2413,7 +2413,7 @@ the step that finds out — and it has to run while the off-device copy from ste
 thing you could restore from.
 
 ```text
-Read PLAN.md "Phase 4" — the mandatory post-Phase-4 re-hash sweep paragraph — and step 14's
+Read archive/PLAN.md "Phase 4" — the mandatory post-Phase-4 re-hash sweep paragraph — and step 14's
 promotion log.
 
 Verify what step 14 actually did. This step writes nothing except its own report.
@@ -2468,7 +2468,7 @@ log reconciles in both directions. Only now is the promotion complete.
 The three things you asked for exist: triage happened, the grid is one infinite deduped page,
 and clicking a photo opens Explorer while `origins.jsonl` holds every original path.
 
-Four decisions from `PLAN.md` § "Open decisions" are still open and none of them block the
+Four decisions from `archive/PLAN.md` § "Open decisions" are still open and none of them block the
 above. **restic verification is no longer one of them — it was settled in step 7 on 2026-08-02.**
 Step 7 ran `restic check` including the full `--read-data` (all 24,785 packs, no errors), and its
 Phase D reconstructed all 1,374,298 files from the packs and compared each against the disk, with
@@ -2503,10 +2503,10 @@ Two facts for whoever does design it: `--force` is **not** part of it — new fi
 read, and a canonical object cannot be silently edited in place because its filename *is* its
 SHA-256 — and content addressing makes scrubbing a local re-hash rather than a restore. The
 vault is also ≈211k entries against `G:\photos`' 1.38M, so the metadata-walk cost that makes
-whole-tree backup of the source annoying is ~5× smaller. See `PLAN.md` "Open decisions" 5.
+whole-tree backup of the source annoying is ~5× smaller. See `archive/PLAN.md` "Open decisions" 5.
 
 **`state.sqlite3` is only half-covered, and it is the one artefact in this project that cannot be
-regenerated.** `PLAN.md` labels it *Irreplaceable* and it is: `triage_rule` and `triage_override`
+regenerated.** `archive/PLAN.md` labels it *Irreplaceable* and it is: `triage_rule` and `triage_override`
 are the output of steps 10–11, which is hours of human judgement over 1.37M files, and every
 future favourite and rating lands there too. Everything else is derivable — `catalog.sqlite3`
 rebuilds from a re-scan, derivatives regenerate from the substrate, the vault restores from restic

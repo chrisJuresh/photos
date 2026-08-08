@@ -8,7 +8,7 @@ them is written down rather than tuned in place.
 
 **These are relative judgements, not readings.** They only mean anything when
 every value in a comparison came from one implementation, which is why v1's
-`asset_features` is not adopted -- see `PLAN.md` § "Phase 2a". Cover ranking
+`asset_features` is not adopted -- see `archive/PLAN.md` § "Phase 2a". Cover ranking
 compares members *within* a stack, so a stack holding one v1 value and one of
 these would rank on incompatible measurements.
 

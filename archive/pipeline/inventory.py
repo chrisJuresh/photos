@@ -1,6 +1,6 @@
 """Phase 0: the `G:\\photos` inventory, reconciled against restic.
 
-`PLAN.md` § "Phase 0" in full. Five phases, each a separate subcommand so the
+`archive/PLAN.md` § "Phase 0" in full. Five phases, each a separate subcommand so the
 long ones can be resumed across evenings and the cheap decisive ones run first:
 
     a  establish   ~19 min  scandir walk + `restic ls`, reconciled

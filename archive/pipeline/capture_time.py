@@ -1,6 +1,6 @@
 """Resolves capture time for every adopted file. `photo` is Phase 5's, not this.
 
-`PLAN.md` calls this the highest-risk part of the build. v1 held a
+`archive/PLAN.md` calls this the highest-risk part of the build. v1 held a
 `DateTimeOriginal` for 38,767 assets, refused every one of them for carrying no
 timezone, and published two calendar buckets -- "ambiguous" and "unknown" --
 covering the whole corpus. Nothing here may reproduce that, so the first rule of
