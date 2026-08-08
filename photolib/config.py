@@ -25,6 +25,7 @@ class Config:
     deriv_root: Path
     meta_root: Path
     thumb_root: Path
+    substrate_root: Path
     catalog_db: Path
     state_db: Path
     backup_root: Path
@@ -75,10 +76,22 @@ def thumb_path(thumb_root: Path, sha256: str) -> Path:
 
     256 directories of ~400 files. The vault's two-level fan-out exists for
     hundreds of thousands of objects on a spinning disk; this tree is smaller
-    and lives on NVMe, and `PLAN.md` spells it with one level.
+    and lives on NVMe, and `archive/PLAN.md` spells it with one level.
 
     It sits beside the root it derives from rather than in the pass that first
     filled the tree: the grid reads that tree on every request and the pass is
     archived under `archive/pipeline`.
     """
     return thumb_root / sha256[:2] / f"{sha256}.webp"
+
+
+def substrate_path(substrate_root: Path, sha256: str) -> Path:
+    """`<substrate_root>\\<aa>\\<sha256>.webp` -- the 1536px tier, one shard level.
+
+    Same shape and same reasoning as `thumb_path`: 256 directories on NVMe, of
+    ~100 files each here, and the request path reads this tree the moment a
+    stack is opened. The two trees stay separate roots rather than two subtrees
+    of one, because they are filled by different passes and a tile can have one
+    tier without the other.
+    """
+    return substrate_root / sha256[:2] / f"{sha256}.webp"
