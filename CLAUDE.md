@@ -185,9 +185,18 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   Never commit media, database, or vault state — rule 5 above still applies, so check
   `git status` before staging rather than reaching for `git add -A`. If nothing changed, say so
   and skip the commit.
-- **One session, one branch, one working tree.** Two sessions in this tree share an index and
-  a `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
-  means anything. A second concurrent session gets its own worktree.
+- **One writer, one branch, one working tree.** Two writers in this tree share an index and a
+  `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
+  means anything. **Check before you build, every time** — `list_sessions` for another running
+  session whose `cwd` is this checkout, `git status --porcelain` for work you did not make.
+  Neither: work in place, which is the common case and keeps the diff where the operator is
+  already looking. Either: take a worktree, added with `git worktree add` and then **entered
+  with `EnterWorktree`** so reaching back into this tree is refused rather than merely
+  discouraged. "Pick your tree" in `docs/agents/issue-tracker.md` is the check, and a committed
+  `PreToolUse` hook enforces it — a write to this checkout is denied once another session holds
+  it. Leave the worktree standing until its branch merges, **never stash while another session
+  is live** (`refs/stash` is one stack for the whole repository, worktrees included), and
+  **never restore a `HEAD` you moved by accident** — say what you ran and stop.
 - Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
 - `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
 
@@ -199,9 +208,9 @@ Issues live as GitHub issues on `chrisJuresh/photos`, driven through the `gh` CL
 See `docs/agents/issue-tracker.md`.
 
 **When a request names a ticket, run its whole lifecycle without being asked** — claim it,
-branch, build it, commit and push, then close it with a comment saying what landed. The
-reader should not have to type a `gh` command. "Working a ticket" in that file is the
-sequence; it is an extension of the commit-and-push etiquette above, not an exception to it.
+pick a tree, branch, build it, commit and push, then close it with a comment saying what
+landed. The reader should not have to type a `gh` command. "Working a ticket" in that file is
+the sequence; it is an extension of the commit-and-push etiquette above, not an exception to it.
 
 ### Triage labels
 

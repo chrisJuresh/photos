@@ -22,6 +22,10 @@ build/
 playwright-report/
 test-results/
 
+# A concurrent session's checkout. The worktree holds real tracked files, so
+# without this they show up as untracked in whichever tree looks first.
+.claude/worktrees/
+
 # Editor / OS
 .idea/
 .vscode/
