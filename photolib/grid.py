@@ -10,14 +10,24 @@
     POST /api/reveal {"id": N} | {"origin": N}            select it in Explorer
     GET  /api/triage/*                                    the survey, read-only
     POST /api/triage/*                                    the only writes there are
+    GET  /api/triage/rebuild                              how the last one went
+    POST /api/triage/rebuild                              enqueue one
 
 Everything except `/api/triage/*` is read-only, and those writes reach
 `state.sqlite3` through a connection that cannot see the catalog — see
-`GridServer.state_writer`. The only surface that leaves the process is
-`/api/reveal`,
-and its path proof lives in `photolib.reveal` so it can be read and tested on
+`GridServer.state_writer`. Two surfaces leave the process: `/api/reveal`,
+whose path proof lives in `photolib.reveal` so it can be read and tested on
 its own — `F51` is v1 putting routers, SQL, security and browser launch in one
-4,700-line module.
+4,700-line module — and `/api/triage/rebuild`, which starts `photolib.rebuild`'s
+job and returns.
+
+Neither of those two lives in `triage_api`'s route tables, and that is the point
+rather than an oversight: what makes "triage writes `state.sqlite3` and nothing
+else" a fact about the code is that every handler in that module is handed a
+connection which can reach nothing else, and a handler that spawns a process is
+not that shape. A rebuild is also the one thing here that can change an answer
+while the process runs, which the memos below would otherwise be entitled to
+assume cannot happen — see `invalidate`.
 
 Four properties carry the stated requirement, that perceived load delay be
 small:
@@ -27,8 +37,9 @@ small:
   * every page carries `total`, so the client can give the scrollbar its final
     length while it still holds only the first page. It is 230-400 ms whatever
     the filter, because a count has to visit every tile, so it is memoised per
-    filter set -- once per selection the reader makes, never once per page. It
-    cannot go stale: every connection here is read-only.
+    filter set -- once per selection the reader makes, never once per page.
+    Nothing in this process can make it stale, because no connection here
+    writes; the one thing that can is a rebuild, and a rebuild clears it.
   * thumbnail URLs are content hashes, so `immutable` is honest and the browser
     stops asking after the first pass. `F47` is that header on a URL whose
     meaning can change.
@@ -66,7 +77,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from photolib import browse, db, reveal as reveal_module, triage_api
+from photolib import browse, db, rebuild as rebuild_module, reveal as reveal_module, triage_api
 from photolib.config import load, substrate_path, thumb_path
 
 DEFAULT_PORT = 8770  # v1 used 8765 for the dashboard and 8766 for the review API
@@ -138,6 +149,12 @@ MAX_REVEAL_BODY = 1024
 # upload. `triage.MAX_IN_VALUES` and `MAX_VALUE_CHARS` bound the same thing
 # from the other side.
 MAX_TRIAGE_BODY = 64 * 1024
+# A rebuild carries no arguments at all — the body is `{}` and exists only so the
+# POST goes through the same same-origin and content-type gauntlet as every other
+# write in the process.
+MAX_REBUILD_BODY = 1024
+
+REBUILD_ROUTE = "/api/triage/rebuild"
 
 SECURITY_HEADERS = (
     ("X-Content-Type-Options", "nosniff"),
@@ -543,6 +560,28 @@ def origin_source_path(conn: sqlite3.Connection, origin_id: int) -> tuple | None
 # server
 
 
+def serves_config(roots: Roots) -> bool:
+    """Whether this server is serving the databases `config.toml` names.
+
+    The rebuild's two steps read `config.toml` for themselves — they are
+    command-line programs and always were — so a server started against another
+    pair would rebuild a catalog it is not showing. That is not a hypothetical:
+    `--catalog`/`--state` exist, and every test in `tests/test_grid.py` is a
+    server on a temporary pair. Comparing the two databases that matter is what
+    turns "do not press that here" into a 409.
+
+    A config that will not load is not a server that may rebuild.
+    """
+    try:
+        config = load()
+    except (OSError, ValueError):
+        return False
+    return (
+        config.catalog_db.resolve() == roots.catalog_db.resolve()
+        and config.state_db.resolve() == roots.state_db.resolve()
+    )
+
+
 class GridServer(ThreadingHTTPServer):
     """Threaded because keep-alive plus one thread is a hang, not a slowdown.
 
@@ -560,9 +599,20 @@ class GridServer(ThreadingHTTPServer):
     # over connections. Silently.
     allow_reuse_address = False
 
-    def __init__(self, address, handler, roots: Roots, spawn) -> None:
+    def __init__(self, address, handler, roots: Roots, spawn, rebuild=None) -> None:
         self.roots = roots
         self.spawn = spawn
+        # Defaulted rather than required, so every existing construction of this
+        # server keeps working — and defaulted to a job that checks it is serving
+        # the configured databases before it runs, so the ones that pass
+        # temporary roots (every test, and `--catalog`) get a refusal instead of
+        # a rebuild of the real catalog. Opting *in* to a live rebuild is a
+        # deliberate act at the call site; opting out is not something anybody
+        # has to remember.
+        self.rebuild = rebuild or rebuild_module.Rebuild(
+            permitted=lambda: serves_config(self.roots),
+            after=self.invalidate,
+        )
         self._local = threading.local()
         self._facets: dict | None = None
         self._totals: dict[browse.Query, int] = {}
@@ -599,11 +649,12 @@ class GridServer(ThreadingHTTPServer):
         over the tile set — ~700 ms over the real corpus. Thirteen GROUP BY
         queries would be ~250 ms each, because each one visits every tile.
 
-        Every connection in this process is read-only, so the answer cannot
-        change while the server runs. Counted under the lock rather than around
-        it, so two threads arriving together pay for one pass and not two;
-        `main` warms it before the browser opens, which is why no request ever
-        waits on it.
+        Every connection in this process is read-only, so nothing served from
+        here can change the answer; the rebuild job can, from another process,
+        and clears this through `invalidate` when it does. Counted under the
+        lock rather than around it, so two threads arriving together pay for one
+        pass and not two; `main` warms it before the browser opens, which is why
+        no request ever waits on it.
         """
         with self._totals_lock:
             if self._facets is None:
@@ -681,6 +732,27 @@ class GridServer(ThreadingHTTPServer):
                     del self._assignments[next(iter(self._assignments))]
                 self._assignments[query] = build_assignment(self.connection(), query)
             return self._assignments[query]
+
+    def invalidate(self) -> None:
+        """Drop everything memoised from the tile set. Called by a finished rebuild.
+
+        The three memos above are each justified by the same sentence — the
+        answer cannot change while a read-only process runs — and a rebuild is
+        the one event that makes that sentence false. It changes `photo` from
+        outside this process, so the counts, the facet vocabulary and the stack
+        assignments all describe a tile set that no longer exists.
+
+        Clearing is enough; nothing here has to reconnect. A connection opened
+        `mode=ro` sees whatever was committed before its next read transaction
+        begins, and every one of these connections is between statements by the
+        time this runs. The next request pays for one recount, which is what a
+        first request after startup pays anyway.
+        """
+        with self._totals_lock:
+            self._facets = None
+            self._totals.clear()
+            self._stacks.clear()
+            self._assignments.clear()
 
     def state_writer(self) -> sqlite3.Connection:
         """This thread's write connection -- to `state.sqlite3` and nothing else.
@@ -773,6 +845,8 @@ class GridHandler(BaseHTTPRequestHandler):
         elif substrate:
             sha256 = substrate.group(1)
             self._tile(substrate_path(self.server.roots.substrate_root, sha256), sha256)
+        elif path == REBUILD_ROUTE:
+            self._json(200, self.server.rebuild.status())
         elif path in triage_api.READ_ROUTES:
             self._triage_read(path, query)
         elif path == "/api/reveal" or path in triage_api.WRITE_ROUTES:
@@ -790,6 +864,8 @@ class GridHandler(BaseHTTPRequestHandler):
         path = self.path.partition("?")[0]
         if path == "/api/reveal":
             self._reveal()
+        elif path == REBUILD_ROUTE:
+            self._rebuild()
         elif path in triage_api.WRITE_ROUTES:
             self._triage_write(path)
         else:
@@ -951,6 +1027,23 @@ class GridHandler(BaseHTTPRequestHandler):
             return
         self._json(status, body)
 
+    def _rebuild(self) -> None:
+        """Enqueue the rebuild and answer with its status. Never runs it here.
+
+        Invariant 4 is the whole design of this handler: grouping 787,798 files
+        is not something a request does, so this one takes a lock, starts a
+        thread and returns in microseconds. The client learns how it went by
+        polling the GET.
+
+        The body is `{}` and is read only so that this POST passes through the
+        same origin and content-type checks as every other write — a rebuild
+        started by a cross-origin page would be an odd attack and a real one.
+        """
+        if self._json_body(MAX_REBUILD_BODY) is None:
+            return
+        status, payload = self.server.rebuild.start()
+        self._json(status, payload)
+
     def _reveal(self) -> None:
         payload = self._json_body(MAX_REVEAL_BODY)
         if payload is None:
@@ -1007,9 +1100,10 @@ def serve(
     port: int = DEFAULT_PORT,
     *,
     spawn=reveal_module._popen,
+    rebuild=None,
 ) -> GridServer:
     """Bind and return the server. The caller runs it."""
-    return GridServer(("127.0.0.1", port), GridHandler, roots, spawn)
+    return GridServer(("127.0.0.1", port), GridHandler, roots, spawn, rebuild)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1060,6 +1154,13 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "  filters         "
         + ", ".join(f"{d['name']} {len(d['options'])}" for d in dimensions)
+    )
+    # Said at startup rather than discovered by pressing the button: a server on
+    # a database pair other than the configured one refuses to rebuild, and the
+    # reason is a choice made on this command line.
+    print(
+        "  rebuild         "
+        + ("available from triage" if serves_config(roots) else "refused: not the configured databases")
     )
     if args.open:
         import webbrowser

@@ -12,6 +12,7 @@
   import Counts from "./lib/Counts.svelte";
   import Header from "./lib/Header.svelte";
   import Probe from "./lib/Probe.svelte";
+  import Rebuild from "./lib/Rebuild.svelte";
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
   import Sheet from "./lib/Sheet.svelte";
@@ -421,6 +422,16 @@
     await afterRuleWrite();
   }
 
+  // A finished rebuild changed the tile set, so the one thing this client
+  // fetched once and kept is now describing a library that has moved. The
+  // server drops its own memos as part of the job; this drops the client's copy
+  // of the only one it holds.
+  async function afterRebuild() {
+    await guard(async () => {
+      facets = await api.facets();
+    });
+  }
+
   async function override(item, decision) {
     const body = await guard(() => api.override(item.s, decision));
     if (!body) return item.o ?? null;
@@ -529,6 +540,8 @@
         ondelete={removeRule}
         onmove={moveRule}
       />
+
+      <Rebuild oncomplete={afterRebuild} />
     </aside>
   {/if}
 

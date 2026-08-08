@@ -11,6 +11,7 @@ import http.client
 import json
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ import synthetic
 
 from photolib import browse, db, migrate
 from photolib import grid as grid_module
+from photolib import rebuild as rebuild_module
 from photolib.browse import SORTS, BadFilter, page_sql, parse_cursor
 from photolib.grid import (
     DEFAULT_KINDS,
@@ -1586,3 +1588,141 @@ def test_the_servers_connection_is_read_only(grid):
     conn = grid.server.connection()
     with pytest.raises(sqlite3.OperationalError):
         conn.execute("INSERT INTO photo (id, rep_sha256, sort_key) VALUES (9999, 'x', 'y')")
+
+
+# -- rebuild -------------------------------------------------------------
+
+
+def rebuild_post(grid, *, origin=None, content_type="application/json", **kwargs):
+    headers = kwargs.pop("headers", ())
+    if origin is None:
+        origin = f"http://127.0.0.1:{grid.port}"
+    if origin is not False:
+        headers = (("Origin", origin), *headers)
+    if content_type is not False:
+        headers = (("Content-Type", content_type), *headers)
+    return http_request(
+        grid.port, "POST", "/api/triage/rebuild", headers=headers, body=b"{}", **kwargs
+    )
+
+
+def wait_for_rebuild(grid, want="done", timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = get_json(grid.port, "/api/triage/rebuild")
+        if status["state"] == want:
+            return status
+        time.sleep(0.01)
+    raise AssertionError(f"rebuild never reached {want}")
+
+
+def seam(grid, run, *, permitted=True):
+    """Give this server a rebuild whose steps are `run` instead of subprocesses."""
+    grid.server.rebuild = rebuild_module.Rebuild(
+        permitted=lambda: permitted, after=grid.server.invalidate, run=run
+    )
+    return grid
+
+
+def test_the_rebuild_status_is_readable_before_anything_has_run(grid):
+    status = get_json(grid.port, "/api/triage/rebuild")
+
+    assert status["state"] == "idle"
+    assert [step["name"] for step in status["steps"]] == ["snapshot", "tiles"]
+
+
+def test_a_server_on_temporary_databases_may_not_rebuild(grid):
+    """Every server in this file is on a temporary pair, and both steps of a
+    rebuild read config.toml for themselves. The refusal is what keeps a click —
+    or a test — off the real catalog."""
+    status, _, body = rebuild_post(grid)
+
+    assert status == 409
+    assert "configured databases" in json.loads(body)["error"]
+
+
+def test_a_rebuild_is_enqueued_rather_than_run_in_the_request(make_grid):
+    """Invariant 4: the handler starts a thread and returns. It does not group."""
+    started, release = threading.Event(), threading.Event()
+
+    def run(root, args, emit):
+        started.set()
+        release.wait(10)
+        return 0
+
+    grid = seam(make_grid(count=4), run)
+    try:
+        status, _, body = rebuild_post(grid)
+        assert status == 202
+        assert json.loads(body)["state"] == "running"
+        assert started.wait(10)
+        # Answered while the step is still in flight, which is the claim: a real
+        # `group` is ~12 s of SQL.
+        assert rebuild_post(grid)[0] == 409
+    finally:
+        release.set()
+    wait_for_rebuild(grid)
+
+
+def test_a_finished_rebuild_drops_the_counts_the_server_had_banked(make_grid):
+    grid = seam(make_grid(count=6), lambda root, args, emit: 0)
+    get_json(grid.port, "/api/photos")
+    get_json(grid.port, "/api/facets")
+    assert grid.server._totals and grid.server._facets is not None
+
+    assert rebuild_post(grid)[0] == 202
+    wait_for_rebuild(grid)
+
+    assert grid.server._totals == {}
+    assert grid.server._stacks == {}
+    assert grid.server._assignments == {}
+    assert grid.server._facets is None
+
+
+def test_a_failed_rebuild_keeps_them(make_grid):
+    """The tile set did not change, so the memos still describe it."""
+    grid = seam(make_grid(count=6), lambda root, args, emit: 1)
+    get_json(grid.port, "/api/photos")
+    banked = dict(grid.server._totals)
+
+    assert rebuild_post(grid)[0] == 202
+    wait_for_rebuild(grid, "failed")
+
+    assert grid.server._totals == banked
+
+
+def test_the_rebuild_reports_each_steps_output(make_grid):
+    def run(root, args, emit):
+        emit(f"ran {args[1]}")
+        return 0
+
+    grid = seam(make_grid(count=4), run)
+    rebuild_post(grid)
+    status = wait_for_rebuild(grid)
+
+    assert [step["log"] for step in status["steps"]] == [
+        ["ran archive.pipeline.backup_state"],
+        ["ran archive.pipeline.group"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected",
+    [
+        ({"origin": False}, 403),
+        ({"origin": "http://evil.example"}, 403),
+        ({"content_type": "text/plain"}, 415),
+        ({"host": "evil.example"}, 403),
+    ],
+)
+def test_a_rebuild_passes_the_same_gauntlet_as_every_other_write(grid, kwargs, expected):
+    assert rebuild_post(grid, **kwargs)[0] == expected
+
+
+def test_a_refused_rebuild_never_reaches_the_job(grid):
+    calls = []
+    seam(grid, lambda root, args, emit: calls.append(args) or 0)
+
+    assert rebuild_post(grid, origin=False)[0] == 403
+    assert get_json(grid.port, "/api/triage/rebuild")["state"] == "idle"
+    assert calls == []
