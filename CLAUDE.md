@@ -163,9 +163,11 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   Neither: work in place, which is the common case and keeps the diff where the operator is
   already looking. Either: take a worktree, added with `git worktree add` and then **entered
   with `EnterWorktree`** so reaching back into this tree is refused rather than merely
-  discouraged. "Pick your tree" in `docs/agents/issue-tracker.md` is the check. Leave the
-  worktree standing until its branch merges, and **never restore a `HEAD` you moved by
-  accident** — say what you ran and stop.
+  discouraged. "Pick your tree" in `docs/agents/issue-tracker.md` is the check, and a committed
+  `PreToolUse` hook enforces it — a write to this checkout is denied once another session holds
+  it. Leave the worktree standing until its branch merges, **never stash while another session
+  is live** (`refs/stash` is one stack for the whole repository, worktrees included), and
+  **never restore a `HEAD` you moved by accident** — say what you ran and stop.
 - Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
 - `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
 
