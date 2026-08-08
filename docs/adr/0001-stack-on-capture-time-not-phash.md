@@ -48,6 +48,14 @@ Set sizes at 3s: 1,661 twos, **1,680 threes**, 206 fours, 94 fives, **558 sixes,
 visible in the raw counts. The default window is **4s**, where the number of
 distinct sets peaks — past it the count falls, which is over-merging.
 
+That window table is the **prototype's**, and the shipped implementation does not
+reproduce it: it merges 14–23 runs fewer at every window, so the grid it leaves is
+larger — 10,948 rows at 4s against the 10,929 above. The offset is systematic
+rather than noise and shrinks as the window widens; its cause is not known and the
+prototype's script was not kept. `docs/grid-queries.md` carries the shipped table
+and is the one to re-derive against. The peak in distinct sets that chose 4s has
+not been re-measured against the shipped code.
+
 ## Two facts found on the way, worth not re-discovering
 
 **Every odd pHash threshold is unreachable.** The hash is median-thresholded, so
@@ -65,8 +73,12 @@ Projected onto tiles it is 2,735 groups, not 10,717.
 ## Consequences
 
 - Stacking adds **no schema migration and no stored grouping**. It is a window
-  function over the filtered set, and on the default sort it is a streaming
-  collapse of adjacent runs, so keyset paging survives and a page stays ~15 ms.
+  function over the filtered set, and on the default sorts it is a streaming
+  collapse of adjacent runs, so keyset paging survives. A stacked page then costs
+  what its tiles cost rather than what it draws, which is more than the ~15 ms
+  hoped for here: the first 500-cover page on `newest` reads 1,805 tiles and ranks
+  1,632 of them to pick covers, ~75 ms against an unstacked 10 ms. A 200-cover page
+  is 16 ms, and page size is the lever. `docs/grid-queries.md` has the bill.
 - Filters apply *before* stacking, so a stack re-forms over whatever is selected
   and the cover is resolved per query rather than materialised.
 - The 449 tiles dated from `mtime` or filename are never stacked: a file date is

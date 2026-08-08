@@ -21,8 +21,9 @@ has one or more.
 _Avoid_: photo, asset, object
 
 **Cover**:
-The single member of a stack the grid draws when the stack is closed. Chosen from
-the members present in the current selection, never fixed in advance.
+The single member of a stack the grid draws when the stack is closed — the sharpest
+frame of its middle-exposure third. Chosen from the members present in the current
+selection, never fixed in advance.
 _Avoid_: representative (that word is taken — see below), thumbnail, hero, key photo
 
 **Representative**:
@@ -35,12 +36,15 @@ _Avoid_: cover, primary
 **Stack**:
 A run of tiles shot in one moment — consecutive captures from one camera within
 the window. This is what a bracketed set or a burst becomes in the grid. Formed at
-query time over whatever the current filters select, so it is never stored.
+query time over whatever the current filters select, so it is never stored. A tile
+whose date came from the filesystem rather than from EXIF never joins one: a copy
+date is not when the photograph was taken.
 _Avoid_: group, cluster, burst, series, similarity stack
 
 **Window**:
-The gap in seconds below which two consecutive captures belong to the same stack.
-The reader sets it; it is the only number stacking has.
+The gap in seconds at or below which two consecutive captures belong to the same
+stack — at or below, because a gap of exactly the window is the commonest bracket
+interval there is. The reader sets it; it is the only number stacking has.
 _Avoid_: threshold, tolerance, distance, sensitivity
 
 **Pair**:
