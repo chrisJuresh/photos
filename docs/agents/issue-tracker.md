@@ -46,12 +46,37 @@ walked through `gh`.
    one and stop, rather than building against a blocker's unwritten half.
 3. **Claim it.** `gh issue edit <n> --add-assignee @me`. First write of the session, so an
    abandoned session still shows who was in it.
-4. **Branch.** `git switch -c <n>-<short-slug>` off the current branch. Never build on `main`.
-5. **Build it,** to the ticket's acceptance criteria and no further. A criterion that turns out
+4. **Pick your tree.** Before touching a file, find out whether another session is already in
+   this one. Nothing announces itself, so read the tree:
+
+   ```bash
+   git worktree list
+   git status --porcelain
+   git symbolic-ref --short HEAD
+   ```
+
+   Build where you are **only** if `HEAD` is on `main` or a non-ticket branch *and*
+   `git status --porcelain` is empty. Any other reading — a ticket branch checked out that
+   isn't yours, uncommitted files you did not write, another worktree already listed — means
+   a session is here, and you take your own instead:
+
+   ```bash
+   git worktree add ../photos-<n> -b <n>-<short-slug> <base>
+   ```
+
+   Then `cd ../photos-<n>` and treat that path as the working directory for the rest of the
+   session, `gh` included. Bias towards taking one: a needless worktree costs a directory, a
+   missed one costs a commit that swallowed another ticket's half-finished work.
+5. **Branch off the right base.** `<base>` is the ticket's blocker where step 2 found one that
+   is closed but not yet merged to `main`; otherwise `main`. Never branch off "the current
+   branch" — with a shared `HEAD` that is whatever another session last checked out, which is
+   how a ticket ends up carrying an unrelated ticket's commits. Never build on `main` itself.
+6. **Build it,** to the ticket's acceptance criteria and no further. A criterion that turns out
    to be wrong is a comment on the issue and a stop, not a quiet re-scope.
-6. **Commit and push** under the etiquette in CLAUDE.md — at the end, unasked, checking
-   `git status` rather than `git add -A`.
-7. **Close it.** `gh issue close <n> --comment "..."` naming the branch and what a reader can
+7. **Commit and push** under the etiquette in CLAUDE.md — at the end, unasked, checking
+   `git status` rather than `git add -A`. In a worktree of your own that listing is yours
+   alone; in a shared tree it is not, so stage the paths you changed by name.
+8. **Close it.** `gh issue close <n> --comment "..."` naming the branch and what a reader can
    now see. Closing is what unblocks the dependents: GitHub counts open blockers only, so a
    closed ticket drops its dependents' `blocked_by` on its own. Nothing else needs editing —
    in particular, do not touch another ticket's body to record that this one is done.
@@ -63,11 +88,27 @@ half-finished. An open ticket with a note is recoverable; a closed one that did 
 
 Two sessions in one working tree share an index and a `HEAD`. One's commit sweeps up the
 other's half-finished files, `git switch` moves the floor under both, and neither session's
-`git status` describes anything real. So the second concurrent ticket gets its own worktree:
+`git status` describes anything real. Step 4 above is what keeps that from happening; the rest
+of this section is what surrounds it.
+
+The check is deliberately one-sided because the two errors are not the same size. A session
+sitting idle between turns is indistinguishable from no session at all, so no reading of the
+tree can prove you are alone — it can only prove you are not. Treat a clean tree on `main` as
+the one case that lets you stay and everything else as occupied.
+
+Push the branch before finishing, then release the directory:
 
 ```bash
-git worktree add ../photos-<n> -b <n>-<short-slug>
+git worktree remove ../photos-<n>
 ```
+
+The branch survives that; only the checkout goes. A worktree left behind is harmless but it
+counts as occupancy for the next session's step 4, which is a false positive nobody needs.
+
+If a session realises mid-ticket that it has been sharing a tree, it moves rather than
+finishes: commit or stash what is genuinely its own, `git worktree add` a tree off the correct
+base, and carry on there. Sorting the branches out afterwards is far more expensive than
+moving now, and the shared tree gets worse with every file written.
 
 Independent tickets are still not free of each other. Two things collide even in separate
 worktrees, and both are physical rather than textual:

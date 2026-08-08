@@ -158,7 +158,13 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   and skip the commit.
 - **One session, one branch, one working tree.** Two sessions in this tree share an index and
   a `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
-  means anything. A second concurrent session gets its own worktree.
+  means anything. **You cannot assume you are the only session here, so check before you
+  build, every time.** You may work in this tree only when `HEAD` is on `main` or a non-ticket
+  branch *and* `git status --porcelain` is empty. A ticket branch checked out, files you did
+  not write, or a `git worktree list` longer than this tree all mean someone else is here, and
+  your work goes in `git worktree add ../photos-<n>` instead. "Pick your tree" in
+  `docs/agents/issue-tracker.md` is the check. When in doubt, worktree: a needless one costs a
+  directory, a missed one costs a commit that swallowed another ticket.
 - Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
 - `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
 
@@ -170,9 +176,9 @@ Issues live as GitHub issues on `chrisJuresh/photos`, driven through the `gh` CL
 See `docs/agents/issue-tracker.md`.
 
 **When a request names a ticket, run its whole lifecycle without being asked** — claim it,
-branch, build it, commit and push, then close it with a comment saying what landed. The
-reader should not have to type a `gh` command. "Working a ticket" in that file is the
-sequence; it is an extension of the commit-and-push etiquette above, not an exception to it.
+pick a tree, branch, build it, commit and push, then close it with a comment saying what
+landed. The reader should not have to type a `gh` command. "Working a ticket" in that file is
+the sequence; it is an extension of the commit-and-push etiquette above, not an exception to it.
 
 ### Triage labels
 
