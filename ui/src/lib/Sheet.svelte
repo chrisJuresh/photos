@@ -133,9 +133,12 @@
         if (!event.target.closest(".chip")) {
           // The element too, and only for its rect: a stack's overlay emanates
           // from the tile that was clicked, and this is the one moment anything
-          // outside the sheet can know where that tile is. Handing over the
-          // element rather than a rect keeps the measuring at the point of use
-          // and this a pass-through — the sheet does not gain a geometry API.
+          // outside the sheet can know where that tile is. Still an element and
+          // not a rect, so the measuring stays at the point of use and this
+          // stays a pass-through — the sheet does not gain a geometry API. The
+          // box wanted is the photograph's and not the element's, since a
+          // stacked tile is taller than its picture, and `sheet.js` exports
+          // `photoRect` to say which is which.
           //
           // The index too, because the overlay walks from it: "the next tile in
           // the current sort" is the next entry in the sheet's own page order.

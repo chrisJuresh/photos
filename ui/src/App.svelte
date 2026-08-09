@@ -18,6 +18,7 @@
   import Rules from "./lib/Rules.svelte";
   import { shareText, stackOf, tally, toggle } from "./lib/select.js";
   import Sheet from "./lib/Sheet.svelte";
+  import { photoRect } from "./lib/sheet.js";
   import { remember, restore } from "./lib/stack.js";
   import Table from "./lib/Table.svelte";
   import Tree from "./lib/Tree.svelte";
@@ -508,7 +509,10 @@
         marks = toggle(marks, stackOf(item));
         return;
       }
-      opened = { frames: framesOf(item), origin: tile.getBoundingClientRect(), at };
+      // The photograph's rect and not the tile's: a stacked tile's element is
+      // taller than its picture by the deck above it, and the overlay has to
+      // fly out of the picture.
+      opened = { frames: framesOf(item), origin: photoRect(tile), at };
       return;
     }
     guard(() => api.revealOrigin(item.id));
@@ -553,7 +557,7 @@
       if (!landed || !opened) return;
       opened = {
         frames: framesOf(landed.item),
-        origin: landed.tile.getBoundingClientRect(),
+        origin: photoRect(landed.tile),
         at: next,
       };
     } finally {
