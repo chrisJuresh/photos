@@ -96,11 +96,13 @@ main {
    nothing. */
 .box {
   flex: var(--share, 1) 1 0;
-  min-width: 110px;
+  min-width: 140px;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(var(--columns, 1), 1fr);
-  grid-auto-rows: minmax(90px, 1fr);
+  /* The row floor matches `FLOOR` + the caption in page.js: past that the box
+     scrolls rather than shrinking its frames away to nothing. */
+  grid-auto-rows: minmax(56px, 1fr);
   align-content: center;
   overflow-y: auto;
   gap: 6px;
@@ -167,7 +169,10 @@ main {
   flex: 0 0 auto;
   overflow: hidden;
   text-align: center;
-  font-size: 11px;
+  /* Small, because a widened view is mostly captions otherwise: two hundred of
+     them under two hundred thumbnails. */
+  font-size: 10px;
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -219,10 +219,11 @@ as drawn, clicking a member says it does not belong, clicking a neighbour says i
 been included — each click is recorded as it is made — and `u` records **not sure**, which is
 an answer rather than a skip; dragging across several frames marks them together and records
 once. The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the run is on screen.
-`k` widens the view when the answer turns on what is past the edge: one frame each side is
-enough for 46% of candidate stacks but only 27% of the least decisive ones, and no fixed width
-settles it when a run can reach 1,435 frames, so it reaches 60 either side — enough to see the
-whole run for 24 of the 30 sets a round samples. **What an
+`k` widens the view when the answer turns on what is past the edge, **with no ceiling** — one
+frame each side is enough for 46% of candidate stacks but only 27% of the least decisive ones,
+and every ceiling picked for it so far has been hit, so the whole run rides with the set. That
+is 3,808 frames and about 316 KB over a round's thirty sets. The frames shrink to a floor and
+then the box scrolls, rather than the view stopping. **What an
 answer says is bounded by what was on screen for it**, which is stored per answer and is the
 column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
 that the stack is complete. Sets are drawn from wherever the Match is least decisive and

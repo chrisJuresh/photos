@@ -60,6 +60,11 @@ function frame(sha, role, marked, gap) {
   const image = document.createElement("img");
   image.src = `/d/${sha}.webp`;
   image.alt = "";
+  // A widened view can hold hundreds of 1536px substrates, and fetching and
+  // decoding all of them at once is how a local page becomes a slideshow. Only
+  // what is on screen is loaded; the rest arrives as the box is scrolled.
+  image.loading = "lazy";
+  image.decoding = "async";
   button.append(image);
 
   const caption = document.createElement("span");
@@ -96,7 +101,13 @@ function box(entries, role, marked) {
 const asFrames = (shas) => shas.map((sha) => ({ sha, gap: 0 }));
 
 const GAP = 6; // must match the `gap` the boxes are laid out with
-const CAPTION = 22; // the strip under each frame that is not photograph
+const CAPTION = 16; // the strip under each frame that is not photograph
+// The smallest a photograph is worth drawing -- the reader's own words are "as
+// long as i can just about see what they are", and they would rather have all
+// of a run small than some of it large. So this is low, and the arrangement
+// shrinks to it before it starts scrolling. Below it a box scrolls instead,
+// because a hundred frames at four pixels each is not a view of anything.
+const FLOOR = 40;
 
 // How many columns to lay a stack out in. CSS can do this with `auto-fit` and it
 // gets it wrong for the job: `auto-fit` packs in as many columns as will fit the
@@ -122,7 +133,12 @@ function columns(count, width, height) {
       best = candidate;
     }
   }
-  return best;
+  // Everything fits and the frames are big enough to read: that arrangement.
+  if (largest >= FLOOR) return best;
+  // It does not fit. Rather than carry on shrinking, fill the width at the floor
+  // size and let the box scroll -- which is the only honest answer once there
+  // are more frames than the room can hold at a legible size.
+  return Math.max(1, Math.min(count, Math.floor((width + GAP) / (FLOOR * 1.5 + GAP))));
 }
 
 function draw() {
@@ -141,8 +157,10 @@ function draw() {
   boxes.push(box(asFrames(set.members), "member", (sha) => (mark.out.has(sha) ? "out" : null)));
   if (after.length) boxes.push(box(after, "neighbour", outside));
 
-  // A box's share of the width is how many frames are in it, so widening the
-  // view grows the context boxes instead of crushing what is already in them.
+  // A box's share of the width is how many frames are in it, which is what gives
+  // every frame on screen about the same area however lopsided the run is: 155
+  // frames one side of a stack and 40 the other should not be two boxes of the
+  // same size. `min-width` in the stylesheet keeps the smaller side off nothing.
   // `style.setProperty` and never `setAttribute("style", …)`: the CSP carries no
   // `unsafe-inline`, which blocks the attribute and not the CSSOM — the same
   // distinction CLAUDE.md draws for Svelte.
@@ -165,9 +183,14 @@ function draw() {
     `set ${at + 1} of ${sample.sets.length} · ${set.members.length} frames · `,
     strong(set.camera || "unnamed camera"),
     ` · ${set.margin} points from the provisional line of ${sample.strictness} · `,
+    // Each side counted separately, because they run out separately: a stack
+    // five frames from the end of its run shows five after it however far the
+    // view is widened, and "5 of 5 after" says the run ended where "showing 30
+    // of 30 either side" looked like a limit.
     available === 0
       ? "nothing either side of it in the run"
-      : `showing ${shown} of ${available} either side`
+      : `showing ${Math.min(shown, set.before.length)} of ${set.before.length} before` +
+        ` · ${Math.min(shown, set.after.length)} of ${set.after.length} after`
   );
   said.textContent = answer
     ? `answered: ${VERDICTS[answer.verdict]} — record again to revise it`
@@ -374,7 +397,7 @@ function widen(by) {
   // press always moves the view by one and never spends itself closing a gap
   // between the two.
   const current = showing(set);
-  const next = Math.min(Math.max(current + by, pinned), sample.context);
+  const next = Math.min(Math.max(current + by, pinned), beside(set));
   // Only when a mark is what stopped it. At the narrowest view there is nothing
   // to narrow and nothing to explain.
   if (next === current && by < 0 && pinned > 1) {

@@ -117,19 +117,25 @@ def test_the_run_is_carried_outwards_from_the_stack_nearest_frame_first() -> Non
     assert names(asked.after) == [E, F]
 
 
-def test_only_so_much_of_the_run_is_carried() -> None:
-    """A run this fence admits reaches 1,435 frames, and the widening key stops
-    long before that."""
+def test_the_whole_run_is_carried_by_default() -> None:
+    """No ceiling: eight was one and the reader hit it, sixty was the next and
+    they hit that too. The whole run rides with the set, which measured over a
+    round's thirty sets is 3,808 frames and about 316 KB."""
     run = [sha_of(str(n)) for n in range(30)]
-    asked = label.questions(
-        [("Lumix", shot(run))],
-        {(run[14], run[15]): HIGH},
-        context=3,
-    )
+    asked = label.questions([("Lumix", shot(run))], {(run[14], run[15]): HIGH})
 
     assert len(asked) == 1
-    assert len(asked[0].before) == 3
-    assert len(asked[0].after) == 3
+    assert len(asked[0].before) == 14  # everything before the stack
+    assert len(asked[0].after) == 14  # and everything after it
+
+
+def test_a_ceiling_can_still_be_asked_for() -> None:
+    run = [sha_of(str(n)) for n in range(30)]
+    asked = label.questions(
+        [("Lumix", shot(run))], {(run[14], run[15]): HIGH}, context=3
+    )
+
+    assert (len(asked[0].before), len(asked[0].after)) == (3, 3)
 
 
 def test_each_frame_outside_carries_its_gap_from_the_stack() -> None:

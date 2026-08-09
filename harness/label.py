@@ -103,25 +103,28 @@ SETS = 30
 # nothing and is exactly the member ADR 0003 expects to be missed, so choosing
 # context by the Match would hide the failure the reader is here to find.
 #
-# Eight was the first ceiling and the reader hit it: a long burst of the same
-# subject is still the same subject eight frames out, and the question "where
-# does this end" cannot be answered from inside the part that looks alike.
+# **There is no ceiling.** Eight was the first one and the reader hit it; sixty
+# was the second and they hit that too, which is the answer to whether a number
+# picked here can be the right one. A long burst of the same subject is still
+# the same subject sixty frames out, and "where does this end" cannot be
+# answered from inside the part that looks alike.
 #
-# 60 rather than a smaller number that would need raising again. It is chosen to
-# stop being the thing in the way: measured over the sets a round samples, the
-# runs they sit in are 2 to 56 frames long for all but four of the thirty, so at
-# this reach the reader sees the whole run nearly every time and the cap is not
-# what stops them. The four that are longer -- 286, 384, 443, 810 and 1,435
-# frames -- have no width that would show them whole, and nothing useful to show
-# if it did.
+# The reason a ceiling looked necessary was cost, and measuring it took the
+# argument away: the whole run either side of every set a round samples is 3,808
+# frames in total, about 316 KB of shas over the loopback, against 85 KB at
+# sixty. That buys widening with no round trip and no limit to explain.
 #
-# The cost is paid once, in the payload: 30 sets carrying up to 120 frames each
-# is around 300 KB over the loopback, which buys widening with no round trip.
-# What bounds the view in practice is the room on screen rather than this number
-# -- past ten or so either side the frames are small, which the reader can see
-# for themselves and narrow back from.
-CONTEXT = 60
+# What bounds the view now is the room on screen, which is the reader's own
+# judgement and visible to them while they make it. `harness/page.js` lays the
+# frames out at a floor size and lets the box scroll rather than shrinking them
+# away to nothing.
+CONTEXT = None
 SHOWN = 1
+
+# A bound on the request field rather than on the view: `shown` arrives from a
+# client and indexes a slice, so it is checked for being a sane positive number
+# and nothing more. Asking for more than there is returns what there is.
+MOST = 100_000
 
 DEFAULT_PORT = 8771  # the grid is on 8770 and this is not the grid
 
@@ -251,7 +254,7 @@ def questions(
     runs: Iterable[Run],
     points: Points,
     strictness: int = STRICTNESS,
-    context: int = CONTEXT,
+    context: int | None = CONTEXT,
 ) -> list[Question]:
     """Every candidate stack there is to ask about, with what surrounds it.
 
@@ -260,14 +263,16 @@ def questions(
     whichever stack it borders. Which is the whole shape of the second complaint:
     the frame that should have been included is usually sitting right there.
 
-    Up to `context` frames are carried each side rather than one, so the reader
-    can widen the view when the answer depends on what is past the edge. Only the
-    nearest still decides the margin: the margin is about *this* boundary, and a
-    frame five along is its own boundary with its own question.
+    Up to `context` frames are carried each side rather than one -- the whole run
+    when it is None, which is the default and what the reader gets -- so widening
+    the view is a local move however far it goes. Only the nearest still decides
+    the margin: the margin is about *this* boundary, and a frame five along is
+    its own boundary with its own question.
     """
     asked: list[Question] = []
     for camera, run in runs:
         shas = [sha for sha, _ in run]
+        reach = len(shas) if context is None else context
         taken = dict(run)
         stacks = link(shas, points, strictness)
         at = 0
@@ -278,11 +283,11 @@ def questions(
                 continue
             before = tuple(
                 (shas[index], taken[shas[first]] - taken[shas[index]])
-                for index in range(first - 1, max(first - context - 1, -1), -1)
+                for index in range(first - 1, max(first - reach - 1, -1), -1)
             )
             after = tuple(
                 (shas[index], taken[shas[index]] - taken[shas[last]])
-                for index in range(last + 1, min(last + context + 1, len(shas)))
+                for index in range(last + 1, min(last + reach + 1, len(shas)))
             )
             question = Question(
                 camera=camera,
@@ -648,10 +653,6 @@ class LabelServer(ThreadingHTTPServer):
         return {
             "sets": sets,
             "shown": SHOWN,
-            # The client honours this rather than keeping its own copy: the
-            # server refuses an answer claiming a wider view than it allows, and
-            # two constants drifting apart would be a refusal nobody can see.
-            "context": CONTEXT,
             "strictness": STRICTNESS,
             "given": sum(1 for entry in sets if entry["answer"] is not None),
             # What is left to judge is what is left in the sample, which is
@@ -777,7 +778,7 @@ class LabelHandler(BaseHTTPRequestHandler):
         # against it, so a frame that was off screen cannot be marked as one the
         # reader saw and judged.
         shown = payload.get("shown", SHOWN)
-        if type(shown) is not int or not 1 <= shown <= CONTEXT:
+        if type(shown) is not int or not 1 <= shown <= MOST:
             self._json(400, {"error": "shown"})
             return
 
@@ -893,7 +894,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"labelling harness on {url}  -- disposable, see the module docstring")
     print(f"  strictness      {args.strictness} provisional, {matches.METHOD}")
     print(f"  sets            {len(asked)} sampled, least decisive first")
-    print(f"  context         {SHOWN} frame each side, widened to {CONTEXT} with +")
+    widest = max((max(len(q.before), len(q.after)) for q in asked), default=0)
+    print(
+        f"  context         {SHOWN} frame each side, widened with k up to the whole "
+        f"run -- {widest} at the most here"
+    )
     print(f"  cameras         {', '.join(cameras)}")
     print(f"  margins         {asked[0].margin} to {asked[-1].margin} points from the line")
     print(f"  labels          {labels_db}")
