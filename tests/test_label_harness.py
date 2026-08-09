@@ -227,20 +227,12 @@ def answers(tmp_path: Path):
     conn.close()
 
 
-def given(conn, **overrides) -> None:
+ASKED = Question(camera="Lumix", members=(A, B), before=None, after=C, margin=2)
+
+
+def given(conn, **marks) -> None:
     label.record(
-        conn,
-        **{
-            "members": (A, B),
-            "camera": "Lumix",
-            "before": None,
-            "after": C,
-            "margin": 2,
-            "evicted": (),
-            "included": (),
-            "unsure": False,
-            **overrides,
-        },
+        conn, ASKED, **{"evicted": (), "included": (), "unsure": False, **marks}
     )
 
 

@@ -12,6 +12,9 @@ repository root is the thing that runs: the grid and triage website, and the sch
   `migrate`, `triage` and `reveal` from `photolib`; the arrow never points the other way.
 - `archive/v1/` is the previous implementation, kept as **read-only reference**. Read it
   freely; do not edit it, refactor it, or fix its bugs.
+- `harness/` is the labelling harness, **scaffolding with a stated end of life**: it settles
+  the strictness threshold and is deleted whole once the grid ticket lands. Same one-way
+  arrow as `archive/pipeline/`.
 - **`Open Photo Vault.cmd`** at the root is the double-click launcher for the website.
 
 ## Hard rules
@@ -208,24 +211,19 @@ against a median of 5 beyond two minutes.
 python -m photolib.matches
 ```
 
-To judge those Matches. **`harness/` is scaffolding with a stated end of life** — the
-labelling harness ADR 0003 says the strictness threshold will be settled by, and it is
-expected to be deleted whole once the grid ticket lands. It is not part of the shipped
-website: nothing in `photolib/` imports it, no route of `photolib.grid` reaches it, and the
-arrow points the way `archive/pipeline/`'s does. It shows one candidate stack at a time with
-the frame before and after it, which is what lets one screen answer both of the reader's
-complaints — *does this stack hold something that does not belong*, and *is it missing
-something that should be here*. Space accepts the stack as drawn, clicking a member says it
-does not belong, clicking a neighbour says it should have been included, and `u` records
-**not sure**, which is a first-class answer rather than a skip. Sets are drawn from wherever
-the Match is least decisive and dealt out a camera at a time, so a threshold calibrated on the
-body the operator shoots most does not quietly misbehave on the other four; `STRICTNESS` in
-that module is a provisional line to disagree with and not the answer. Answers go to a
-`labels.sqlite3` of its own beside the catalog — **never `state.sqlite3`**, which holds
-irreplaceable triage decisions — and it is not a migrated database, because a disposable table
-has no business in the shipped schema. Frames come from the same substrate tree the overlay
-draws from. Stopping it loses nothing and an answer already given comes back with its set so it
-can be revised. Its one test is the sampling, over scores written in the test file.
+To judge those Matches — the **labelling harness** ADR 0003 says strictness will be settled
+by. It shows one candidate stack at a time with the frame before and after it, which is what
+lets one screen answer both of the reader's complaints: *does this stack hold something that
+does not belong*, and *is it missing something that should be here*. Space accepts the stack
+as drawn, clicking a member says it does not belong, clicking a neighbour says it should have
+been included — each click is recorded as it is made — and `u` records **not sure**, which is
+an answer rather than a skip. Sets are drawn from wherever the Match is least decisive and
+dealt out a camera at a time; `STRICTNESS` there is a provisional line to disagree with and
+not the answer. One run is one of ADR 0003's two rounds of thirty, and the second round is a
+second run at whatever the first round moved the line to — `--strictness` and `--sets` say so.
+Answers go to a `labels.sqlite3` of its own beside the catalog, **never `state.sqlite3`**, and
+it is not a migrated database because a disposable table has no business in the shipped
+schema. Frames come from the substrate tree. Its one test is the sampling.
 
 ```bash
 python -m harness.label --open

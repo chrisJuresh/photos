@@ -73,7 +73,7 @@ main {
   overflow-x: auto;
 }
 
-.group {
+.box {
   min-width: 0;
   display: flex;
   gap: 6px;
@@ -83,7 +83,7 @@ main {
   background: var(--panel);
 }
 
-.group.neighbour { border-style: dashed; background: none; }
+.box.neighbour { border-style: dashed; background: none; }
 
 .frame {
   position: relative;

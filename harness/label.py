@@ -71,10 +71,12 @@ from photolib.config import load, substrate_path
 # are what will move it.
 STRICTNESS = 20
 
-# How many sets are worth judging. ADR 0003: two rounds of about thirty, the
-# first calibrating the threshold and the second -- drawn after re-running with
-# the first round's answers -- checking the work.
-SETS = 60
+# How many sets one round is worth. ADR 0003 asks for two rounds of about thirty,
+# and they are two *runs* of this harness rather than sixty sets in one sitting:
+# the second is "drawn after re-running with the first round's answers", so the
+# line has moved by then and the sample it draws is a different one. `--sets` and
+# `--strictness` are how the second round says so.
+SETS = 30
 
 DEFAULT_PORT = 8771  # the grid is on 8770 and this is not the grid
 
@@ -100,7 +102,7 @@ class Question:
     margin: int  # points between the weakest evidence and `STRICTNESS`
 
 
-def score(points: Points, a: str, b: str) -> int:
+def match(points: Points, a: str, b: str) -> int:
     """The Match between two frames, or zero where there is no row.
 
     A pair with no row is a pair the harness has no evidence for -- the screen
@@ -131,7 +133,7 @@ def link(
     stacks: list[list[str]] = []
     holding: list[str] = []
     for frame in run:
-        if holding and all(score(points, member, frame) >= strictness for member in holding):
+        if holding and all(match(points, member, frame) >= strictness for member in holding):
             holding.append(frame)
         else:
             if holding:
@@ -159,14 +161,20 @@ def _margin(
     linkage is what it would have had to satisfy. Floored at zero, so a neighbour
     that agrees with every member and was split off anyway -- which the forward
     walk can do -- reads as the coin toss it is rather than as a negative.
+
+    The two terms are not on the same scale and cannot be: a Match runs upwards
+    without a bound, so a member pair can sit hundreds of points above the line,
+    while a neighbour can only be `strictness` below it. That asymmetry is the
+    truth about the distances and not a skew, and it is invisible to the ordering
+    -- it only ever separates sets that are decisive either way.
     """
     weakest = [
-        score(points, early, late) - strictness
+        match(points, early, late) - strictness
         for index, early in enumerate(members)
         for late in members[index + 1 :]
     ]
     weakest += [
-        strictness - min(score(points, neighbour, member) for member in members)
+        strictness - min(match(points, neighbour, member) for member in members)
         for neighbour in neighbours
         if neighbour is not None
     ]
@@ -345,26 +353,28 @@ def store(path: Path) -> sqlite3.Connection:
 
 def record(
     conn: sqlite3.Connection,
+    question: Question,
     *,
-    members: Sequence[str],
-    camera: str | None,
-    before: str | None,
-    after: str | None,
-    margin: int,
     evicted: Sequence[str],
     included: Sequence[str],
     unsure: bool,
 ) -> str:
-    """File one answer, replacing whatever the reader said about it before."""
+    """File one answer, replacing whatever the reader said about it before.
+
+    The question rather than five of its fields, because reading the labels
+    afterwards means asking how the verdicts fell across the grey band and across
+    the bodies -- so what was asked is stored beside what was answered, and there
+    is one place that decides which parts of it that is.
+    """
     given = verdict(evicted=evicted, included=included, unsure=unsure)
     conn.execute(
         _RECORD,
         (
-            key(members),
-            camera,
-            before,
-            after,
-            margin,
+            key(question.members),
+            question.camera,
+            question.before,
+            question.after,
+            question.margin,
             given,
             json.dumps(list(evicted)),
             json.dumps(list(included)),
@@ -404,6 +414,11 @@ SUBSTRATE_ROUTE = re.compile(r"^/d/([0-9a-f]{64})\.webp$")
 
 MAX_ANSWER_BODY = 8 * 1024
 
+# Copied from `photolib.grid` rather than imported from it, and this is the one
+# place that is the right way round: importing would leave the shipped server
+# holding a name this directory uses, and deleting `harness/` has to leave
+# nothing behind. The copy is small, it is checked against the original whenever
+# either moves, and the whole of it goes at once.
 SECURITY_HEADERS = (
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "no-referrer"),
@@ -438,14 +453,14 @@ class LabelServer(ThreadingHTTPServer):
             {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
         )
 
-    def judge(self, **answer) -> dict:
+    def judge(self, question: Question, **marks) -> dict:
         """Record one answer and hand back the sample it changed.
 
         One lock over the write and the read that follows it, so the counter the
-        reader is shown is the count as of their own keystroke.
+        reader is shown is the count as of their own click.
         """
         with self._lock:
-            record(self.labels, **answer)
+            record(self.labels, question, **marks)
             return self._payload()
 
     def payload(self) -> dict:
@@ -455,7 +470,7 @@ class LabelServer(ThreadingHTTPServer):
     def _payload(self) -> dict:
         """The whole sample, with whatever the reader has already said about it.
 
-        All of it at once: sixty sets of shas is a few tens of kilobytes, and
+        All of it at once: thirty sets of shas is a few tens of kilobytes, and
         sending it whole is what makes going back to revise an answer a local
         move rather than a round trip.
         """
@@ -476,7 +491,7 @@ class LabelServer(ThreadingHTTPServer):
             "strictness": STRICTNESS,
             "given": sum(1 for entry in sets if entry["answer"] is not None),
             # What is left to judge is what is left in the sample, which is
-            # ADR 0003's two rounds of thirty unless the catalog held fewer.
+            # ADR 0003's round of thirty unless the catalog held fewer.
             "useful": len(sets),
         }
 
@@ -612,11 +627,7 @@ class LabelHandler(BaseHTTPRequestHandler):
         self._json(
             200,
             self.server.judge(
-                members=question.members,
-                camera=question.camera,
-                before=question.before,
-                after=question.after,
-                margin=question.margin,
+                question,
                 evicted=marks["evicted"],
                 included=marks["included"],
                 unsure=unsure,
@@ -639,6 +650,10 @@ class LabelHandler(BaseHTTPRequestHandler):
         if content_type != "application/json":
             self.close_connection = True
             self._json(415, {"error": "content-type"})
+            return None
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self._json(400, {"error": "body"})
             return None
         raw_length = self.headers.get("Content-Length")
         if raw_length is None or not raw_length.strip().isdigit():
@@ -669,7 +684,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--open", action="store_true", help="open a browser once bound")
     parser.add_argument(
-        "--sets", type=int, default=SETS, help="how many sets to sample (default 60)"
+        "--sets",
+        type=int,
+        default=SETS,
+        help="how many sets one round samples (default 30, ADR 0003's round)",
     )
     parser.add_argument(
         "--strictness",

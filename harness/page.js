@@ -55,11 +55,13 @@ function frame(sha, role, marked) {
   return button;
 }
 
-function group(shas, role, marked) {
-  const box = document.createElement("div");
-  box.className = `group ${role}`;
-  for (const sha of shas) box.append(frame(sha, role, marked(sha)));
-  return box;
+// A box rather than a group: CONTEXT.md keeps "group" off the stack, and this is
+// the stack as drawn, with the border that states the claim being judged.
+function box(shas, role, marked) {
+  const holder = document.createElement("div");
+  holder.className = `box ${role}`;
+  for (const sha of shas) holder.append(frame(sha, role, marked(sha)));
+  return holder;
 }
 
 function draw() {
@@ -68,11 +70,11 @@ function draw() {
 
   stage.replaceChildren();
   if (set.before) {
-    stage.append(group([set.before], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
+    stage.append(box([set.before], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
   }
-  stage.append(group(set.members, "member", (sha) => (mark.out.has(sha) ? "out" : null)));
+  stage.append(box(set.members, "member", (sha) => (mark.out.has(sha) ? "out" : null)));
   if (set.after) {
-    stage.append(group([set.after], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
+    stage.append(box([set.after], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
   }
 
   const answer = set.answer;
@@ -103,7 +105,11 @@ function countUp() {
   );
 }
 
-async function send(unsure) {
+// A click is an answer, not a pencil mark: the set is recorded the moment the
+// reader says a frame does not belong, and the keystroke that follows only says
+// they are finished with it. So nothing is lost by walking away mid-set, and
+// "clicking a frame records that it does not belong" is true of the click.
+async function send(unsure, advance) {
   const set = sample.sets[at];
   const mark = marksFor(at);
   const response = await fetch("/api/answer", {
@@ -121,32 +127,48 @@ async function send(unsure) {
     return;
   }
   sample = await response.json();
-  marks.delete(at);
-  step(1, true);
+  marks.delete(at); // the stored answer is the marks now
+  if (advance) step(1, true);
+  else draw();
+}
+
+// The next set nobody has answered, wrapping past the end, or -1 when they all
+// are. Wrapping is what keeps the last set from being a dead end: a reader who
+// arrows past a few and then finishes the last one is sent back to the gaps
+// rather than left redrawing the set they just answered.
+function unanswered(from) {
+  const total = sample.sets.length;
+  for (let offset = 0; offset < total; offset += 1) {
+    const index = (from + offset + total) % total;
+    if (!sample.sets[index].answer) return index;
+  }
+  return -1;
 }
 
 // Forward past whatever is already answered, so a reader who stops and comes
 // back carries on rather than re-judging. Backwards is always one step, because
 // backwards is how an answer gets revised.
 function step(by, skipAnswered = false) {
-  let next = at + by;
-  while (skipAnswered && next < sample.sets.length && sample.sets[next].answer) next += 1;
-  if (next < 0 || next >= sample.sets.length) {
-    if (skipAnswered && sample.given >= sample.sets.length) {
-      stage.replaceChildren();
-      const done = document.createElement("p");
-      done.className = "done";
-      done.textContent = "every set in this sample is answered. Nothing more is useful here.";
-      stage.append(done);
-      about.textContent = "";
-      said.textContent = "← to go back over any of them";
-      countUp();
-      return;
-    }
-    next = Math.min(Math.max(next, 0), sample.sets.length - 1);
+  if (skipAnswered) {
+    const next = unanswered(at + by);
+    if (next < 0) return finished();
+    at = next;
+    draw();
+    return;
   }
-  at = next;
+  at = Math.min(Math.max(at + by, 0), sample.sets.length - 1);
   draw();
+}
+
+function finished() {
+  stage.replaceChildren();
+  const done = document.createElement("p");
+  done.className = "done";
+  done.textContent = "every set in this sample is answered. Nothing more is useful here.";
+  stage.append(done);
+  about.textContent = "";
+  said.textContent = "← to go back over any of them";
+  countUp();
 }
 
 stage.addEventListener("click", (event) => {
@@ -157,16 +179,16 @@ stage.addEventListener("click", (event) => {
   const sha = button.dataset.sha;
   if (held.has(sha)) held.delete(sha);
   else held.add(sha);
-  draw();
+  send(false, false);
 });
 
 document.addEventListener("keydown", (event) => {
   if (!sample) return;
   if (event.key === " ") {
     event.preventDefault();
-    send(false);
+    send(false, true);
   } else if (event.key === "u" || event.key === "U") {
-    send(true);
+    send(true, true);
   } else if (event.key === "ArrowRight") {
     step(1);
   } else if (event.key === "ArrowLeft") {
@@ -174,7 +196,7 @@ document.addEventListener("keydown", (event) => {
   } else if (event.key === "Backspace") {
     event.preventDefault();
     marks.set(at, { out: new Set(), in: new Set() });
-    draw();
+    send(false, false);
   }
 });
 
