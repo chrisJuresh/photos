@@ -173,7 +173,7 @@
   <div class="panes">
     {#if marked.stacks}
       <div class="glass marks" use:refract>
-        <span class="pair">
+        <span class="nums">
           <strong>{count(marked.stacks)}</strong>
           <span class="muted">{marked.stacks === 1 ? "stack" : "stacks"}</span>
           <strong>{count(marked.photos)}</strong>
@@ -496,7 +496,7 @@
 
   /* Two numbers with their words, which is what makes them readable as a pair
      rather than as one number the reader has to guess the unit of. */
-  .marks .pair {
+  .marks .nums {
     display: flex;
     align-items: baseline;
     gap: 5px;

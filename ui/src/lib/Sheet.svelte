@@ -22,7 +22,7 @@
     // is — a tile displays them and does not hold them, which is what lets a
     // recycled tile come back with its mark.
     selecting = false,
-    marked = [],
+    markedKeys = [],
     onActivate = () => {},
     onOverride = async () => null,
     onExcludeFolder = () => {},
@@ -37,7 +37,7 @@
   // Marked-ness is looked up once per bind, so the set is built once per change
   // rather than scanned per tile — ~150 mounted tiles against a marked set that
   // is however long the reader made it.
-  const markedKeys = $derived(new Set(marked));
+  const lookup = $derived(new Set(markedKeys));
 
   // The chip cycles through the three states an override can be in. `clear`
   // deletes the row rather than storing a third value, so "the rules decide
@@ -113,7 +113,7 @@
   // mark survive recycling: a tile scrolled out is released and the one that
   // comes back is bound here, against the set as it stands now.
   function fillMark(el, item) {
-    el.dataset.marked = markedKeys.has(item.id) ? "on" : "off";
+    el.dataset.marked = lookup.has(item.id) ? "on" : "off";
   }
 
   onMount(() => {
@@ -183,7 +183,7 @@
   // recycled back in.
   let marksBound = "";
   $effect(() => {
-    const keys = marked.join(",");
+    const keys = markedKeys.join(",");
     if (!instance || keys === marksBound) return;
     marksBound = keys;
     instance.refill();

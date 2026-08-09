@@ -19,7 +19,7 @@ def query(on=True, window=10, sort="newest", filters=None):
     return {"stacking": {"on": on, "window": window}, "sort": sort, "filters": filters or {}}
 
 
-def group(key, ids):
+def stack(key, ids):
     return {"key": key, "ids": ids}
 
 
@@ -32,23 +32,23 @@ def test_a_tile_carries_the_whole_stack():
     member. The key stays the cover's id — that is what the tile is drawn as and
     what the tickbox has to be looked up by."""
     item = {"id": 1240, "m": [{"id": 1240}, {"id": 1241}, {"id": 1242}]}
-    assert call(SELECT, "groupOf", item) == {"key": 1240, "ids": [1240, 1241, 1242]}
+    assert call(SELECT, "stackOf", item) == {"key": 1240, "ids": [1240, 1241, 1242]}
 
 
 @needs_node
 def test_a_tile_with_no_members_stands_for_itself():
     """A stack of one and every tile with stacking off arrive without `m`, and a
     tile already carries an id — the same rule the overlay opens by."""
-    assert call(SELECT, "groupOf", {"id": 77}) == {"key": 77, "ids": [77]}
+    assert call(SELECT, "stackOf", {"id": 77}) == {"key": 77, "ids": [77]}
 
 
 @needs_node
 def test_marking_appends_and_unmarking_removes():
-    marks = call(SELECT, "toggle", [], group(1, [1, 2]))
-    assert marks == [group(1, [1, 2])]
-    marks = call(SELECT, "toggle", marks, group(9, [9]))
-    assert marks == [group(1, [1, 2]), group(9, [9])]
-    assert call(SELECT, "toggle", marks, group(1, [1, 2])) == [group(9, [9])]
+    marks = call(SELECT, "toggle", [], stack(1, [1, 2]))
+    assert marks == [stack(1, [1, 2])]
+    marks = call(SELECT, "toggle", marks, stack(9, [9]))
+    assert marks == [stack(1, [1, 2]), stack(9, [9])]
+    assert call(SELECT, "toggle", marks, stack(1, [1, 2])) == [stack(9, [9])]
 
 
 @needs_node
@@ -59,7 +59,7 @@ def test_the_marked_set_keeps_the_order_it_was_marked_in():
     order the reader clicked in."""
     marks = []
     for key in (9000, 12, 4400):
-        marks = call(SELECT, "toggle", marks, group(key, [key]))
+        marks = call(SELECT, "toggle", marks, stack(key, [key]))
     assert [entry["key"] for entry in marks] == [9000, 12, 4400]
 
 
@@ -67,14 +67,14 @@ def test_the_marked_set_keeps_the_order_it_was_marked_in():
 def test_the_reducer_does_not_touch_what_it_was_given():
     """A new array every time, because `$state` does not proxy into one deeply
     enough for a mutation to redraw the tickboxes."""
-    before = [group(1, [1])]
-    call(SELECT, "toggle", before, group(2, [2]))
-    assert before == [group(1, [1])]
+    before = [stack(1, [1])]
+    call(SELECT, "toggle", before, stack(2, [2]))
+    assert before == [stack(1, [1])]
 
 
 @needs_node
 def test_the_tally_is_stacks_and_the_photographs_in_them():
-    marks = [group(1, [1, 2, 3]), group(9, [9]), group(20, [20, 21])]
+    marks = [stack(1, [1, 2, 3]), stack(9, [9]), stack(20, [20, 21])]
     assert call(SELECT, "tally", marks) == {"stacks": 3, "photos": 6}
     assert call(SELECT, "tally", []) == {"stacks": 0, "photos": 0}
 
@@ -85,7 +85,7 @@ def test_the_tally_is_stacks_and_the_photographs_in_them():
 @needs_node
 def test_the_share_string_is_the_conditions_then_the_groups():
     """The example in the ticket, exactly."""
-    marks = [group(1234, [1234, 1235, 1236]), group(1240, [1240]), group(1251, [1251, 1252])]
+    marks = [stack(1234, [1234, 1235, 1236]), stack(1240, [1240]), stack(1251, [1251, 1252])]
     assert call(SELECT, "shareText", query(), marks) == (
         "stack=10s sort=newest filters=none\n"
         "[1234,1235,1236],[1240],[1251,1252]"

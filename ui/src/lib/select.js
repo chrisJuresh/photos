@@ -18,12 +18,12 @@
  * because that is what the tile is drawn as, and so what a recycled tile has to
  * look its tickbox up by.
  */
-export function groupOf(item) {
+export function stackOf(item) {
   return { key: item.id, ids: (item.m ?? [item]).map((frame) => frame.id) };
 }
 
 /**
- * Mark the group if it is not marked, unmark it if it is. A new array every
+ * Mark the stack if it is not marked, unmark it if it is. A new array every
  * time: `$state` does not proxy deeply enough for a mutation to repaint the
  * tickboxes, and reassignment is what makes them redraw.
  *
@@ -31,9 +31,9 @@ export function groupOf(item) {
  * in ascending numeric order — which would quietly reorder a report away from
  * the order the reader clicked in, and the order is part of what they saw.
  */
-export function toggle(marks, group) {
-  const without = marks.filter((entry) => entry.key !== group.key);
-  return without.length === marks.length ? [...marks, group] : without;
+export function toggle(marks, stack) {
+  const without = marks.filter((entry) => entry.key !== stack.key);
+  return without.length === marks.length ? [...marks, stack] : without;
 }
 
 /** How many stacks are marked, and how many photographs they hold. */
@@ -63,6 +63,6 @@ export function conditions(query) {
 
 /** The conditions line, then the marked ids grouped as the grid grouped them. */
 export function shareText(query, marks) {
-  const groups = marks.map((entry) => "[" + entry.ids.join(",") + "]").join(",");
-  return conditions(query) + "\n" + groups;
+  const stacks = marks.map((entry) => "[" + entry.ids.join(",") + "]").join(",");
+  return conditions(query) + "\n" + stacks;
 }
