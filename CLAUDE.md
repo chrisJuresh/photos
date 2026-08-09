@@ -155,6 +155,30 @@ pass alone. Measured: 24,283 tiles in 3m33s on an RTX 3080 Ti, decode-bound.
 python -m photolib.fingerprints
 ```
 
+To enumerate the **candidate pairs** — every pair of frames that could be one stack — and give
+each one the cheap **screen** ADR 0003 puts in front of the geometric check. A candidate is a
+pair inside one run of consecutive same-camera captures whose every gap is at or below the
+3600s ceiling, over the EXIF-dated population `photolib/browse.py` already stacks the grid
+over; complete linkage is why it is every pair of a run and not only the adjacent ones. The
+ceiling is a build-time commitment, because it decides how many candidates exist at all:
+3,634,381 at 3600s against 2,193,828 at 900s and 307,750 at 60s, and `--counts` prints that
+table without writing anything. The screen is the cosine of the two fingerprints, **stored per
+candidate rather than reduced to a yes-or-no**, because the fingerprint's own threshold is what
+ADR 0003 leaves unsettled and a number chosen later must be a re-read of these rows rather than
+another pass — it is not the reader's *strictness*, which is a threshold on the Match. A
+screened-out candidate is recorded as one, so that "never plausibly the same picture" stays
+distinguishable from "checked properly and disagreed"; that verdict is the one derived value in
+the table, and moving the screen constant is refused rather than silently answered at the old
+threshold. It reads the catalog on the NVMe and nothing else — not the substrates, not `G:`,
+and not `state.sqlite3`, which is not even attached. Resumable, idempotent, and it refuses
+while a writer holds the catalog.
+Measured: 3,632,211 pairs in 1m21s, of which 566,522 survive the screen at 0.40, and the
+table it wrote grew the catalog from 1,757 MB to 2,517 MB.
+
+```bash
+python -m photolib.candidates
+```
+
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
 it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
 then drops the facet vocabulary and every `total` the server had memoised — no restart.

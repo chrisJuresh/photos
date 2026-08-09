@@ -123,9 +123,21 @@ keeps stacks contiguous in capture order, and the match decides everything insid
 fence. It stopped being the only number stacking has — see `docs/adr/0003`.
 _Avoid_: threshold, tolerance, distance, sensitivity
 
+**Candidate**:
+Two frames the window has not ruled out — a pair inside one run of consecutive
+same-camera captures. Every pair of a run and not only the adjacent ones, because
+complete linkage makes a stack a clique. It is the pair set the offline match pass
+owes a verdict on, and it is enumerated over every EXIF-dated tile rather than over
+what a filter has left on screen, because membership does not depend on the view.
+A candidate the fingerprint rejects is **screened out** — never plausibly the same
+picture, and never checked properly; the rest are **survivors**, which is a statement
+about what is worth checking and never about whether the two frames match.
+_Avoid_: pair (that is a RAW and its JPEG, below), comparison, edge
+
 **Pair**:
 A tile whose files are a RAW and its JPEG. Collapsed permanently at build time, and
-not a stack.
+not a stack. A **candidate pair** is the other thing entirely, and the word is only
+safe there in full.
 _Avoid_: duplicate, sidecar, RAW+JPEG group
 
 **Near-duplicate**:
