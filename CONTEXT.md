@@ -97,6 +97,15 @@ and a handheld reposition, and collapses when the camera turns to face something
 Computed once, per pair, and stored; **strictness** is the reader's threshold on it.
 _Avoid_: similarity, score, distance, confidence
 
+**Fingerprint**:
+One vector per tile, computed from its substrate, that says roughly what the frame shows.
+It is the cheap screen in front of the match: two frames whose fingerprints disagree could
+not be the same picture and are never checked properly, and everything that survives is
+decided by the match rather than by this. High recall is what it is for; it is not evidence
+on its own, and no reader-facing knob is a threshold on it. Stored under the identity of the
+model that produced it, so two models are two populations and never one.
+_Avoid_: embedding (that is the implementation), signature, descriptor, hash, match
+
 **Linkage**:
 How much has to match before frames are one stack. *Complete* — every pair inside the
 stack — is the default, and it is what makes "two unrelated photographs never share a

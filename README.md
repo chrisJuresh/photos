@@ -27,7 +27,7 @@ except `/api/triage/*`, which writes the rule set to `state.sqlite3`.
 |---|---|
 | `photolib/` | The website. `grid` serves it; `triage_api`, `triage_screens`, `triage` and `probe` are the triage half; `config`, `db` and `migrate` are shared infrastructure. |
 | `ui/` | Svelte 5 source for the client. `npm run build` emits `photolib/static/bundle.{js,css}`, which are committed so the server runs from a clean checkout with no node toolchain. |
-| `migrations/` | The seven SQL migrations behind the catalog and state databases. |
+| `migrations/` | The eight SQL migrations behind the catalog and state databases. |
 | `tests/` | One suite over both the website and the archived pipeline. |
 | `archive/pipeline/` | The one-shot build pipeline that produced the vault — 16 modules, run to completion between 2026-08-01 and 2026-08-07. Still importable, still tested, not needed to serve the website. |
 | `archive/v1/` | The previous implementation, read-only reference, under a safety hold. |
@@ -43,8 +43,9 @@ The arrow never points the other way: `photolib.grid` imports nothing from `arch
 python -m pytest tests -q
 ```
 
-563 tests, temporary databases only — none of them opens a path from `config.toml`. Tests that
-need `ffmpeg`, `exiftool` or `rawpy` skip when the binary is absent rather than failing.
+1,036 tests, temporary databases only — none of them opens a path from `config.toml`. Tests
+that need `ffmpeg`, `exiftool` or `rawpy` skip when the binary is absent rather than failing,
+and none of them loads `torch` or a model: the fingerprint pass's encoder is a seam.
 
 [`CLAUDE.md`](CLAUDE.md) documents every command, what each one touches, and what it costs.
 

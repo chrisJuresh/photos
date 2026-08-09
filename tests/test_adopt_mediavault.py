@@ -500,7 +500,8 @@ def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
 
     Migration 005 adds the triage survey, which is a derived projection rebuilt
     by `archive.pipeline.triage_survey`; 006 adds Phase 4's promotion ledger; 007 adds
-    Phase 5's grouping, which is derived and rebuilt by `archive.pipeline.group`. None of
+    Phase 5's grouping, which is derived and rebuilt by `archive.pipeline.group`; 008 adds
+    the fingerprints, re-derivable from the substrates by `photolib.fingerprints`. None of
     them is ever written by this import, so all are named here rather than
     allowed in by a loosened assertion.
     """
@@ -517,6 +518,7 @@ def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
         "pair_key",
         "near_dup",
         "near_band",
+        "fingerprint",
     }
     connection = db.connect(*migrated)
     try:

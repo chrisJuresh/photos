@@ -61,9 +61,10 @@ procedure in passing, and do not treat the gap as a reason to redesign anything.
 ## Running and verifying
 
 The root build is a plain Python package with no venv. Its dependencies are `pytest`, `pillow`
-and `numpy`, plus `rawpy` for Phase 2b's DNG path; `ffmpeg` and `exiftool` are external
-binaries reached through PATH, and only Phase 2b needs them. Tests that need a binary skip when
-it is absent rather than failing. Tests run against temporary databases only; none of them
+and `numpy`, plus `rawpy` for Phase 2b's DNG path and `torch` for the fingerprint pass;
+`ffmpeg` and `exiftool` are external binaries reached through PATH, and only Phase 2b needs
+them. Tests that need a binary skip when it is absent rather than failing, and no test loads
+`torch` or a model at all — the encoder is a seam the suite passes a stand-in through. Tests run against temporary databases only; none of them
 opens a path from `config.toml`.
 
 ```bash
@@ -139,6 +140,19 @@ nothing. It reads `G:`: run it in the background and leave the drive alone while
 
 ```bash
 python -m photolib.substrates
+```
+
+To give every published tile a **fingerprint** — the DINOv2 ViT-S/14 embedding that
+`docs/adr/0003-stack-on-verified-match.md` screens candidate pairs with before anything
+expensive looks at them. Nothing reads these vectors yet and no tile looks different after a
+pass. It reads the substrate tree and the catalog, both on the NVMe, and never opens `G:`, so
+it cannot collide with anything reading the vault. Resumable, idempotent, and it names the
+tiles whose substrate is missing rather than letting them become tiles with no vector. The
+~85 MB of weights are fetched once by `torch.hub` and cached; `torch` is a dependency of this
+pass alone. Measured: 24,283 tiles in 3m33s on an RTX 3080 Ti, decode-bound.
+
+```bash
+python -m photolib.fingerprints
 ```
 
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
