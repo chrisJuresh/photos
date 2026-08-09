@@ -1,5 +1,12 @@
 # Stack the grid on capture time, not on the perceptual hash
 
+> **Superseded by [ADR 0003](0003-stack-on-verified-match.md) — the decision, not the
+> evidence.** Capture time alone is no longer what decides membership: a stack is now a
+> verified visual match, fenced by time. Everything below about *pHash* still holds and
+> is why nobody should re-try it; 0003 confirms it a second way, from the operator's own
+> labels. Two consequences recorded here are reversed there — a filter now shrinks a
+> stack rather than splitting it, and the grouping is materialised.
+
 The catalog carries a purpose-built near-duplicate subsystem — pHash, dHash, a
 banded `near_band` index and a populated `near_dup` table — so grouping the grid
 by perceptual similarity looks like the obvious implementation. It is the wrong
