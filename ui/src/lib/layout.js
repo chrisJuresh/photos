@@ -42,6 +42,34 @@ export function packRows(source, from, avail, atEnd, emit) {
   return start;
 }
 
+// The other half of `packRows`. That one solves the row equation for the height
+// every tile shares; this one solves it for each tile's width and walks the row
+// left to right accumulating the gaps. Together they are one equation, and it
+// lives here rather than in the renderer so that anything needing to know where
+// a tile is drawn -- a hit-test against tiles that are not mounted, say -- gets
+// the same answer the renderer got, by construction rather than by agreement.
+//
+// Plain data in, plain data out: `row` is one of the {top, height, from, to}
+// records `packRows` emitted, `items` the array it packed, `avail` the canvas
+// width it was packed against. Returns one {index, x, w} per tile in the row.
+//
+// (`Overlay.svelte` packs the fanned-out sheet with a third solution of the same
+// relation -- fixed box, height gives -- which is the dual problem and stays
+// where it is.)
+export function rowBoxes(row, items, avail) {
+  const boxes = [];
+  let x = 0;
+  for (let i = row.from; i < row.to; i++) {
+    // The last tile takes the remainder, so a row is exactly `avail` wide and
+    // rounding never accumulates into a ragged right edge.
+    const last = i === row.to - 1;
+    const w = last ? avail - x : Math.round(aspect(items[i]) * row.height);
+    boxes.push({ index: i, x, w });
+    x += w + GAP;
+  }
+  return boxes;
+}
+
 // First and last row index intersecting [top, bottom], by binary search.
 export function visibleRows(source, top, bottom) {
   if (!source.length) return null;
