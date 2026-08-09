@@ -110,7 +110,7 @@
 
   // Escape closes whatever is open, and a click anywhere that is not the header
   // does the same. Both are on window rather than on a backdrop element: a
-  // backdrop over the sheet would eat the click that reveals a photograph.
+  // backdrop over the sheet would eat the click that opens a photograph.
   function onkeydown(event) {
     if (event.key === "Escape") panel = "";
   }

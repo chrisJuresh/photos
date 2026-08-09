@@ -342,11 +342,13 @@ def _frame(row) -> dict:
 
 
 def _frames(rows, members: tuple | list) -> dict:
-    """`{"m": [...]}` for a stack worth opening, and nothing for one that is not.
+    """`{"m": [...]}` for a stack the tile cannot stand in for on its own.
 
-    A stack of one opens nothing — clicking it reveals in Explorer, as an
-    unstacked tile always has — so the key is absent rather than a list of one.
-    That is 6,297 of the 10,929 rows a four-second window leaves.
+    A stack of one is its own only frame, and the cover already carries an id, a
+    hash and dimensions — which is the whole of a frame — so the client builds
+    that list rather than being sent it. The key is absent rather than a
+    one-element list saying what the row beside it already says. That is 6,297
+    of the 10,929 rows a four-second window leaves.
     """
     if len(members) < 2:
         return {}
