@@ -109,12 +109,22 @@ had them available and did not read them. So they are enforced as well as writte
 which denies a write to the **main checkout** once another session has claimed it and tells you
 to take a worktree.
 
-It does not guess. A session claims the checkout the first time it actually writes, so an idle
-session and a read-only agent never claim anything, and a lone writer is never blocked. A claim
-goes stale an hour after its last write, which is how a finished session frees the tree. It
-fails **open** on anything it cannot read — no repo, no git, an unparseable payload — because
-blocking the only writer over state it merely failed to read is the worse error.
-`PHOTOS_ALLOW_SHARED_CHECKOUT=1` turns it off when it is wrong.
+It does not guess. A session claims the tree it works in the first time it actually writes, so
+an idle session and a read-only agent never claim anything, and a lone writer is never blocked.
+A claim stays live while **either** its last write or its transcript file is within twenty
+minutes — the transcript is the better signal of the two, because it moves on every turn, so a
+session that has spent twenty minutes reading still holds its tree where a last-write-only
+signal would hand it away mid-task. `SessionEnd` drops the claim outright, so a session that
+exits cleanly frees the tree at once rather than at the end of a timeout, and `SessionStart`
+says who is already writing here, so a second session can take a worktree before it collides
+rather than after. It fails **open** on anything it cannot read — no repo, no git, an
+unparseable payload — because blocking the only writer over state it merely failed to read is
+the worse error. `PHOTOS_ALLOW_SHARED_CHECKOUT=1` turns it off when it is wrong.
+
+One thing it judges **repository-wide rather than per tree**: `git stash`. The stack is shared
+by every worktree, so a push from a worktree is denied while any other session is live anywhere
+in the repository, which is the rule the `refs/stash` bullet below has always asserted. Reading
+the stack — `git stash list`, `git stash show` — is not a push and is never denied.
 
 Two limits worth knowing. **Committing from a worktree wants `git -C` with the path spelled
 out**: the guard reads a git call's target off `-C` and otherwise assumes the session's
@@ -197,9 +207,10 @@ worktrees:
 - **`refs/stash`** — the stash is one stack for the whole repository, shared by every worktree.
   `git stash` in one worktree pushes onto another's entries and renumbers them, so a later
   `git stash pop` or `git stash drop` in *either* takes the wrong one. This is the one place a
-  worktree looks like isolation and is not. **Do not stash while another session is live.**
-  Commit instead — a commit belongs to your branch and cannot be popped by a stranger — and
-  leave someone else's `stash@{0}` alone even when it looks redundant.
+  worktree looks like isolation and is not. **Do not stash while another session is live** — the
+  guard denies the push from every tree, not just this one. Commit instead — a commit belongs to
+  your branch and cannot be popped by a stranger — and leave someone else's `stash@{0}` alone
+  even when it looks redundant.
 - **`G:`** — nothing else may touch it while a step that reads it runs, Explorer windows
   included. That is rule 1 territory, and it applies across sessions.
 - **`E:`** — the catalog, the thumbnails and the substrates share one NVMe. A ticket
