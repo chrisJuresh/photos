@@ -655,6 +655,27 @@ code,
   outline-offset: -3px;
 }
 
+/* A drag across tiles is a gesture, not a text selection, and the browser will
+   happily read it as one across the paths a triage tile carries. */
+#canvas.selecting {
+  user-select: none;
+}
+
+/* The rubber-band box, drawn by sheet.js in canvas coordinates — so it stays
+   over the tiles it is measuring while the sheet scrolls under it. Transparent
+   to the pointer, because the thing being pressed is what is underneath it, and
+   above the tiles, which are appended after it as the drag mounts new rows. */
+.marquee {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 /* ------------------------------------------------------------------ chrome */
 
 h1 {

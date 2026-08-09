@@ -13,6 +13,7 @@
 //   fill(el, item)                         called when an item is bound to one
 //   activate(item, event)                  a click that was not handled by fill's
 //                                          own controls
+//   sweepStart/sweepMove/sweepEnd          the marquee, while `setSweeping(true)`
 //
 // The packing and the recycling are step 6's, unchanged. Two things about the
 // windowing are not, because step 6 was measured on a sheet the size of one
@@ -32,6 +33,7 @@ import {
   deck,
   packRows,
   rowBoxes,
+  tilesIn,
   visibleRows,
 } from "./layout.js";
 
@@ -49,6 +51,12 @@ const PREFETCH_PX = 2500;
 // gives one origin — so they have to start early, not fast.
 const BEHIND = 1;
 const AHEAD = 2;
+
+// How far the pointer travels before a press is a drag rather than a click. A
+// hand that means to mark one tile still moves a pixel or two on the way down,
+// and a marquee that fired on those would replace select mode's single click
+// with a one-tile sweep that says the same thing less clearly.
+const SWEEP_MIN = 4;
 
 // Chrome clamps an element's height near 33.5M px and then disagrees with any
 // layout computed past it. Triage's largest screen is 1.24M rows, which wants
@@ -195,6 +203,9 @@ export function createSheet(canvas, sentinel, options) {
     photo.className = "tile-photo";
     const img = document.createElement("img");
     img.decoding = "async";
+    // Otherwise a press on a photograph starts the browser's own image drag,
+    // which swallows the pointer stream a marquee is drawn from.
+    img.draggable = false;
     // No loading="lazy": it layers the browser's own viewport heuristic on top
     // of our windowing, and the two disagree at the edges.
     img.addEventListener("load", () => el.classList.add("loaded"));
@@ -401,6 +412,9 @@ export function createSheet(canvas, sentinel, options) {
     frame = requestAnimationFrame(() => {
       frame = 0;
       render();
+      // A drag held still while the wheel scrolls is still growing its box: the
+      // anchor is a point on the sheet and the sheet has moved under the hand.
+      if (drag) trackSweep();
       if (needsMore()) loadNext();
     });
   }
@@ -427,8 +441,131 @@ export function createSheet(canvas, sentinel, options) {
     if (needsMore()) loadNext();
   }
 
+  // ------------------------------------------------------------- the marquee
+
+  // A press on the canvas rubber-bands a box over the tiles it crosses. Three
+  // things about it live here rather than above the sheet, and all three for the
+  // same reason: this file holds `rows`, `items` and `width`, which is the whole
+  // of the geometry the box is tested against. Nothing here knows what a mark
+  // is — the seams hand up the tiles the box covers and the caller decides.
+  //
+  // Coordinates are the canvas's own throughout, so a wheel-scroll mid-drag
+  // extends the box over content rather than dragging it over the window: the
+  // anchor is a point on the sheet, and the sheet is what moves. That is also
+  // what lets a drag reach tiles that were never mounted, which is most of them.
+  let sweeping = false;
+  let drag = null; // {ax, ay, cx, cy, index, live} or null
+  let sweepFrame = 0;
+  let band = null;
+  // A finished drag leaves a click behind it, on whichever element the press and
+  // the release have in common. It is not a mark, and it is the one click select
+  // mode must not act on.
+  let swept = false;
+
+  // The pointer, in canvas coordinates. Read per event rather than cached: the
+  // canvas moves under a scroll, and the drag is meant to notice.
+  function pointAt(clientX, clientY) {
+    const box = canvas.getBoundingClientRect();
+    return { x: clientX - box.left, y: clientY - box.top };
+  }
+
+  function drawBand(rect) {
+    if (!band) {
+      band = document.createElement("div");
+      band.className = "marquee";
+      canvas.appendChild(band);
+    }
+    band.hidden = false;
+    band.style.width = rect.right - rect.left + "px";
+    band.style.height = rect.bottom - rect.top + "px";
+    band.style.transform = "translate(" + rect.left + "px," + rect.top + "px)";
+  }
+
+  // The box as it now stands, and what it covers. Called from a frame rather
+  // than from the pointer event, and from the scroll handler as well, so a drag
+  // held still over a scrolling sheet keeps up.
+  function trackSweep() {
+    if (!drag) return;
+    const { x, y } = pointAt(drag.cx, drag.cy);
+    if (!drag.live) {
+      if (Math.abs(x - drag.ax) < SWEEP_MIN && Math.abs(y - drag.ay) < SWEEP_MIN) return;
+      drag.live = true;
+      options.sweepStart(drag.index === null ? null : items[drag.index], drag.index);
+    }
+    const rect = {
+      left: Math.min(drag.ax, x),
+      right: Math.max(drag.ax, x),
+      top: Math.min(drag.ay, y),
+      bottom: Math.max(drag.ay, y),
+    };
+    drawBand(rect);
+    options.sweepMove(tilesIn(rows, items, width, rect).map((index) => items[index]));
+  }
+
+  function onPointerDown(event) {
+    swept = false;
+    // Shift is the other gesture: it extends from the last tile touched, and a
+    // press that could be either would have to guess which.
+    if (!sweeping || event.button !== 0 || event.shiftKey) return;
+    const { x, y } = pointAt(event.clientX, event.clientY);
+    // The tile under the pointer decides the whole drag, and it is asked for
+    // the same way every other tile in the box will be — not off the DOM, so a
+    // press on empty canvas below the rows is one answer rather than a missing
+    // element handled somewhere else.
+    const under = tilesIn(rows, items, width, { left: x, top: y, right: x, bottom: y });
+    drag = {
+      ax: x,
+      ay: y,
+      cx: event.clientX,
+      cy: event.clientY,
+      index: under.length ? under[0] : null,
+      live: false,
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+  }
+
+  function onPointerMove(event) {
+    if (!drag) return;
+    drag.cx = event.clientX;
+    drag.cy = event.clientY;
+    if (sweepFrame) return;
+    sweepFrame = requestAnimationFrame(() => {
+      sweepFrame = 0;
+      trackSweep();
+    });
+  }
+
+  function onPointerUp(event) {
+    if (!drag) return;
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("pointercancel", onPointerUp);
+    cancelAnimationFrame(sweepFrame);
+    sweepFrame = 0;
+    // The last move may still be waiting on a frame, and the release is itself a
+    // position: the box commits where the reader let go, not where the last
+    // frame happened to catch it.
+    drag.cx = event.clientX;
+    drag.cy = event.clientY;
+    trackSweep();
+    const live = drag.live;
+    drag = null;
+    if (band) band.hidden = true;
+    if (!live) return;
+    swept = true;
+    options.sweepEnd();
+  }
+
+  canvas.addEventListener("pointerdown", onPointerDown);
+
   // One delegated listener. Per-tile listeners and recycling are incompatible.
   function onClick(event) {
+    if (swept) {
+      swept = false;
+      return;
+    }
     const tile = event.target.closest(".tile");
     if (!tile || !canvas.contains(tile)) return;
     const index = Number(tile.dataset.index);
@@ -532,6 +669,17 @@ export function createSheet(canvas, sentinel, options) {
     focus(index) {
       mounted.get(index)?.focus();
     },
+    // Whether a press on the canvas rubber-bands. Select mode turns on and off
+    // under a sheet that outlives the toggle, exactly as the tickboxes do.
+    setSweeping(value) {
+      sweeping = value;
+    },
+    // The items between two indices, inclusive, in the order the sheet holds
+    // them — which is the order the grid is sorted in. Shift-click's range: the
+    // gesture knows two tiles and this is what lies between them.
+    itemsBetween(a, b) {
+      return items.slice(Math.min(a, b), Math.max(a, b) + 1);
+    },
     // Re-bind one already-mounted item, for an override toggle that changed it.
     refresh(item) {
       for (const [index, el] of mounted) {
@@ -541,11 +689,16 @@ export function createSheet(canvas, sentinel, options) {
     destroy() {
       generation++;
       canvas.removeEventListener("click", onClick);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
       window.removeEventListener("scroll", onScroll);
       resize.disconnect();
       intersect.disconnect();
       clearTimeout(reflowTimer);
       cancelAnimationFrame(placeholderFrame);
+      cancelAnimationFrame(sweepFrame);
     },
   };
 }

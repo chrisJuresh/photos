@@ -121,6 +121,46 @@ export function deck(size, width) {
   return cards;
 }
 
+// Which tiles a rubber-band box covers, as indices into `items`, in the order
+// the grid is sorted in.
+//
+// The marquee cannot ask the DOM: about three viewports of tiles are mounted at
+// a time and the rest are pooled away, so an element hit-test would answer for a
+// fraction of what the box crosses. It asks the geometry instead — the committed
+// rows, the items they packed, and the canvas width they were packed against —
+// through the same `rowBoxes` walk the renderer places tiles with, which is what
+// makes the box and the picture agree by construction.
+//
+// `rect` is {left, top, right, bottom} in canvas coordinates, already the right
+// way round; the drag is what knows which of its two corners came first. Both
+// ends are inclusive, because the reader cannot see which pixel they pressed.
+//
+// A tile is its photograph here, not its element: a stacked one stands `DECK_H`
+// taller, into the row gap above it, and a box drawn in that gap is a box over
+// the space between two rows in every other respect. Sweeping the deck would
+// make the gap catch tiles for stacked rows and not for unstacked ones, which
+// is a rule nobody could see.
+//
+// The row span comes from the same binary search the renderer windows with, so
+// this is O(log rows + tiles in the box) rather than a walk of a sheet that
+// reaches 686,351 entries. `visibleRows` clamps its answer into the array rather
+// than reporting an empty span, so each end is checked against its own row here:
+// a box dragged into the reserved height below the last packed row is over
+// nothing, and clamping alone would call that the last row.
+export function tilesIn(rows, items, avail, rect) {
+  const span = visibleRows(rows, rect.top, rect.bottom);
+  if (!span) return [];
+  const hits = [];
+  for (let r = span[0]; r <= span[1]; r++) {
+    const row = rows[r];
+    if (row.top > rect.bottom || row.top + row.height < rect.top) continue;
+    for (const box of rowBoxes(row, items, avail)) {
+      if (box.x <= rect.right && box.x + box.w >= rect.left) hits.push(box.index);
+    }
+  }
+  return hits;
+}
+
 // First and last row index intersecting [top, bottom], by binary search.
 export function visibleRows(source, top, bottom) {
   if (!source.length) return null;

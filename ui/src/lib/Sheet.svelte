@@ -27,6 +27,13 @@
     onOverride = async () => null,
     onExcludeFolder = () => {},
     onState = () => {},
+    // The marquee, in three moments. `onSweepStart` is handed the tile the drag
+    // pressed on — null on empty canvas — because that tile decides whether the
+    // whole drag marks or unmarks; `onSweepMove` every tile the box now covers,
+    // which is a preview and a commit at once; `onSweepEnd` the release.
+    onSweepStart = () => {},
+    onSweepMove = () => {},
+    onSweepEnd = () => {},
   } = $props();
 
   let canvas = $state(null);
@@ -123,6 +130,9 @@
       extend: triage ? extend : extendTick,
       fill: triage ? fill : fillMark,
       onState: (state) => onState(state),
+      sweepStart: (item, at) => onSweepStart(item, at),
+      sweepMove: (swept) => onSweepMove(swept),
+      sweepEnd: () => onSweepEnd(),
       activate: async (item, event, tile, at) => {
         // A disabled button dispatches no click at all, so the already-excluded
         // case never arrives here and cannot fall through to the reveal either.
@@ -142,7 +152,11 @@
           //
           // The index too, because the overlay walks from it: "the next tile in
           // the current sort" is the next entry in the sheet's own page order.
-          onActivate(item, tile, at);
+          //
+          // And whether Shift was down — as the one bit it is, rather than as
+          // the event, which would put a DOM object above a component whose
+          // whole arrangement is that the DOM stays underneath it.
+          onActivate(item, tile, at, event.shiftKey);
           return;
         }
         const decision = NEXT[item.o ?? "null"];
@@ -151,7 +165,15 @@
       },
     });
     started = key;
+    instance.setSweeping(selecting);
     return () => instance?.destroy();
+  });
+
+  // Whether a press rubber-bands. The same fact the `.selecting` class on the
+  // canvas carries — the tickboxes are shown by CSS and the gesture is armed
+  // here, from one prop, so the two cannot disagree about which mode is on.
+  $effect(() => {
+    instance?.setSweeping(selecting);
   });
 
   // Read both props first so the effect subscribes to them before any early
@@ -188,6 +210,13 @@
   /** @param {number} at */
   export function focusTile(at) {
     instance?.focus(at);
+  }
+
+  /** The tiles from `a` to `b` inclusive, in sheet order — shift-click's range.
+   * @param {number} a
+   * @param {number} b */
+  export function itemsBetween(a, b) {
+    return instance?.itemsBetween(a, b) ?? [];
   }
 
   // Re-mark the folder chips after a write. `fill` runs when a tile is bound, so
