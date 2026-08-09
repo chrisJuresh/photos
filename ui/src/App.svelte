@@ -16,6 +16,7 @@
   import Rebuild from "./lib/Rebuild.svelte";
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
+  import { shareText, stackOf, tally, toggle } from "./lib/select.js";
   import Sheet from "./lib/Sheet.svelte";
   import { remember, restore } from "./lib/stack.js";
   import Table from "./lib/Table.svelte";
@@ -79,6 +80,12 @@
   let opened = $state(null);
   // The sheet component, for the two things the overlay asks of it by index.
   let sheetView = $state(null);
+  // Select mode, and the tiles marked in it as `{key, ids}` in the order they
+  // were marked. Held here rather than in the sheet for the same reason the
+  // overrides are: a tile is recycled and the mark is not, so the mark cannot
+  // live on the tile.
+  let selecting = $state(false);
+  let marks = $state([]);
 
   const screen = $derived(SCREENS[index]);
   const showTable = $derived(screen.table !== false);
@@ -102,6 +109,24 @@
     ...Object.fromEntries(
       Object.entries(filters).filter(([, values]) => values.length > 0),
     ),
+  });
+
+  // What the sheet needs to draw the tickboxes, and what the header's pane
+  // reads. Derived rather than tracked alongside `marks`, so there is one place
+  // a mark is recorded and nothing to keep in step with it.
+  const markedKeys = $derived(marks.map((entry) => entry.key));
+  const markedTally = $derived(tally(marks));
+
+  // A marked set that survived a change to the query would describe a grouping
+  // that no longer exists, and being a snapshot of one specific grouping the
+  // reader judged wrong is its whole value. `gridQuery` is recomputed by exactly
+  // the four things the ticket names — the sort, the filters, the toggle and the
+  // window — so it is the signal rather than a list of them restated here.
+  $effect(() => {
+    void gridQuery;
+    untrack(() => {
+      marks = [];
+    });
   });
 
   // Changing this is what tells the sheet to start over. The screen is in it
@@ -475,6 +500,14 @@
   // substrate for an overlay to draw.
   function activate(item, tile, at) {
     if (mode === "grid") {
+      // In select mode a click is the mark and nothing else: no overlay, no
+      // reveal. A cover carries its whole stack, which is what makes the export
+      // say how the grid had grouped things rather than only which photographs
+      // were picked.
+      if (selecting) {
+        marks = toggle(marks, stackOf(item));
+        return;
+      }
       opened = { frames: framesOf(item), origin: tile.getBoundingClientRect(), at };
       return;
     }
@@ -546,6 +579,14 @@
     closeOverlay();
     guard(() => api.revealPhoto(frame.id));
   }
+
+  // The marked set as the report it exists to produce. Nothing leaves the
+  // machine: this is the system clipboard, there is no endpoint behind it, and
+  // the conditions line is what stops the reader being asked which window they
+  // were on.
+  function share() {
+    guard(() => navigator.clipboard.writeText(shareText({ stacking, sort, filters }, marks)));
+  }
 </script>
 
 {#if mode === "grid"}
@@ -557,10 +598,15 @@
     total={sheet.total}
     tiles={sheet.tiles}
     loading={sheet.loading}
+    {selecting}
+    marked={markedTally}
     onselect={selectFilter}
     onsort={(next) => (sort = next)}
     onstack={(next) => (stacking = remember(next))}
     onclear={() => (filters = {})}
+    onselecting={(next) => (selecting = next)}
+    onshare={share}
+    onunmark={() => (marks = [])}
     ontriage={() => (mode = "triage")}
   />
 {/if}
@@ -699,6 +745,8 @@
         total={mode === "grid" ? null : (counts?.page_paths ?? null)}
         triage={mode === "triage"}
         {excludedDirs}
+        selecting={mode === "grid" && selecting}
+        {markedKeys}
         onActivate={activate}
         onOverride={override}
         onExcludeFolder={excludeFolder}
