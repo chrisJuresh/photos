@@ -6,7 +6,7 @@
   //
   // The grid is the mode this opens in, and it has no sidebar: its chrome is the
   // fixed header, which carries the filters, the sort, and the way into triage.
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { api, count, debounce, sequencer } from "./lib/api.js";
   import { PHOTOS_ROOT, SCREENS, decisionOf, folderOf, isUnder } from "./lib/screens.js";
   import Counts from "./lib/Counts.svelte";
@@ -21,6 +21,7 @@
   import Table from "./lib/Table.svelte";
   import Tree from "./lib/Tree.svelte";
   import Tuner from "./lib/Tuner.svelte";
+  import { step } from "./lib/walk.js";
 
   // `/tune` is the grid with the material's controls bolted on: the same header
   // over the same photographs, which is the only place the material can honestly
@@ -71,10 +72,13 @@
   // the header's state that is remembered, and the reason it is remembered is
   // that it is a preference about the grid rather than a search in it.
   let stacking = $state(restore());
-  // The open stack — its frames and the rect of the tile they came out of — or
-  // null. Held here rather than in the sheet because the sheet is not what is
-  // open: the overlay floats above it and leaves its rows exactly as packed.
+  // The open tile — its frames, the rect they came out of, and where it sits in
+  // the sheet's page order — or null. Held here rather than in the sheet because
+  // the sheet is not what is open: the overlay floats above it and leaves its
+  // rows exactly as packed. The index is what the arrows walk along.
   let opened = $state(null);
+  // The sheet component, for the two things the overlay asks of it by index.
+  let sheetView = $state(null);
 
   const screen = $derived(SCREENS[index]);
   const showTable = $derived(screen.table !== false);
@@ -456,29 +460,90 @@
     return api.page(candidate, cursor);
   }
 
-  // A tile in the grid opens, always. `m` is the page's own answer to what a
+  // What the overlay draws for one tile. `m` is the page's own answer to what a
   // stack holds and it is absent on a stack of one and on every tile while
   // stacking is off — so the tile stands in for itself there, which it can
   // because a tile already carries everything a frame is: its id, its hash and
   // its dimensions. That is why one rule covers both settings of a switch the
-  // payload does not mention.
+  // payload does not mention, and why walking works the same in both.
+  const framesOf = (item) => item.m ?? [{ id: item.id, s: item.s, w: item.w, h: item.h }];
+
+  // A tile in the grid opens, always.
   //
   // Triage is the other client of this sheet and keeps its single click: its
   // tiles are source files, revealed as origins, and most of them have no
   // substrate for an overlay to draw.
-  function activate(item, tile) {
+  function activate(item, tile, at) {
     if (mode === "grid") {
-      const frames = item.m ?? [{ id: item.id, s: item.s, w: item.w, h: item.h }];
-      opened = { frames, origin: tile.getBoundingClientRect() };
+      opened = { frames: framesOf(item), origin: tile.getBoundingClientRect(), at };
       return;
     }
     guard(() => api.revealOrigin(item.id));
   }
 
-  // The second press: a frame inside the open overlay. It closes on the way
-  // out, because the reveal was the thing it was opened to do.
-  function revealFrame(frame) {
+  // Whether there is a tile that way. `step` is the whole of it: the sheet's
+  // count and its `exhausted` are what say where the selection really ends, as
+  // against where the pages read so far happen to stop.
+  const canStepBack = $derived(
+    opened !== null && step(opened.at, -1, sheet.count, sheet.exhausted) !== null,
+  );
+  const canStepOn = $derived(
+    opened !== null && step(opened.at, 1, sheet.count, sheet.exhausted) !== null,
+  );
+
+  // One step of the walk. The sheet scrolls to the tile — paging for it if the
+  // reader has run off the end of what is loaded — and the overlay is re-opened
+  // on what it landed on, which is what gives every step a rect to fly out of
+  // and leaves the grid where the walk ended.
+  //
+  // Two gates, both here so a press has one place that decides its fate.
+  // `walking` drops one that arrives while a step is still resolving: a step
+  // waiting on a page is the slow one, and queueing those behind a held key
+  // would spend fetches on tiles the reader has already gone past. `STEP_MS` is
+  // the rate a *held* arrow may go — repeat arrives about thirty times a second,
+  // and a step onto a tile already read resolves at once, so without it holding
+  // the key would cross thirty photographs a second. It applies to `held` alone:
+  // a press or a click the reader made is never too fast to mean something.
+  const STEP_MS = 120;
+  let walking = false;
+  let stepped = 0;
+
+  async function walk(delta, held = false) {
+    const now = performance.now();
+    if (!opened || walking || (held && now - stepped < STEP_MS)) return;
+    const next = step(opened.at, delta, sheet.count, sheet.exhausted);
+    if (next === null) return;
+    stepped = now;
+    walking = true;
+    try {
+      const landed = await sheetView?.walkTo(next);
+      if (!landed || !opened) return;
+      opened = {
+        frames: framesOf(landed.item),
+        origin: landed.tile.getBoundingClientRect(),
+        at: next,
+      };
+    } finally {
+      walking = false;
+    }
+  }
+
+  // Closing hands the keyboard back to the tile the reader actually reached,
+  // which after a walk is not the one they opened. After the flush, because the
+  // overlay's own pane holds focus until it is gone.
+  async function closeOverlay() {
+    const at = opened?.at ?? null;
     opened = null;
+    await tick();
+    if (at !== null) sheetView?.focusTile(at);
+  }
+
+  // The second press: a frame inside the open overlay. It closes on the way
+  // out, because the reveal was the thing it was opened to do — and closes the
+  // same way Escape does, so the reader comes back from Explorer to the tile
+  // they left rather than to the one they started at.
+  function revealFrame(frame) {
+    closeOverlay();
     guard(() => api.revealPhoto(frame.id));
   }
 </script>
@@ -628,6 +693,7 @@
 
     {#if showSheet || mode === "grid"}
       <Sheet
+        bind:this={sheetView}
         key={sheetKey}
         {fetchPage}
         total={mode === "grid" ? null : (counts?.page_paths ?? null)}
@@ -646,8 +712,11 @@
   <Overlay
     frames={opened.frames}
     origin={opened.origin}
+    back={canStepBack}
+    forward={canStepOn}
+    onstep={walk}
     onreveal={revealFrame}
-    onclose={() => (opened = null)}
+    onclose={closeOverlay}
   />
 {/if}
 
