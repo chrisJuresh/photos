@@ -140,7 +140,13 @@ def make_grid(tmp_path: Path):
             lambda command, executable: spawns.append((command, executable)),
         )
         started.append(server)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        # `shutdown` blocks until the serve loop next wakes, so the poll interval
+        # is a per-test sleep at teardown and nothing else. At the 0.5s default
+        # that was 85s of a 249s suite in this fixture alone — 169 tests each
+        # waiting half a second on a loop with nothing left to serve.
+        threading.Thread(
+            target=lambda: server.serve_forever(poll_interval=0.01), daemon=True
+        ).start()
         return Grid(server.server_address[1], roots, spawns, rows, server)
 
     yield factory

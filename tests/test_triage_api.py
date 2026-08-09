@@ -49,7 +49,10 @@ def server(tmp_path: Path):
     conn.close()
 
     instance = GridServer(("127.0.0.1", 0), GridHandler, roots, lambda *_: None)
-    threading.Thread(target=instance.serve_forever, daemon=True).start()
+    # The poll interval is a teardown sleep, as in `test_grid.py`'s `make_grid`.
+    threading.Thread(
+        target=lambda: instance.serve_forever(poll_interval=0.01), daemon=True
+    ).start()
     yield instance
     instance.shutdown()
     instance.server_close()
