@@ -94,7 +94,9 @@ _Avoid_: group, cluster, burst, series, similarity stack
 How strongly two frames agree that they are the same picture — the count of distinctive
 points that line up between them under one transform. It survives a change of exposure
 and a handheld reposition, and collapses when the camera turns to face something else.
-Computed once, per pair, and stored; **strictness** is the reader's threshold on it.
+Computed once, per pair, and stored; **strictness** is the reader's threshold on it, and
+**linkage** is how many members of a stack a frame has to clear it against. Both were
+settled from the reader's own labels — see `docs/adr/0003`, "What the labels settled".
 _Avoid_: similarity, score, distance, confidence
 
 **Fingerprint**:
@@ -125,8 +127,11 @@ _Avoid_: threshold, tolerance, distance, sensitivity
 
 **Candidate**:
 Two frames the window has not ruled out — a pair inside one run of consecutive
-same-camera captures. Every pair of a run and not only the adjacent ones, because
-complete linkage makes a stack a clique. It is the pair set the offline match pass
+same-camera captures. Every pair of a run and not only the adjacent ones, because a
+frame owes a verdict against every member of a stack and not only against the one
+before it — under complete linkage, which made a stack a clique, and equally under
+*matches most members*, which `docs/adr/0003` settled on and which still counts every
+member. It is the pair set the offline match pass
 owes a verdict on, and it is enumerated over every EXIF-dated tile rather than over
 what a filter has left on screen, because membership does not depend on the view.
 A candidate the fingerprint rejects is **screened out** — never plausibly the same

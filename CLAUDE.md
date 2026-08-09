@@ -261,13 +261,23 @@ setting **names the labelled cases it gets wrong** rather than only counting the
 `--precision` moves the floor and `--linkage` narrows which rules are in the running, so a
 decision to set one aside is a command rather than an argument made afterwards. It reads
 the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate and never touches
-`G:`; it writes nothing at all. Its output is `docs/adr/0003-stack-on-verified-match.md`'s
-"What the labels settled", which records strictness 20 and *matches most members* — and
-the ceilings behind them, including that 224 of the 3,712 pairs the reader kept together
-carry no Match row at all.
+`G:`; it writes nothing at all. The ceiling is not a knob: it is the fence the Match rows
+were computed behind, so cutting the runs anywhere else would replay the labels over pairs
+that were never checked.
 
 ```bash
 python -m harness.calibrate
+```
+
+Its output is `docs/adr/0003-stack-on-verified-match.md`'s "What the labels settled", and
+**the bare run above is not the command that returns what the ADR recorded.** Over all
+three rules it recommends *neighbour* linkage at 25 — the best recall clearing the floor —
+and the ADR declines it, because the runs where a chain does its work carry no frames the
+reader pushed out, so round one's labels cannot price its failure. The recorded default is
+strictness 20 with *matches most members*, and this is the run that returns it:
+
+```bash
+python -m harness.calibrate --linkage complete,majority
 ```
 
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:

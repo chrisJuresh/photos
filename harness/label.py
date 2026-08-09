@@ -57,7 +57,7 @@ import re
 import sqlite3
 import sys
 import threading
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -133,6 +133,10 @@ LABELS = "labels.sqlite3"  # beside the catalog, which is where the NVMe is name
 STATIC_DIR = Path(__file__).resolve().parent
 
 Points = dict[tuple[str, str], int]
+# Whether a frame joins the stack in hand: the linkage rule, as a value. `link`
+# takes one so that `harness.calibrate` can replay the labels against the softer
+# rules ADR 0003 leaves open without a second copy of the walk.
+Joins = Callable[[Sequence[str], str, Points, int], bool]
 Capture = tuple[str, int]  # a frame, and when it was taken
 Run = tuple[str | None, list[Capture]]  # a camera, and its consecutive captures
 Near = tuple[str, int]  # a frame outside the stack, and its gap from the edge
@@ -224,16 +228,20 @@ def link(
     run: Sequence[str],
     points: Points,
     strictness: int = STRICTNESS,
-    joins=complete,
+    joins: Joins = complete,
 ) -> list[list[str]]:
     """One run cut into stacks, by `joins` at `strictness`.
 
-    ADR 0003: every pair inside a stack must match, not merely each frame and its
-    predecessor -- so a frame joins the stack in hand only if it agrees with all
-    of it. The walk is forward and greedy, which is what `photolib.browse` does
-    with the window, and its failure is the one the reader is being asked about:
-    a frame the walk consumed early can agree with every member of the stack it
-    was placed before. That split is a coin toss and `questions` scores it as one.
+    The rule is `complete` unless a caller says otherwise, because that is what
+    ADR 0003 draws the reader's sets at; `harness.calibrate` is the one caller
+    that passes anything else, and it does so to replay the labels against the
+    softenings the ADR leaves open.
+
+    The walk is forward and greedy whichever rule is in force, which is what
+    `photolib.browse` does with the window, and its failure is the one the reader
+    is being asked about: a frame the walk consumed early can agree with every
+    member of the stack it was placed before. That split is a coin toss and
+    `questions` scores it as one.
     """
     stacks: list[list[str]] = []
     holding: list[str] = []

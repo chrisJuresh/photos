@@ -11,7 +11,10 @@ and saying how well each one reproduces what they said.
 equally important here: the reader's binding constraint is precision -- *never
 open a stack and see two unrelated photographs* -- and recall is best-effort
 under it. A single score would hide exactly the trade the setting is being chosen
-for, so `choose` maximises precision first and reads recall only as a tie-break.
+for. So precision is a **floor** a setting clears before its recall is allowed to
+speak, and never a ranking: ordering on precision alone hands back the corner of
+the sweep, where a setting stacks almost nothing and is therefore almost never
+wrong. `choose` is that floor and `frontier` is the trade it was drawn across.
 
 **A label is evidence about the frames that were on screen when it was given,
 and about nothing else.** `harness.label` shows a candidate stack with what
@@ -58,7 +61,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from harness import label
-from harness.label import Points
+from harness.label import Joins, Points
 from photolib import candidates, matches
 from photolib.config import load
 
@@ -260,12 +263,23 @@ class Tally:
         self.wrong.setdefault(subject.name, []).append(entry)
 
 
-def placed(run: Sequence[str], points: Points, strictness: int, joins) -> dict[str, int]:
+def placed(
+    run: Sequence[str], points: Points, strictness: int, joins: Joins
+) -> dict[str, int]:
     """Which stack each frame of a run lands in, at one setting.
 
-    The whole run and not the scope: a frame the forward walk consumed early is
-    why a stack was drawn where it was, so replaying only the frames on screen
-    would answer a different question from the one the reader was asked.
+    **The whole run and not the scope**, which is the one place the harness's
+    window deliberately does not bound things -- and it is the right way round.
+    What is being predicted is what the *grid* would draw, and the grid has never
+    heard of the reader's view: it walks the run. Cutting the walk down to the
+    frames that were on screen would score a stack that nothing will ever draw.
+
+    It cuts both ways and both are the truth rather than an artefact. A frame the
+    walk consumed early is why a stack was drawn where it was, so dropping it
+    would invent a merge. And an unseen frame that chains two seen ones into one
+    stack is not a leak of the window either: the reader saw *those two*, said
+    they do not belong together, and the grid would put them in one stack anyway
+    -- which is exactly the complaint precision is counting.
     """
     return {
         sha256: index
@@ -274,7 +288,7 @@ def placed(run: Sequence[str], points: Points, strictness: int, joins) -> dict[s
     }
 
 
-def replay(cases: Iterable[Case], points: Points, strictness: int, joins) -> Tally:
+def replay(cases: Iterable[Case], points: Points, strictness: int, joins: Joins) -> Tally:
     """Score one setting against every label, naming what it got wrong."""
     tally = Tally()
     walked: dict[tuple[str, ...], dict[str, int]] = {}
@@ -357,6 +371,22 @@ def choose(scored: dict[Setting, Tally], floor: float = PRECISION) -> Setting | 
     return max(clearing, key=ranked) if clearing else None
 
 
+def beats(soft: Tally, strict: Tally) -> bool:
+    """Whether one setting is better than another on both counts at once.
+
+    Both, because a setting that buys recall with precision has not beaten
+    anything -- it has made the trade this report exists to show, and choosing
+    between those two is `choose`'s job and not this one's.
+    """
+    return (
+        soft.precision is not None
+        and strict.precision is not None
+        and soft.precision >= strict.precision
+        and (soft.recall or 0) >= (strict.recall or 0)
+        and (soft.precision, soft.recall) != (strict.precision, strict.recall)
+    )
+
+
 def frontier(scored: dict[Setting, Tally]) -> list[Setting]:
     """The settings nothing else beats on both counts at once.
 
@@ -366,18 +396,14 @@ def frontier(scored: dict[Setting, Tally]) -> list[Setting]:
     scoreable = {
         setting: tally for setting, tally in scored.items() if tally.precision is not None
     }
-    best: list[Setting] = []
-    for setting, tally in scoreable.items():
-        beaten = any(
-            other is not tally
-            and other.precision >= tally.precision
-            and (other.recall or 0) >= (tally.recall or 0)
-            and (other.precision, other.recall) != (tally.precision, tally.recall)
-            for other in scoreable.values()
-        )
-        if not beaten:
-            best.append(setting)
-    return sorted(best, key=lambda setting: -(scoreable[setting].recall or 0))
+    return sorted(
+        (
+            setting
+            for setting, tally in scoreable.items()
+            if not any(beats(other, tally) for other in scoreable.values())
+        ),
+        key=lambda setting: -(scoreable[setting].recall or 0),
+    )
 
 
 # --- reading the labels and the catalog ---------------------------------------
@@ -402,7 +428,7 @@ def cases(answers: dict[str, dict], runs: Iterable[Sequence[str]]) -> tuple[list
     return read, orphans
 
 
-def scores(
+def checked(
     conn: sqlite3.Connection,
     wanted: set[str],
     *,
@@ -480,22 +506,6 @@ def diagnosis(scored: dict[Setting, Tally]) -> list[str]:
                 said.append(f"{len(stacked)} wrongly stacked, strongest at {worst.points}")
             lines.append(f"    {name:<32} {'; '.join(said)}")
     return lines
-
-
-def beats(soft: Tally, strict: Tally) -> bool:
-    """Whether one rule is better than another on both counts at once.
-
-    Both, because a rule that buys recall with precision has not beaten anything
-    -- it has made the trade the report exists to show, and choosing between
-    those two is `choose`'s job and not this one's.
-    """
-    return (
-        soft.precision is not None
-        and strict.precision is not None
-        and soft.precision >= strict.precision
-        and (soft.recall or 0) >= (strict.recall or 0)
-        and (soft.precision, soft.recall) != (strict.precision, strict.recall)
-    )
 
 
 def softening(scored: dict[Setting, Tally], strictness: int) -> list[str]:
@@ -587,16 +597,18 @@ def evidence(read: Sequence[Case], points: Points) -> list[str]:
     in the other direction.
     """
     kept, pushed, unchecked = [], [], 0
+    weight: list[tuple[int, str]] = []
     for subject in read:
+        held = 0
         for early, late, same in pairs(subject):
             if same and (early, late) not in points and (late, early) not in points:
                 unchecked += 1
+            held += same
             (kept if same else pushed).append(label.match(points, early, late))
+        weight.append((held, subject.name))
     if not kept:
         return []
-    weight = sorted(
-        (sum(1 for _, _, same in pairs(subject) if same), subject.name) for subject in read
-    )[::-1][:5]
+    weight = sorted(weight)[::-1][:5]
     share = sum(count for count, _ in weight) / len(kept)
     return [
         f"evidence  {len(kept)} pairs the reader kept together, {len(pushed)} they pushed"
@@ -683,12 +695,6 @@ def main(argv: list[str] | None = None) -> int:
         default=",".join(str(value) for value in SWEEP),
     )
     parser.add_argument(
-        "--ceiling",
-        type=int,
-        default=candidates.CEILING,
-        help="the window the runs are cut at, in seconds (default: %(default)s)",
-    )
-    parser.add_argument(
         "--precision",
         type=float,
         default=PRECISION,
@@ -723,17 +729,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no answers in {labels_db}: run python -m harness.label first")
         return 1
 
+    # The ceiling is `photolib.candidates`' own and is not a knob here: it is the
+    # fence the Match rows were computed behind, so cutting the runs at any other
+    # value would replay the labels over pairs that were never checked.
     conn = candidates.catalog(config.catalog_db, read_only=True)
     try:
         frames = candidates.population(conn)
-        read, orphans = cases(answers, candidates.runs(frames, args.ceiling))
-        points = scores(conn, {sha256 for subject in read for sha256 in subject.run})
+        read, orphans = cases(answers, candidates.runs(frames, candidates.CEILING))
+        points = checked(conn, {sha256 for subject in read for sha256 in subject.run})
     finally:
         conn.close()
 
     print(f"catalog   {config.catalog_db}")
     print(f"labels    {labels_db}")
-    print(f"window    {args.ceiling}s ceiling, {matches.METHOD} version {matches.VERSION}\n")
+    print(
+        f"window    {candidates.CEILING}s ceiling, {matches.METHOD} "
+        f"version {matches.VERSION}\n"
+    )
     report(read, points, orphans, strictnesses, args.precision, linkages)
     return 0
 
