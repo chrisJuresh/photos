@@ -8,6 +8,7 @@ whatever `config.toml` names.
 
 from __future__ import annotations
 
+import subprocess
 import threading
 import time
 
@@ -210,6 +211,33 @@ def test_the_default_runner_runs_in_the_directory_it_is_given(tmp_path):
     _spawn(tmp_path, ("-c", "import os; print(os.getcwd())"), seen.append)
 
     assert seen == [str(tmp_path.resolve())]
+
+
+def test_the_default_runner_gives_the_child_no_stdin(tmp_path, monkeypatch):
+    """A rebuild is a background job: nobody is at a keyboard for it, and the
+    server that spawns it may itself have no console.
+
+    Asserted at the call and not through the child, because the failure it
+    guards against is not observable from inside one. On Windows an unset
+    `stdin` makes the child inherit `GetStdHandle(STD_INPUT_HANDLE)`, which
+    `pytest`'s fd-level capture does not redirect: a child asked to read it
+    would block on the developer's console forever, and under
+    `scripts/run-tests.ps1` -- where that handle is invalid -- `Popen` raises
+    `WinError 6` before the child exists at all. Two tests above spawn for real
+    and are what caught it.
+    """
+    seen = {}
+    real = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", spy)
+    code = _spawn(tmp_path, ("-c", "pass"), lambda line: None)
+
+    assert code == 0
+    assert seen["stdin"] == subprocess.DEVNULL
 
 
 def test_an_untouched_job_reports_idle():

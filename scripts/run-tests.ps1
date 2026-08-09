@@ -11,6 +11,17 @@
 # UseShellExecute=false, and the child then inherits the caller's console. The
 # redirection has to happen inside the child instead, which is what this does.
 #
+# The console pytest gets here is hidden and non-interactive, so it has no valid
+# standard input. Code under test that spawns a subprocess without saying what
+# its stdin is inherits that invalid handle, and Windows raises
+# `OSError: [WinError 6] The handle is invalid` from `subprocess.Popen` --
+# a failure of this runner, reported as a test failure, in a file that passes in
+# a normal console. It bit `photolib/rebuild.py` on 2026-08-09 and was fixed
+# there with `stdin=subprocess.DEVNULL`, which is what a job with no reader
+# should have asked for anyway; `test_the_default_runner_gives_the_child_no_stdin`
+# holds it. A WinError 6 out of a spawn is this, and the spawning code is where
+# it is fixed.
+#
 #   powershell -NoProfile -File scripts\run-tests.ps1
 #
 # It returns immediately. Wait for <out>\pytest.done -- it holds the exit code --
