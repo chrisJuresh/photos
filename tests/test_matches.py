@@ -316,8 +316,8 @@ def test_a_pair_the_screen_never_saw_is_not_checked_either(corpus: Corpus) -> No
 
 def test_the_match_records_the_method_that_produced_it(corpus: Corpus) -> None:
     a = corpus.add("1", 0)
-    corpus.add("2", 2)
-    corpus.survivors(a, sha_of("2"))
+    b = corpus.add("2", 2)
+    corpus.survivors(a, b)
     corpus.check()
 
     assert corpus.conn.execute(

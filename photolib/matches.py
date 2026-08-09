@@ -134,6 +134,13 @@ def agree(a: Features, b: Features) -> int:
     repeated texture -- railings, foliage, brickwork -- produces in quantity. The
     homography then drops whatever survives that but does not move the way the
     rest of the frame moved. What is left is the count.
+
+    **`NEEDED` is the floor and not a small Match.** RANSAC fits from a minimal
+    sample of four and those four are inliers by construction, so a count of four
+    means nothing agreed beyond the sample -- measured, 117,744 of this catalog's
+    566,522 pairs sit there exactly. A threshold on the Match is therefore above
+    four rather than at it, which is a fact about this estimator and belongs with
+    it rather than in whatever later chooses the number.
     """
     if a.descriptors is None or b.descriptors is None:
         return 0

@@ -198,6 +198,11 @@ Frames are read from the substrate tree at 1024px on the long edge, and fan-outs
 in capture order so a frame is described once rather than once per pair. It reads the
 substrates and the catalog, both on the NVMe, never opens `G:`, and does not attach
 `state.sqlite3`. Resumable, idempotent, and it refuses while a writer holds the catalog.
+Measured: 566,522 pairs over 22,580 frames at 287/s — 32m47s for the 564,323 left after a
+trial run — and the table it wrote grew the catalog from 2,517 MB to 2,631 MB. Nothing was
+missing and nothing failed to decode. The Match separates the two populations it was built
+to: pairs a second or less apart score a median of 283 and 94% of them reach 20 or more,
+against a median of 5 beyond two minutes.
 
 ```bash
 python -m photolib.matches
