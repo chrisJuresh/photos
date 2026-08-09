@@ -4,7 +4,7 @@
   // tile, then the frame — whether the tile stood for fifty captures or one.
   //
   // This floats above the sheet and never touches it. The sheet's rows are
-  // immutable once packed, and the whole of "opening a stack costs you your
+  // immutable once packed, and the whole of "opening a tile costs you your
   // place" would be re-packing them to make room — so nothing here is in the
   // sheet's flow, nothing here changes its width, and closing it puts the
   // reader back on the row they were reading.
@@ -173,7 +173,7 @@
     pane?.focus();
     return () => {
       // Back where the reader was. `focus` and not `click`: restoring focus to
-      // the tile must not re-open the stack it just closed.
+      // the tile must not re-open the tile it just closed.
       if (from instanceof HTMLElement && document.contains(from)) from.focus();
     };
   });

@@ -337,6 +337,10 @@ def _frame(row) -> dict:
     `_photo` without the ThumbHash: a frame is drawn from `/d/`, which is a
     1536px read behind a click that has already happened, and a placeholder for
     it would be a second decode of a hash the cover has already shown.
+
+    These four keys are also spelled out in `App.svelte`'s `activate`, which
+    builds this shape from a tile when the tile is its own only frame. Renaming
+    one of them here is a change in two files, and the second one is in Svelte.
     """
     return {"id": row[0], "s": row[1], "w": row[2], "h": row[3]}
 
