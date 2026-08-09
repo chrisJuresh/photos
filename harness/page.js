@@ -12,7 +12,14 @@ const said = document.getElementById("said");
 
 let sample = null;
 let at = 0;
+// How much context the reader has asked for, which is not the same as how much
+// there is: a set at the end of a run has less, and one they widened earlier
+// should not leave the counter stuck above what the next set can show.
+let wanted = 1;
 const marks = new Map(); // index -> { out: Set, in: Set }
+
+const beside = (set) => Math.max(set.before.length, set.after.length);
+const showing = (set) => Math.min(wanted, beside(set));
 
 const VERDICTS = {
   accept: "accepted as drawn",
@@ -33,7 +40,17 @@ function marksFor(index) {
   return marks.get(index);
 }
 
-function frame(sha, role, marked) {
+// The gap between a frame outside the stack and the edge of it, which is what
+// says whether the frame is plausible at all: two seconds is another press of
+// the shutter, forty minutes is somewhere else.
+function elapsed(seconds) {
+  const gap = Math.abs(seconds);
+  if (gap < 60) return `${gap}s`;
+  if (gap < 3600) return `${Math.round(gap / 60)}m`;
+  return `${(gap / 3600).toFixed(1)}h`;
+}
+
+function frame(sha, role, marked, gap) {
   const button = document.createElement("button");
   button.className = `frame ${role}` + (marked ? ` marked-${marked}` : "");
   button.dataset.sha = sha;
@@ -49,7 +66,7 @@ function frame(sha, role, marked) {
   caption.textContent =
     marked === "out" ? "does not belong"
     : marked === "in" ? "should be included"
-    : role === "neighbour" ? "neighbour"
+    : role === "neighbour" ? `${elapsed(gap)} away`
     : sha.slice(0, 8);
   button.append(caption);
   return button;
@@ -57,15 +74,18 @@ function frame(sha, role, marked) {
 
 // A box rather than a group: CONTEXT.md keeps "group" off the stack, and this is
 // the stack as drawn, with the border that states the claim being judged.
-function box(shas, role, marked) {
+function box(entries, role, marked) {
   const holder = document.createElement("div");
   holder.className = `box ${role}`;
-  for (const sha of shas) holder.append(frame(sha, role, marked(sha)));
+  for (const { sha, gap } of entries) holder.append(frame(sha, role, marked(sha), gap));
   return holder;
 }
 
+const asFrames = (shas) => shas.map((sha) => ({ sha, gap: 0 }));
+
 const GAP = 6; // must match the `gap` the boxes are laid out with
 const CAPTION = 22; // the strip under each frame that is not photograph
+const CONTEXT = 8; // how far the view widens; `harness/label.py` bounds it too
 
 // How many columns to lay a stack out in. CSS can do this with `auto-fit` and it
 // gets it wrong for the job: `auto-fit` packs in as many columns as will fit the
@@ -98,15 +118,20 @@ function draw() {
   const set = sample.sets[at];
   const mark = marksFor(at);
 
+  // `before` comes back nearest-first, so it is reversed to be drawn: on screen
+  // the run reads left to right in the order it was shot.
+  const outside = (sha) => (mark.in.has(sha) ? "in" : null);
+  const shown = showing(set);
+  const before = set.before.slice(0, shown);
+  const after = set.after.slice(0, shown);
+
   stage.replaceChildren();
-  if (set.before) {
-    stage.append(box([set.before], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
-  }
-  const members = box(set.members, "member", (sha) => (mark.out.has(sha) ? "out" : null));
+  if (before.length) stage.append(box([...before].reverse(), "neighbour", outside));
+  const members = box(asFrames(set.members), "member", (sha) =>
+    mark.out.has(sha) ? "out" : null
+  );
   stage.append(members);
-  if (set.after) {
-    stage.append(box([set.after], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
-  }
+  if (after.length) stage.append(box(after, "neighbour", outside));
   // After appending, because the count is chosen against the room the box
   // actually got. `style.setProperty` and never `setAttribute("style", …)`:
   // the CSP carries no `unsafe-inline`, which blocks the attribute and not the
@@ -117,10 +142,14 @@ function draw() {
   );
 
   const answer = set.answer;
+  const available = beside(set);
   about.replaceChildren(
     `set ${at + 1} of ${sample.sets.length} · ${set.members.length} frames · `,
     strong(set.camera || "unnamed camera"),
-    ` · ${set.margin} points from the provisional line of ${sample.strictness}`
+    ` · ${set.margin} points from the provisional line of ${sample.strictness} · `,
+    available === 0
+      ? "nothing either side of it in the run"
+      : `showing ${shown} of ${available} either side`
   );
   said.textContent = answer
     ? `answered: ${VERDICTS[answer.verdict]} — record again to revise it`
@@ -156,6 +185,9 @@ async function send(unsure, advance) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       members: set.members,
+      // At least one, because that is the narrowest view there is; a set with
+      // nothing beside it has nothing to say about either way.
+      shown: Math.max(showing(set), 1),
       evicted: [...mark.out],
       included: [...mark.in],
       unsure,
@@ -241,12 +273,48 @@ document.addEventListener("keydown", (event) => {
     step(1);
   } else if (event.key === "ArrowLeft") {
     step(-1);
+  } else if (event.key === "+" || event.key === "=") {
+    widen(1);
+  } else if (event.key === "-" || event.key === "_") {
+    widen(-1);
   } else if (event.key === "Backspace") {
     event.preventDefault();
     marks.set(at, { out: new Set(), in: new Set() });
     send(false, false);
   }
 });
+
+// Changing the view is not an answer, so it posts nothing.
+//
+// Narrowing stops at the furthest frame the reader has pulled in, rather than
+// hiding it. Hiding it would have to retract the answer -- what is recorded is
+// only ever about the frames that were on screen -- and quietly turning a
+// considered "this one should have been included" back into "accepted as drawn"
+// is the wrong way to resolve that. Let go of the frame first, which is a click
+// on it, and then the view narrows.
+function widen(by) {
+  const set = sample.sets[at];
+  const mark = marksFor(at);
+  const reach = (near) =>
+    near.reduce((furthest, { sha }, index) => (mark.in.has(sha) ? index + 1 : furthest), 0);
+  const pinned = Math.max(reach(set.before), reach(set.after), 1);
+
+  // Counted from what is on screen rather than from what was asked for, so a
+  // press always moves the view by one and never spends itself closing a gap
+  // between the two.
+  const current = showing(set);
+  const next = Math.min(Math.max(current + by, pinned), CONTEXT);
+  // Only when a mark is what stopped it. At the narrowest view there is nothing
+  // to narrow and nothing to explain.
+  if (next === current && by < 0 && pinned > 1) {
+    said.textContent =
+      "a frame you have pulled in is out there — click it again to let go of it first";
+    return;
+  }
+  if (next === wanted) return;
+  wanted = next;
+  draw();
+}
 
 (async () => {
   sample = await (await fetch("/api/sets")).json();

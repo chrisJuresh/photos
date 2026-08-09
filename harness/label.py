@@ -54,7 +54,7 @@ import sqlite3
 import sys
 import threading
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -78,6 +78,29 @@ STRICTNESS = 20
 # `--strictness` are how the second round says so.
 SETS = 30
 
+# How many frames either side of a stack the reader may look at, and how many
+# they are shown before asking.
+#
+# One each side is what ADR 0003 specifies and it is not enough on its own: the
+# frame beyond the neighbour is often a plausible member too, and a reader who
+# cannot see it cannot say so. Measured over this catalog, of the 4,368 candidate
+# stacks 46% have no frame outside with any claim at all -- but the sets a round
+# samples are the *least decisive* ones by construction, and there only 27% do.
+#
+# There is also no width that settles it: three each side covers 43% of a round's
+# sets and eight covers little more, because the runs this fence admits reach
+# 1,435 frames. So the width is the reader's to choose per set. One each side is
+# the default because the common case is a stack with nothing arguable beside it
+# and it should cost nothing to confirm; `CONTEXT` is as far as the widening key
+# goes.
+#
+# The extra frames are chosen by position in the run and captioned with the gap,
+# never by the Match: a bracket end blown out past having any texture left scores
+# nothing and is exactly the member ADR 0003 expects to be missed, so choosing
+# context by the Match would hide the failure the reader is here to find.
+CONTEXT = 8
+SHOWN = 1
+
 DEFAULT_PORT = 8771  # the grid is on 8770 and this is not the grid
 
 LABELS = "labels.sqlite3"  # beside the catalog, which is where the NVMe is named
@@ -85,7 +108,9 @@ LABELS = "labels.sqlite3"  # beside the catalog, which is where the NVMe is name
 STATIC_DIR = Path(__file__).resolve().parent
 
 Points = dict[tuple[str, str], int]
-Run = tuple[str | None, list[str]]  # a camera, and its consecutive captures
+Capture = tuple[str, int]  # a frame, and when it was taken
+Run = tuple[str | None, list[Capture]]  # a camera, and its consecutive captures
+Near = tuple[str, int]  # a frame outside the stack, and its gap from the edge
 
 
 # --- forming the sets ---------------------------------------------------------
@@ -93,13 +118,32 @@ Run = tuple[str | None, list[str]]  # a camera, and its consecutive captures
 
 @dataclass(frozen=True)
 class Question:
-    """One candidate stack, its neighbours, and how little the Match commits."""
+    """One candidate stack, what surrounds it, and how little the Match commits.
+
+    `before` and `after` run **outwards from the stack**, nearest frame first,
+    and carry the seconds between each frame and the edge of the stack it sits
+    beside. The gap is carried because it is what tells the reader whether a
+    frame outside is plausible at all -- two seconds is another press of the
+    shutter and forty minutes is somewhere else -- and because it is the fence
+    ADR 0003 keeps, made visible.
+    """
 
     camera: str | None
     members: tuple[str, ...]
-    before: str | None  # the frame before the stack in its run, if there is one
-    after: str | None
+    before: tuple[Near, ...]
+    after: tuple[Near, ...]
     margin: int  # points between the weakest evidence and `STRICTNESS`
+
+    def nearest(self) -> tuple[str | None, str | None]:
+        """The frame each side of the stack, which is where the margin is decided."""
+        return (
+            self.before[0][0] if self.before else None,
+            self.after[0][0] if self.after else None,
+        )
+
+    def surrounding(self, shown: int) -> list[str]:
+        """The frames outside the stack the reader was actually shown."""
+        return [sha for sha, _ in self.before[:shown]] + [sha for sha, _ in self.after[:shown]]
 
 
 def match(points: Points, a: str, b: str) -> int:
@@ -182,32 +226,53 @@ def _margin(
 
 
 def questions(
-    runs: Iterable[Run], points: Points, strictness: int = STRICTNESS
+    runs: Iterable[Run],
+    points: Points,
+    strictness: int = STRICTNESS,
+    context: int = CONTEXT,
 ) -> list[Question]:
-    """Every candidate stack there is to ask about, with its neighbours.
+    """Every candidate stack there is to ask about, with what surrounds it.
 
     A stack of one is not asked about -- CONTEXT.md has a stack be the same
-    photograph taken more than once -- but it is still drawn, as the neighbour of
+    photograph taken more than once -- but it is still drawn, as a neighbour of
     whichever stack it borders. Which is the whole shape of the second complaint:
     the frame that should have been included is usually sitting right there.
+
+    Up to `context` frames are carried each side rather than one, so the reader
+    can widen the view when the answer depends on what is past the edge. Only the
+    nearest still decides the margin: the margin is about *this* boundary, and a
+    frame five along is its own boundary with its own question.
     """
     asked: list[Question] = []
     for camera, run in runs:
-        stacks = link(run, points, strictness)
+        shas = [sha for sha, _ in run]
+        taken = dict(run)
+        stacks = link(shas, points, strictness)
         at = 0
         for stack in stacks:
-            before = run[at - 1] if at else None
-            after = run[at + len(stack)] if at + len(stack) < len(run) else None
+            first, last = at, at + len(stack) - 1
             at += len(stack)
             if len(stack) < 2:
                 continue
+            before = tuple(
+                (shas[index], taken[shas[first]] - taken[shas[index]])
+                for index in range(first - 1, max(first - context - 1, -1), -1)
+            )
+            after = tuple(
+                (shas[index], taken[shas[index]] - taken[shas[last]])
+                for index in range(last + 1, min(last + context + 1, len(shas)))
+            )
+            question = Question(
+                camera=camera,
+                members=tuple(stack),
+                before=before,
+                after=after,
+                margin=0,
+            )
             asked.append(
-                Question(
-                    camera=camera,
-                    members=tuple(stack),
-                    before=before,
-                    after=after,
-                    margin=_margin(stack, (before, after), points, strictness),
+                replace(
+                    question,
+                    margin=_margin(stack, question.nearest(), points, strictness),
                 )
             )
     return asked
@@ -261,7 +326,11 @@ def plan(
     """
     frames = candidates.population(conn)
     camera_of = {sha256: camera for camera, _secs, _kind, sha256 in frames}
-    runs = [(camera_of[run[0]], run) for run in candidates.runs(frames, ceiling)]
+    taken = {sha256: secs for _camera, secs, _kind, sha256 in frames}
+    runs = [
+        (camera_of[run[0]], [(sha256, taken[sha256]) for sha256 in run])
+        for run in candidates.runs(frames, ceiling)
+    ]
     points: Points = {
         (early, late): count
         for early, late, count in conn.execute(
@@ -312,25 +381,55 @@ def key(members: Sequence[str]) -> str:
 # `margin` and `camera` ride along with the answer because reading the labels
 # afterwards means asking how the verdicts fell across the grey band and across
 # the bodies, and neither question can be re-derived once the sample has moved.
+#
+# **`surrounding` is what makes an answer readable, and ticket 34 turns on it.**
+# It is the frames outside the stack that were on screen when the answer was
+# given -- so `accept` means "the frames I was shown are right" and never "this
+# stack is complete". A strictness that pulls in a frame the reader never saw is
+# not contradicting them, and a report that scored it as an error would be
+# measuring the width of this window rather than the threshold.
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS answer (
-  members    TEXT PRIMARY KEY,  -- the stack as drawn, comma-joined. See `key`.
-  camera     TEXT,
-  before_sha TEXT,
-  after_sha  TEXT,
-  margin     INTEGER NOT NULL,
-  verdict    TEXT NOT NULL CHECK (verdict IN ({', '.join(f"'{v}'" for v in VERDICTS)})),
-  evicted    TEXT NOT NULL,     -- JSON: members the reader said do not belong
-  included   TEXT NOT NULL,     -- JSON: neighbours the reader said should be in
+  members     TEXT PRIMARY KEY,  -- the stack as drawn, comma-joined. See `key`.
+  camera      TEXT,
+  surrounding TEXT NOT NULL,     -- JSON: the frames outside it the reader saw
+  margin      INTEGER NOT NULL,
+  verdict     TEXT NOT NULL CHECK (verdict IN ({', '.join(f"'{v}'" for v in VERDICTS)})),
+  evicted     TEXT NOT NULL,     -- JSON: members the reader said do not belong
+  included    TEXT NOT NULL,     -- JSON: neighbours the reader said should be in
   answered_at TEXT NOT NULL DEFAULT (datetime('now'))
 )
 """
 
 _RECORD = """
 INSERT OR REPLACE INTO answer
-  (members, camera, before_sha, after_sha, margin, verdict, evicted, included)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  (members, camera, surrounding, margin, verdict, evicted, included)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 """
+
+
+class LabelsRefused(RuntimeError):
+    """Raised before anything is written. Nothing was changed."""
+
+
+def _refuse_if_older(conn: sqlite3.Connection, path: Path) -> None:
+    """Refuse a labels file written before the reader could widen the view.
+
+    That file records one neighbour each side; this one records what was on
+    screen, which is a different claim and the one ticket 34 has to read. There
+    is no migration because there is no migration machinery here on purpose --
+    so this says how many answers are at stake and lets the reader decide, rather
+    than quietly rewriting them into a shape they were not given in.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(answer)")}
+    if not columns or "surrounding" in columns:
+        return
+    held = conn.execute("SELECT count(*) FROM answer").fetchone()[0]
+    raise LabelsRefused(
+        f"{path} holds {held} answer(s) recorded before the view could be widened, "
+        "which say which frames were shown only as one either side. Move it aside "
+        "to start a fresh round -- or say so and the old answers can be carried over."
+    )
 
 
 def store(path: Path) -> sqlite3.Connection:
@@ -347,6 +446,11 @@ def store(path: Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode = WAL")
+    try:
+        _refuse_if_older(conn, path)
+    except LabelsRefused:
+        conn.close()
+        raise
     conn.execute(SCHEMA)
     return conn
 
@@ -355,6 +459,7 @@ def record(
     conn: sqlite3.Connection,
     question: Question,
     *,
+    shown: int,
     evicted: Sequence[str],
     included: Sequence[str],
     unsure: bool,
@@ -364,7 +469,9 @@ def record(
     The question rather than five of its fields, because reading the labels
     afterwards means asking how the verdicts fell across the grey band and across
     the bodies -- so what was asked is stored beside what was answered, and there
-    is one place that decides which parts of it that is.
+    is one place that decides which parts of it that is. `shown` is how far the
+    reader had widened the view, and it is stored as the frames themselves: see
+    `SCHEMA` for why that is the column ticket 34 turns on.
     """
     given = verdict(evicted=evicted, included=included, unsure=unsure)
     conn.execute(
@@ -372,8 +479,7 @@ def record(
         (
             key(question.members),
             question.camera,
-            question.before,
-            question.after,
+            json.dumps(question.surrounding(shown)),
             question.margin,
             given,
             json.dumps(list(evicted)),
@@ -392,9 +498,10 @@ def answers(conn: sqlite3.Connection) -> dict[str, dict]:
             "verdict": row[2],
             "evicted": json.loads(row[3]),
             "included": json.loads(row[4]),
+            "surrounding": json.loads(row[5]),
         }
         for row in conn.execute(
-            "SELECT members, camera, verdict, evicted, included FROM answer"
+            "SELECT members, camera, verdict, evicted, included, surrounding FROM answer"
         )
     }
 
@@ -478,8 +585,11 @@ class LabelServer(ThreadingHTTPServer):
         sets = [
             {
                 "members": list(question.members),
-                "before": question.before,
-                "after": question.after,
+                # Nearest first, each with the seconds between it and the stack.
+                # All of them ride with the set: widening the view is then a
+                # local move, like going back to revise is.
+                "before": [{"sha": sha, "gap": gap} for sha, gap in question.before],
+                "after": [{"sha": sha, "gap": gap} for sha, gap in question.after],
                 "camera": question.camera,
                 "margin": question.margin,
                 "answer": given.get(key(question.members)),
@@ -488,6 +598,7 @@ class LabelServer(ThreadingHTTPServer):
         ]
         return {
             "sets": sets,
+            "shown": SHOWN,
             "strictness": STRICTNESS,
             "given": sum(1 for entry in sets if entry["answer"] is not None),
             # What is left to judge is what is left in the sample, which is
@@ -609,10 +720,18 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": "members"})
             return
 
+        # How far the reader had widened the view. Everything else is checked
+        # against it, so a frame that was off screen cannot be marked as one the
+        # reader saw and judged.
+        shown = payload.get("shown", SHOWN)
+        if type(shown) is not int or not 1 <= shown <= CONTEXT:
+            self._json(400, {"error": "shown"})
+            return
+
         marks = {}
         for field, allowed in (
             ("evicted", set(question.members)),
-            ("included", {question.before, question.after} - {None}),
+            ("included", set(question.surrounding(shown))),
         ):
             value = payload.get(field, [])
             if not isinstance(value, list) or not set(value) <= allowed:
@@ -628,6 +747,7 @@ class LabelHandler(BaseHTTPRequestHandler):
             200,
             self.server.judge(
                 question,
+                shown=shown,
                 evicted=marks["evicted"],
                 included=marks["included"],
                 unsure=unsure,
@@ -720,6 +840,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"labelling harness on {url}  -- disposable, see the module docstring")
     print(f"  strictness      {args.strictness} provisional, {matches.METHOD}")
     print(f"  sets            {len(asked)} sampled, least decisive first")
+    print(f"  context         {SHOWN} frame each side, widened to {CONTEXT} with +")
     print(f"  cameras         {', '.join(cameras)}")
     print(f"  margins         {asked[0].margin} to {asked[-1].margin} points from the line")
     print(f"  labels          {labels_db}")
@@ -740,4 +861,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except LabelsRefused as exc:
+        sys.exit(f"refused: {exc}")

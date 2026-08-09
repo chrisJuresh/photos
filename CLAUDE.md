@@ -217,7 +217,12 @@ lets one screen answer both of the reader's complaints: *does this stack hold so
 does not belong*, and *is it missing something that should be here*. Space accepts the stack
 as drawn, clicking a member says it does not belong, clicking a neighbour says it should have
 been included — each click is recorded as it is made — and `u` records **not sure**, which is
-an answer rather than a skip. Sets are drawn from wherever the Match is least decisive and
+an answer rather than a skip. `+` widens the view when the answer turns on what is past the
+edge: one frame each side is enough for 46% of candidate stacks but only 27% of the least
+decisive ones, and no fixed width settles it when a run can reach 1,435 frames. **What an
+answer says is bounded by what was on screen for it**, which is stored per answer and is the
+column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
+that the stack is complete. Sets are drawn from wherever the Match is least decisive and
 dealt out a camera at a time; `STRICTNESS` there is a provisional line to disagree with and
 not the answer. One run is one of ADR 0003's two rounds of thirty, and the second round is a
 second run at whatever the first round moved the line to — `--strictness` and `--sets` say so.

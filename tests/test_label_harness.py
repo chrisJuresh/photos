@@ -14,6 +14,7 @@ photograph.
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,7 @@ def sha_of(seed: str) -> str:
     return (seed * 64)[:64]
 
 
-A, B, C, D, E = (sha_of(seed) for seed in "abcde")
+A, B, C, D, E, F, G = (sha_of(seed) for seed in "abcdefg")
 
 HIGH = STRICTNESS + 40  # agreed on plainly
 LOW = 0  # nothing agreed at all
@@ -71,32 +72,81 @@ def test_a_pair_with_no_row_is_read_as_agreeing_on_nothing() -> None:
 # --- which sets are worth the reader's evening -------------------------------
 
 
+def shot(run: list[str], every: int = 2) -> list[tuple[str, int]]:
+    """A run as the enumeration hands it over: each frame with when it was taken."""
+    return [(sha, index * every) for index, sha in enumerate(run)]
+
+
+def ask(run: list[str], points: dict, camera: str | None = "Lumix") -> list[Question]:
+    return label.questions([(camera, shot(run))], points)
+
+
 def one(run: list[str], points: dict, camera: str | None = "Lumix") -> Question:
-    asked = label.questions([(camera, run)], points)
+    asked = ask(run, points, camera)
     assert len(asked) == 1, asked
     return asked[0]
 
 
+def names(near) -> list[str]:
+    """The shas of a run of neighbours, dropping the gaps."""
+    return [sha for sha, _gap in near]
+
+
 def test_a_stack_is_shown_with_the_frame_before_and_after_it() -> None:
-    run = [A, B, C, D]
-    asked = one(run, scores(bc=HIGH))
+    asked = one([A, B, C, D], scores(bc=HIGH))
 
     assert asked.members == (B, C)
-    assert asked.before == A
-    assert asked.after == D
+    assert asked.nearest() == (A, D)
 
 
 def test_a_stack_at_the_end_of_a_run_has_no_frame_after_it() -> None:
     asked = one([A, B], scores(ab=HIGH))
 
     assert asked.members == (A, B)
-    assert (asked.before, asked.after) == (None, None)
+    assert asked.nearest() == (None, None)
+    assert (asked.before, asked.after) == ((), ())
+
+
+def test_the_run_is_carried_outwards_from_the_stack_nearest_frame_first() -> None:
+    """The reader widens the view when the answer turns on what is past the edge,
+    and that has to be a local move -- so the frames ride with the set."""
+    asked = one([A, B, C, D, E, F], scores(cd=HIGH))
+
+    assert asked.members == (C, D)
+    assert names(asked.before) == [B, A]
+    assert names(asked.after) == [E, F]
+
+
+def test_only_so_much_of_the_run_is_carried() -> None:
+    """A run this fence admits reaches 1,435 frames, and the widening key stops
+    long before that."""
+    run = [sha_of(str(n)) for n in range(30)]
+    asked = label.questions(
+        [("Lumix", shot(run))],
+        {(run[14], run[15]): HIGH},
+        context=3,
+    )
+
+    assert len(asked) == 1
+    assert len(asked[0].before) == 3
+    assert len(asked[0].after) == 3
+
+
+def test_each_frame_outside_carries_its_gap_from_the_stack() -> None:
+    """Two seconds is another press of the shutter and forty minutes is somewhere
+    else, and the reader cannot tell those apart from the photograph alone."""
+    asked = label.questions(
+        [("Lumix", [(A, 0), (B, 10), (C, 12), (D, 300)])], scores(bc=HIGH)
+    )[0]
+
+    assert asked.before == ((A, 10),)   # 10s before the stack begins
+    assert asked.after == ((D, 288),)   # 288s after it ends
 
 
 def test_a_lone_frame_is_not_a_stack_and_is_not_shown() -> None:
     """CONTEXT.md: a stack is the same photograph taken more than once. A frame
     that matched nothing is still drawn as a neighbour of the stack beside it."""
-    asked = label.questions([("Lumix", [A, B, C])], scores(bc=HIGH))
+    asked = ask([A, B, C], scores(bc=HIGH))
 
     assert [question.members for question in asked] == [(B, C)]
 
@@ -127,17 +177,25 @@ def test_a_neighbour_is_judged_on_its_weakest_pair_and_not_its_best() -> None:
     assert asked.margin == STRICTNESS - LOW
 
 
+def test_only_the_nearest_frame_either_side_decides_the_margin() -> None:
+    """The margin is about *this* boundary. A frame further out is its own
+    boundary with its own question, and letting it move this number would rank
+    the set by an argument the reader is not being shown."""
+    near = one([A, B, C], scores(bc=HIGH, ab=NEAR, ac=NEAR))
+    far = one([A, B, C, D], scores(cd=HIGH, bc=NEAR, bd=NEAR, ab=LOW, ac=LOW, ad=LOW))
+
+    assert near.margin == 1
+    assert far.margin == 1  # A is two away and does not enter it
+
+
 def test_a_neighbour_that_agrees_with_every_member_is_a_coin_toss() -> None:
     """The walk is forward, so B is consumed by the stack before this one and can
     still agree with all of it. Nothing about the Match justifies that split, so
     the margin bottoms out rather than going negative."""
-    asked = label.questions(
-        [("Lumix", [A, B, C, D])],
-        scores(ab=HIGH, ac=LOW, ad=LOW, bc=HIGH, bd=HIGH, cd=HIGH),
-    )
+    asked = ask([A, B, C, D], scores(ab=HIGH, ac=LOW, ad=LOW, bc=HIGH, bd=HIGH, cd=HIGH))
 
     assert [question.members for question in asked] == [(A, B), (C, D)]
-    assert asked[1].before == B
+    assert asked[1].nearest()[0] == B
     assert asked[1].margin == 0
 
 
@@ -152,7 +210,7 @@ def test_a_stack_nothing_borders_and_nothing_strains_is_decisive() -> None:
 
 def asking(camera: str, margin: int, seed: str) -> Question:
     return Question(
-        camera=camera, members=(sha_of(seed),), before=None, after=None, margin=margin
+        camera=camera, members=(sha_of(seed),), before=(), after=(), margin=margin
     )
 
 
@@ -227,12 +285,14 @@ def answers(tmp_path: Path):
     conn.close()
 
 
-ASKED = Question(camera="Lumix", members=(A, B), before=None, after=C, margin=2)
+ASKED = Question(
+    camera="Lumix", members=(A, B), before=(), after=((C, 3), (D, 9)), margin=2
+)
 
 
 def given(conn, **marks) -> None:
     label.record(
-        conn, ASKED, **{"evicted": (), "included": (), "unsure": False, **marks}
+        conn, ASKED, **{"shown": 1, "evicted": (), "included": (), "unsure": False, **marks}
     )
 
 
@@ -272,3 +332,48 @@ def test_an_answer_records_the_stack_it_was_about() -> None:
     assert stored["members"] == [A, B]
     assert stored["included"] == [C]
     assert stored["camera"] == "Lumix"
+
+
+def test_an_answer_records_which_frames_outside_the_stack_were_on_screen() -> None:
+    """Ticket 34 turns on this: `accept` says the frames the reader was shown are
+    right, and never that the stack is complete. A strictness that pulls in a
+    frame they never saw is not contradicting them."""
+    conn = label.store(Path(":memory:"))
+    try:
+        label.record(conn, ASKED, shown=1, evicted=(), included=(), unsure=False)
+        narrow = label.answers(conn)[label.key((A, B))]["surrounding"]
+        label.record(conn, ASKED, shown=2, evicted=(), included=(), unsure=False)
+        wide = label.answers(conn)[label.key((A, B))]["surrounding"]
+    finally:
+        conn.close()
+
+    assert narrow == [C]
+    assert wide == [C, D]
+
+
+def test_the_frames_on_screen_are_the_ones_the_view_was_widened_to() -> None:
+    question = Question(
+        camera="Lumix", members=(C, D), before=((B, 2), (A, 5)), after=((E, 3),), margin=0
+    )
+
+    assert question.surrounding(1) == [B, E]
+    assert question.surrounding(2) == [B, A, E]
+    assert question.surrounding(8) == [B, A, E]  # asking for more than there is
+
+
+def test_a_labels_file_from_before_the_view_could_widen_is_refused(tmp_path: Path) -> None:
+    """It records one neighbour each side, which is a different claim from what
+    was on screen. There is no migration machinery here on purpose, so this says
+    what is at stake rather than quietly rewriting the reader's answers."""
+    path = tmp_path / "labels.sqlite3"
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE answer (members TEXT PRIMARY KEY, camera TEXT, before_sha TEXT,"
+        " after_sha TEXT, margin INTEGER, verdict TEXT, evicted TEXT, included TEXT)"
+    )
+    old.execute("INSERT INTO answer VALUES ('x', 'Lumix', NULL, NULL, 1, 'accept', '[]', '[]')")
+    old.commit()
+    old.close()
+
+    with pytest.raises(label.LabelsRefused, match="1 answer"):
+        label.store(path)
