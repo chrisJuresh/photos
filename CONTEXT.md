@@ -49,6 +49,18 @@ rows, so the photograph never moves — see
 `docs/adr/0002-decks-rise-into-the-row-gap.md`.
 _Avoid_: badge, stack indicator, count, pile
 
+**Marked**:
+A tile the reader has picked by hand, in select mode — by clicking it, by shift-clicking
+to extend from the last tile touched, or by sweeping a marquee over a run of them. The
+marked set is evidence: it is what the Share button copies, as the ids grouped the way
+the grid grouped them. Marking a cover marks its whole stack, and a mark is metadata that
+never becomes a file operation. Not *selection*, which is taken: that is what the filters
+and the sort have chosen to put on screen, and the marked set is a subset of it that the
+reader chose themselves. It survives scrolling and a resize, and nothing else — a change
+to the filters, the sort or the stacking window empties it, because it describes one
+grouping and that grouping has gone.
+_Avoid_: selected, checked, ticked, chosen, tagged, flagged
+
 **Representative**:
 The one file of a tile whose bytes are served and revealed. A property of the tile,
 decided at build time, unrelated to stacking.

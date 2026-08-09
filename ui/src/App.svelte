@@ -16,7 +16,7 @@
   import Rebuild from "./lib/Rebuild.svelte";
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
-  import { shareText, stackOf, tally, toggle } from "./lib/select.js";
+  import { shareText, stackOf, sweep, tally, toggle } from "./lib/select.js";
   import Sheet from "./lib/Sheet.svelte";
   import { photoRect } from "./lib/sheet.js";
   import { remember, restore } from "./lib/stack.js";
@@ -87,6 +87,18 @@
   // live on the tile.
   let selecting = $state(false);
   let marks = $state([]);
+  // The last tile touched, as an index into the sheet's page order, and what a
+  // shift-click extends from. An index rather than an id because the range is
+  // "everything between these two in the current sort", and the sheet's order
+  // is that sort. Null until something has been touched.
+  let markAnchor = $state(null);
+  // The drag in progress, or null: `{from, marking}` — the marked set as it
+  // stood when the press landed, and the verdict the tile under the pointer
+  // fixed for the whole of it. Both are re-applied on every move, which is what
+  // makes the preview live and a tile the box has moved back off revert. One
+  // object rather than two variables, so there is no half-set drag to describe.
+  // Not `$state`: it decides what a move computes and nothing draws it.
+  let dragging = null;
 
   const screen = $derived(SCREENS[index]);
   const showTable = $derived(screen.table !== false);
@@ -127,6 +139,7 @@
     void gridQuery;
     untrack(() => {
       marks = [];
+      markAnchor = null; // it indexes an order this query no longer has
     });
   });
 
@@ -499,14 +512,25 @@
   // Triage is the other client of this sheet and keeps its single click: its
   // tiles are source files, revealed as origins, and most of them have no
   // substrate for an overlay to draw.
-  function activate(item, tile, at) {
+  function activate(item, tile, at, shift = false) {
     if (mode === "grid") {
       // In select mode a click is the mark and nothing else: no overlay, no
       // reveal. A cover carries its whole stack, which is what makes the export
       // say how the grid had grouped things rather than only which photographs
       // were picked.
       if (selecting) {
-        marks = toggle(marks, stackOf(item));
+        // Shift extends from the last tile touched to this one, in the order
+        // the sheet holds them — which is the sort the grid is under — and
+        // applies *this* click's outcome across the range: mark from an
+        // unmarked tile, unmark from a marked one. The same gesture the triage
+        // table's tickboxes have, over tiles instead of rows.
+        if (shift && markAnchor !== null) {
+          const run = sheetView?.itemsBetween(markAnchor, at) ?? [];
+          marks = sweep(marks, run.map(stackOf), !isMarked(item));
+        } else {
+          marks = toggle(marks, stackOf(item));
+        }
+        markAnchor = at;
         return;
       }
       // The photograph's rect and not the tile's: a stacked tile's element is
@@ -516,6 +540,38 @@
       return;
     }
     guard(() => api.revealOrigin(item.id));
+  }
+
+  const isMarked = (item) => marks.some((entry) => entry.key === item.id);
+
+  // The marquee, in three moments.
+  //
+  // The tile under the pointer when the press landed decides the whole drag:
+  // from a marked tile it unmarks everything it touches, from an unmarked one —
+  // and from empty canvas, which is the same thing said with no tile — it marks.
+  // Fixed here, once, because a box whose meaning changed under the hand while
+  // it was being extended would be unusable.
+  function sweepStart(item, at) {
+    dragging = { from: marks, marking: item === null || !isMarked(item) };
+    if (at !== null) markAnchor = at;
+  }
+
+  // Every move is the verdict re-applied to the set as it stood when the drag
+  // began, so the marks preview live and a tile the box has moved back off goes
+  // back to what it was. The drag never touches a mark outside its own box:
+  // this is an evidence-gathering tool and the reader sweeps several separate
+  // runs into one report. Clearing is the button that says Clear.
+  function sweepMove(covered) {
+    marks = sweep(dragging.from, covered.map(stackOf), dragging.marking);
+  }
+
+  function sweepEnd() {
+    dragging = null;
+  }
+
+  function unmarkAll() {
+    marks = [];
+    markAnchor = null;
   }
 
   // Whether there is a tile that way. `step` is the whole of it: the sheet's
@@ -610,7 +666,7 @@
     onclear={() => (filters = {})}
     onselecting={(next) => (selecting = next)}
     onshare={share}
-    onunmark={() => (marks = [])}
+    onunmark={unmarkAll}
     ontriage={() => (mode = "triage")}
   />
 {/if}
@@ -754,6 +810,9 @@
         onActivate={activate}
         onOverride={override}
         onExcludeFolder={excludeFolder}
+        onSweepStart={sweepStart}
+        onSweepMove={sweepMove}
+        onSweepEnd={sweepEnd}
         onState={(state) => (sheet = { ...sheet, ...state })}
       />
     {/if}

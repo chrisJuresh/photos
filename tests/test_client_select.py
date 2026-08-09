@@ -79,6 +79,68 @@ def test_the_tally_is_stacks_and_the_photographs_in_them():
     assert call(SELECT, "tally", []) == {"stacks": 0, "photos": 0}
 
 
+# ------------------------------------------------------------------ the sweep
+
+
+@needs_node
+def test_a_sweep_appends_what_it_caught_in_sheet_order():
+    """The marquee and shift-click both land here. The order is the order the
+    tiles are drawn in, which is the grid's current sort — the same claim a
+    click-by-click report makes about the order the reader worked in."""
+    marks = call(SELECT, "sweep", [], [stack(3, [3]), stack(7, [7, 8])], True)
+    assert marks == [stack(3, [3]), stack(7, [7, 8])]
+
+
+@needs_node
+def test_a_sweep_over_something_already_marked_marks_it_once():
+    """Two drags overlapping, or a shift-click back across a range: the second
+    one must not put a second copy of a stack in the report."""
+    before = [stack(3, [3]), stack(9, [9])]
+    after = call(SELECT, "sweep", before, [stack(9, [9]), stack(12, [12])], True)
+    assert after == [stack(3, [3]), stack(9, [9]), stack(12, [12])]
+
+
+@needs_node
+def test_an_unmarking_sweep_takes_only_what_it_swept():
+    before = [stack(3, [3]), stack(9, [9]), stack(12, [12])]
+    assert call(SELECT, "sweep", before, [stack(9, [9])], False) == [
+        stack(3, [3]),
+        stack(12, [12]),
+    ]
+
+
+@needs_node
+def test_a_sweep_never_clears_marks_outside_the_box():
+    """This is not a file manager. The reader sweeps several separate runs
+    scattered down the sheet to send in one message, so a drag that destroyed
+    the previous sweep would be exactly wrong — clearing is the button."""
+    before = [stack(1, [1]), stack(2, [2])]
+    assert call(SELECT, "sweep", before, [stack(50, [50])], True) == [
+        stack(1, [1]),
+        stack(2, [2]),
+        stack(50, [50]),
+    ]
+    assert call(SELECT, "sweep", before, [stack(50, [50])], False) == before
+
+
+@needs_node
+def test_an_empty_sweep_changes_nothing():
+    """Every drag starts as one: the box has no area until the pointer moves."""
+    before = [stack(1, [1])]
+    assert call(SELECT, "sweep", before, [], True) == before
+    assert call(SELECT, "sweep", before, [], False) == before
+
+
+@needs_node
+def test_the_sweep_does_not_touch_what_it_was_given():
+    """Applied to the same snapshot on every pointer move — a live preview is
+    the drag's verdict re-applied to the set as it stood when the drag began, so
+    a tile the box has moved back off reverts."""
+    before = [stack(1, [1])]
+    call(SELECT, "sweep", before, [stack(2, [2])], True)
+    assert before == [stack(1, [1])]
+
+
 # --------------------------------------------------------------- the string
 
 

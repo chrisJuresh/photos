@@ -36,6 +36,33 @@ export function toggle(marks, stack) {
   return without.length === marks.length ? [...marks, stack] : without;
 }
 
+/**
+ * One verdict applied to a run of stacks: the marquee's, and shift-click's.
+ *
+ * `marking` is fixed before the run is known — by the state of the tile the drag
+ * pressed on, or by the state of the tile the shift-click landed on — so this
+ * takes it rather than deciding it per stack. A box whose meaning changed under
+ * the hand as it grew would be unusable. (Not `mark`: that is a noun in this
+ * domain — a marked tile — and this is the direction the run is going.)
+ *
+ * Additive in both directions: it adds or removes what it was handed and leaves
+ * everything else exactly where it was. The reader sweeps several separate runs
+ * scattered down the sheet to send in one message, so a drag that cleared the
+ * previous sweep would be exactly wrong; clearing is the button that says so.
+ *
+ * A new array as `toggle` returns one, and for the same reason. The drag
+ * re-applies this to the snapshot it took at the start on every pointer move,
+ * which is what makes a tile the box has moved back off revert.
+ */
+export function sweep(marks, stacks, marking) {
+  if (!marking) {
+    const swept = new Set(stacks.map((stack) => stack.key));
+    return marks.filter((entry) => !swept.has(entry.key));
+  }
+  const held = new Set(marks.map((entry) => entry.key));
+  return [...marks, ...stacks.filter((stack) => !held.has(stack.key))];
+}
+
 /** How many stacks are marked, and how many photographs they hold. */
 export function tally(marks) {
   return {

@@ -27,6 +27,13 @@
     onOverride = async () => null,
     onExcludeFolder = () => {},
     onState = () => {},
+    // The marquee, in three moments. `onSweepStart` is handed the tile the drag
+    // pressed on — null on empty canvas — because that tile decides whether the
+    // whole drag marks or unmarks; `onSweepMove` every tile the box now covers,
+    // which is a preview and a commit at once; `onSweepEnd` the release.
+    onSweepStart = () => {},
+    onSweepMove = () => {},
+    onSweepEnd = () => {},
   } = $props();
 
   let canvas = $state(null);
@@ -123,6 +130,9 @@
       extend: triage ? extend : extendTick,
       fill: triage ? fill : fillMark,
       onState: (state) => onState(state),
+      sweepStart: (item, at) => onSweepStart(item, at),
+      sweepMove: (swept) => onSweepMove(swept),
+      sweepEnd: () => onSweepEnd(),
       activate: async (item, event, tile, at) => {
         // A disabled button dispatches no click at all, so the already-excluded
         // case never arrives here and cannot fall through to the reveal either.
@@ -142,7 +152,11 @@
           //
           // The index too, because the overlay walks from it: "the next tile in
           // the current sort" is the next entry in the sheet's own page order.
-          onActivate(item, tile, at);
+          //
+          // And whether Shift was down — as the one bit it is, rather than as
+          // the event, which would put a DOM object above a component whose
+          // whole arrangement is that the DOM stays underneath it.
+          onActivate(item, tile, at, event.shiftKey);
           return;
         }
         const decision = NEXT[item.o ?? "null"];
@@ -151,7 +165,21 @@
       },
     });
     started = key;
+    instance.setSweeping(selecting);
     return () => instance?.destroy();
+  });
+
+  // Whether a press rubber-bands. The same fact the `.selecting` class on the
+  // canvas carries — the tickboxes are shown by CSS and the gesture is armed
+  // here, from one prop, so the two cannot disagree about which mode is on.
+  //
+  // Said twice on purpose, and the mount is the one that cannot go: `instance`
+  // is a plain `let` rather than `$state`, so this effect does not re-run when
+  // it is assigned. Its first pass has nothing to arm, and a sheet that mounts
+  // with select mode already on — leaving triage and coming back, say — would
+  // then never be armed at all, because `selecting` is not about to change.
+  $effect(() => {
+    instance?.setSweeping(selecting);
   });
 
   // Read both props first so the effect subscribes to them before any early
@@ -190,6 +218,13 @@
     instance?.focus(at);
   }
 
+  /** The tiles from `a` to `b` inclusive, in sheet order — shift-click's range.
+   * @param {number} a
+   * @param {number} b */
+  export function itemsBetween(a, b) {
+    return instance?.itemsBetween(a, b) ?? [];
+  }
+
   // Re-mark the folder chips after a write. `fill` runs when a tile is bound, so
   // without this the tiles already on screen keep the marks they were mounted
   // with. Compared as a value rather than by identity because the counts refresh
@@ -206,9 +241,17 @@
   // The same for the marked set: a mark applied to a tile already on screen has
   // to appear on it, rather than waiting for that tile to be scrolled away and
   // recycled back in.
-  let marksBound = "";
+  //
+  // By identity and not by value, which is the opposite of the rule above and
+  // for the reason that rule gives: the folder list is rebuilt on every
+  // keystroke whether or not it changed, and this one is derived from `marks`,
+  // which is only reassigned when a mark actually moves. So identity is already
+  // the exact signal — and a marquee makes the difference matter, because a
+  // sweep can leave thousands of keys and joining them into a string to compare
+  // is then real work on every frame of a drag.
+  let marksBound = null;
   $effect(() => {
-    const keys = markedKeys.join(",");
+    const keys = markedKeys;
     if (!instance || keys === marksBound) return;
     marksBound = keys;
     instance.refill();
