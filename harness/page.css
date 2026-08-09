@@ -64,17 +64,28 @@ main {
 }
 
 /* The stack in the middle, its neighbours outside it. The border is the claim
-   being judged: everything inside is one photograph, everything outside is not. */
+   being judged: everything inside is one photograph, everything outside is not.
+
+   Every box down this chain carries `min-width: 0` and `min-height: 0`, and no
+   photograph anywhere sets its own size. That is the whole rule, and breaking it
+   is not a cosmetic bug: a flex item defaults to refusing to shrink below its
+   content, so a 1536px substrate left to size itself pushes its frame straight
+   out through the side of the box that holds it and lies across whatever is
+   beside it -- a neighbour, drawn dimmed to say it is outside the stack, over
+   the member the reader is trying to judge. Measured before this was written:
+   the frame before the stack overhung the first member by 345px, and four of a
+   six-frame stack sat off the right of a 1280px window with nothing to scroll. */
 .stage {
+  min-width: 0;
   min-height: 0;
   display: flex;
   align-items: stretch;
   gap: 10px;
-  overflow-x: auto;
 }
 
 .box {
   min-width: 0;
+  min-height: 0;
   display: flex;
   gap: 6px;
   padding: 8px;
@@ -83,10 +94,34 @@ main {
   background: var(--panel);
 }
 
-.box.neighbour { border-style: dashed; background: none; }
+/* The stack takes the room that is left, and **wraps** rather than staying on
+   one line. A row is the obvious arrangement and the wrong one: eight frames
+   across a 1280px window leaves each photograph 130px wide in a 465px-tall
+   slot, which is a strip of picture between two bands of nothing, and the
+   reader cannot see the difference they are being asked to judge. `auto-fit`
+   does the counting, so a stack of three gets three big tiles and a burst of
+   twelve wraps to a third row and scrolls inside its own border. */
+.box.member {
+  flex: 1 1 0;
+  display: grid;
+  grid-template-columns: repeat(var(--columns, 1), 1fr);
+  grid-auto-rows: minmax(90px, 1fr);
+  align-content: center;
+  overflow-y: auto;
+}
+
+/* Context, never the thing being judged, so a fixed slice either side. */
+.box.neighbour {
+  flex: 0 0 18%;
+  align-items: stretch;
+  border-style: dashed;
+  background: none;
+}
 
 .frame {
-  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -99,21 +134,36 @@ main {
   cursor: pointer;
 }
 
+.box.neighbour .frame { flex: 1 1 auto; }
+
+/* Sized by the frame, never by the file: the picture is letterboxed into
+   whatever room its share of the row leaves. */
 .frame img {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  max-height: 100%;
-  max-width: 42vw;
+  width: 100%;
   object-fit: contain;
 }
 
-.frame.neighbour img { opacity: 0.45; }
+/* Dimmed to say "outside the stack", not to say "not really here". The dashed
+   box and the caption carry that too, and at 0.45 -- with frames overhanging
+   each other, as they did -- it read as a rendering fault rather than a state. */
+.frame.neighbour img { opacity: 0.6; }
 .frame:hover { border-color: #5a5a5a; }
 .frame.marked-out { border-color: var(--out); }
 .frame.marked-out img { opacity: 0.3; }
 .frame.marked-in { border-color: var(--in); }
 .frame.marked-in img { opacity: 1; }
 
-.caption { text-align: center; font-size: 11px; }
+.caption {
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-align: center;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .frame.marked-out .caption { color: var(--out); }
 .frame.marked-in .caption { color: var(--in); }
 

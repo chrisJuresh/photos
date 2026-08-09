@@ -64,6 +64,36 @@ function box(shas, role, marked) {
   return holder;
 }
 
+const GAP = 6; // must match the `gap` the boxes are laid out with
+const CAPTION = 22; // the strip under each frame that is not photograph
+
+// How many columns to lay a stack out in. CSS can do this with `auto-fit` and it
+// gets it wrong for the job: `auto-fit` packs in as many columns as will fit the
+// width and never looks at the height, so six frames went four across in two
+// rows and each photograph came out 182px wide with half the row empty under it.
+// The reader is here to see a difference between photographs, so the arrangement
+// worth having is the one that draws them largest -- which means trying each
+// column count and keeping the best, since the winner depends on the shape of
+// the room as much as on how many frames there are.
+function columns(count, width, height) {
+  let best = 1;
+  let largest = 0;
+  for (let candidate = 1; candidate <= count; candidate += 1) {
+    const rows = Math.ceil(count / candidate);
+    const tall = (height - GAP * (rows - 1)) / rows - CAPTION;
+    const wide = (width - GAP * (candidate - 1)) / candidate;
+    if (tall <= 0 || wide <= 0) continue;
+    // A 3:2 picture is what this library is mostly made of, so its height in
+    // that tile stands in for "how well can the reader see it".
+    const size = Math.min(wide / 1.5, tall);
+    if (size > largest) {
+      largest = size;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 function draw() {
   const set = sample.sets[at];
   const mark = marksFor(at);
@@ -72,10 +102,19 @@ function draw() {
   if (set.before) {
     stage.append(box([set.before], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
   }
-  stage.append(box(set.members, "member", (sha) => (mark.out.has(sha) ? "out" : null)));
+  const members = box(set.members, "member", (sha) => (mark.out.has(sha) ? "out" : null));
+  stage.append(members);
   if (set.after) {
     stage.append(box([set.after], "neighbour", (sha) => (mark.in.has(sha) ? "in" : null)));
   }
+  // After appending, because the count is chosen against the room the box
+  // actually got. `style.setProperty` and never `setAttribute("style", …)`:
+  // the CSP carries no `unsafe-inline`, which blocks the attribute and not the
+  // CSSOM — the same distinction CLAUDE.md draws for Svelte.
+  members.style.setProperty(
+    "--columns",
+    columns(set.members.length, members.clientWidth, members.clientHeight)
+  );
 
   const answer = set.answer;
   about.replaceChildren(
@@ -170,6 +209,15 @@ function finished() {
   said.textContent = "← to go back over any of them";
   countUp();
 }
+
+// The arrangement is chosen against the room there is, so a resized window is a
+// different answer. Debounced, because a drag is a hundred of these.
+let settling = null;
+window.addEventListener("resize", () => {
+  if (!sample || !sample.sets[at]) return;
+  clearTimeout(settling);
+  settling = setTimeout(draw, 150);
+});
 
 stage.addEventListener("click", (event) => {
   const button = event.target.closest(".frame");
