@@ -166,6 +166,12 @@ export function createSheet(canvas, sentinel, options) {
     if (tile) return tile;
     const el = document.createElement("div");
     el.className = "tile";
+    // Focusable by script but not by Tab: the overlay closes onto whichever
+    // tile the reader walked to, and the keyboard has to land somewhere real
+    // for the arrow keys they were just using to keep meaning something. Not in
+    // the tab order, because 150 mounted tiles in it would be a tab order
+    // nobody could get past.
+    el.tabIndex = -1;
     // The deck first, so it paints under everything, and its cards deepest
     // first, so each one is painted over by the wider card in front of it and
     // only its top sliver shows. `cards` is held the other way round — nearest
@@ -333,9 +339,22 @@ export function createSheet(canvas, sentinel, options) {
     return nextTop - (origin() + window.innerHeight) < PREFETCH_PX;
   }
 
-  async function loadNext() {
-    if (inflight || exhausted) return;
+  // The read that is running, kept so it can be waited on. `walkTo` steps past
+  // the end of what has been paged in and has to wait for the page that brings
+  // the tile it wants; a `loadNext` that returns at once while a page is already
+  // in flight cannot be awaited in a loop without spinning. So the guard and the
+  // reading are separate, and the guard hands back the promise of the read that
+  // is already going.
+  let reading = Promise.resolve();
+
+  function loadNext() {
+    if (inflight || exhausted) return reading;
     inflight = true;
+    reading = readPages();
+    return reading;
+  }
+
+  async function readPages() {
     const mine = generation;
     onState({ loading: true, count: items.length, exhausted, total, tiles });
     try {
@@ -412,8 +431,9 @@ export function createSheet(canvas, sentinel, options) {
   function onClick(event) {
     const tile = event.target.closest(".tile");
     if (!tile || !canvas.contains(tile)) return;
-    const item = items[Number(tile.dataset.index)];
-    if (item && options.activate) options.activate(item, event, tile);
+    const index = Number(tile.dataset.index);
+    const item = items[index];
+    if (item && options.activate) options.activate(item, event, tile, index);
   }
 
   canvas.addEventListener("click", onClick);
@@ -479,6 +499,38 @@ export function createSheet(canvas, sentinel, options) {
     refill() {
       if (!options.fill) return;
       for (const [index, el] of mounted) options.fill(el, items[index]);
+    },
+    // Walk to one tile: read pages until it has a box, scroll the sheet so it
+    // sits in the middle of the window, mount it, and hand back the item with
+    // the element it was mounted into.
+    //
+    // Not `reveal`: that word is taken, and it means Explorer everywhere else in
+    // this codebase. The overlay steps with this, and stepping *is* this scroll:
+    // the tile the pane is drawing is the tile behind the pane, so the flight
+    // has a real rect to leave from on every step rather than only on the first,
+    // running off the loaded end pages the same way scrolling always has, and
+    // closing the overlay leaves the reader where the walk ended.
+    //
+    // `packed` and not `items.length`, because a trailing partial row is held
+    // back until the page after it — an item can be read and still have no box.
+    async walkTo(index) {
+      while (index >= packed && !exhausted) {
+        const before = packed;
+        await loadNext();
+        if (packed === before) break;
+      }
+      const row = rows.find((one) => one.to > index);
+      if (!row) return null;
+      const middle = Math.max(0, (window.innerHeight - row.height) / 2);
+      window.scrollTo(0, Math.max(0, canvas.offsetTop + row.top - middle));
+      render();
+      const el = mounted.get(index);
+      return el ? { item: items[index], tile: el } : null;
+    },
+    // Put the keyboard back on a tile. The overlay hands focus back on the way
+    // out, and after a walk that is a different tile from the one it opened on.
+    focus(index) {
+      mounted.get(index)?.focus();
     },
     // Re-bind one already-mounted item, for an override toggle that changed it.
     refresh(item) {

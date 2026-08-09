@@ -20,6 +20,20 @@ One immutable object in the vault, identified by the SHA-256 of its bytes. A til
 has one or more.
 _Avoid_: photo, asset, object
 
+**Overlay**:
+What a tile expands into: its frames over a blurred grid, all of them at once — one
+photograph filling the pane where the tile stands alone. Every tile expands, so the
+overlay is where a photograph is looked at and where revealing it in Explorer is asked
+for. The reader walks the selection from inside it, tile to tile in the current sort,
+and the grid scrolls underneath to whichever tile the pane is drawing.
+_Avoid_: lightbox, modal, viewer, expanded stack
+
+**Frame**:
+One member of what the overlay draws — the tile's own photograph when it stands alone,
+and one of the stack's when it does not. A frame is a tile, seen from inside an open
+one; the word exists because "the tiles of a tile" reads as nonsense.
+_Avoid_: slide, item, member
+
 **Cover**:
 The single member of a stack the grid draws when the stack is closed — the sharpest
 frame of its middle-exposure third. Chosen from the members present in the current

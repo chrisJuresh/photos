@@ -29,10 +29,19 @@
     total = null,
     tiles = null,
     loading = false,
+    // Select mode, and what it has caught: `{stacks, photos}` from
+    // `select.js`'s `tally`. The pair of numbers the count pane gave up when it
+    // became one number — here they are about a set the reader chose, which is
+    // the only place a pair of them is worth reading.
+    selecting = false,
+    marked = { stacks: 0, photos: 0 },
     onselect = () => {},
     onsort = () => {},
     onstack = () => {},
     onclear = () => {},
+    onselecting = () => {},
+    onshare = () => {},
+    onunmark = () => {},
     ontriage = () => {},
   } = $props();
 
@@ -159,10 +168,29 @@
        does change with the toggle is how many stacks those photographs made,
        and that is the badge on the Stacks pill, which is where the reader
        turned stacking on. -->
-  <div class="glass tally" use:refract>
-    <strong>{photos === null ? "…" : count(photos)}</strong>
-    <span class="muted">{photos === 1 ? "photo" : "photos"}</span>
-    {#if loading}<span class="spin" aria-label="loading"></span>{/if}
+  <!-- Both panes hang out of the bar's left edge, in the margin the side setting
+       opens up. The marked one is first so it grows away from the count. -->
+  <div class="panes">
+    {#if marked.stacks}
+      <div class="glass marks" use:refract>
+        <span class="nums">
+          <strong>{count(marked.stacks)}</strong>
+          <span class="muted">{marked.stacks === 1 ? "stack" : "stacks"}</span>
+          <strong>{count(marked.photos)}</strong>
+          <span class="muted">{marked.photos === 1 ? "photo" : "photos"}</span>
+        </span>
+        <button class="menu small" onclick={() => onshare()} title="Copy the conditions and the marked ids to the clipboard">
+          Share
+        </button>
+        <button class="menu small" onclick={() => onunmark()}>Clear</button>
+      </div>
+    {/if}
+
+    <div class="glass tally" use:refract>
+      <strong>{photos === null ? "…" : count(photos)}</strong>
+      <span class="muted">{photos === 1 ? "photo" : "photos"}</span>
+      {#if loading}<span class="spin" aria-label="loading"></span>{/if}
+    </div>
   </div>
 
   <!-- The panels hang off this rather than off the bar: an element with a
@@ -203,6 +231,20 @@
           Stacks{#if stacking.on && total !== null}<span class="badge">{count(total)}</span>{/if}<span
             class="caret">▾</span
           >
+        </button>
+
+        <!-- A toggle rather than a menu, so no caret: there is nothing to open.
+             What it does is change what a click on a photograph means, which is
+             why its on-state is the solid one the open panels use. -->
+        <button
+          class="menu"
+          class:on={selecting}
+          role="switch"
+          aria-checked={selecting}
+          title="Mark tiles by clicking them, then copy their ids"
+          onclick={() => onselecting(!selecting)}
+        >
+          Select
         </button>
 
         {#if chips.length}
@@ -384,35 +426,31 @@
     min-height: 56px;
   }
 
-  /* Its own pane, so the number has ground under it whatever the bar's tint is
-     set to. Out of the flow and hung off the bar's left edge, because the bar is
-     what is centred in the window: in the row it would push the bar right by its
-     own width, and a count that is not the thing being centred should not be
-     what decides where the centre is. It lives in the margin the side setting
-     opens up, which is why that setting has a floor — at 650 there is 650px of
-     window to its left and it needs about 120 of them.
+  /* The answers, each on ground of its own so it has something under it whatever
+     the bar's tint is set to. Out of the flow and hung off the bar's left edge,
+     because the bar is what is centred in the window: in the row they would push
+     it right by their own width, and a count that is not the thing being centred
+     should not be what decides where the centre is. They live in the margin the
+     side setting opens up, which is why that setting has a floor — at 650 there
+     is 650px of window to the bar's left and the count needs about 120 of them.
 
-     Its height is its own too, and `/tune` sets it: the pane holding a
+     Right to left, so the count keeps its position and the marked pane grows
+     away from it: the count is where the reader's eye already is, and a pane
+     appearing must not move it.
+
+     The height is the count's own, and `/tune` sets it: the pane holding a
      five-digit answer does not have to be the height of a row of pills. It
      ships at 42px against the bar's 56, and `top`/`bottom` plus an auto block
-     margin centre it against the bar whatever that height is. It no longer sets
-     the row's height at all — `--header-h` is the bar, which is the only one of
-     the two the photographs have to start below.
+     margin centre the row against the bar whatever that height is. It no longer
+     sets the header's height at all — `--header-h` is the bar, which is the only
+     one of the two the photographs have to start below.
 
      The height is exact rather than a floor, and the block padding is nothing:
      a pane that kept 12px above and below the number could not be shrunk past
      45px however low the slider went, and the point of the control is to get it
      down to the height of a pill beside it. The line is centred by the flex
-     row, so the padding was never what put it in the middle.
-
-     The two properties the rest of the material reads are rebound here to the
-     count's own pair, rather than the pane naming a background and a colour of
-     its own: everything inside it — the number, the word, the muted fraction
-     that word is written in — then picks the new values up from the rules that
-     already read them, and `.glass` above needs no exception. */
-  .tally {
-    --glass-tint: var(--glass-tint-tally);
-    --glass-text: var(--glass-text-tally);
+     row, so the padding was never what put it in the middle. */
+  .panes {
     position: absolute;
     right: calc(100% + var(--s-2));
     top: 0;
@@ -420,10 +458,64 @@
     margin-block: auto;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--s-2);
     height: var(--glass-tally-h, 42px);
+  }
+
+  /* The two properties the rest of the material reads are rebound here to the
+     count's own pair, rather than each pane naming a background and a colour of
+     its own: everything inside them — the number, the word, the muted fraction
+     that word is written in — then picks the new values up from the rules that
+     already read them, and `.glass` above needs no exception. */
+  .tally,
+  .marks {
+    --glass-tint: var(--glass-tint-tally);
+    --glass-text: var(--glass-text-tally);
+  }
+
+  .tally {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
     padding: 0 var(--s-4);
     white-space: nowrap;
+  }
+
+  /* The count's material, because it is the same kind of thing: an answer, on
+     its own ground, read off a photograph. What it adds is the two controls the
+     count pane has no use for. */
+  .marks {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    height: 100%;
+    padding: 0 var(--s-2) 0 var(--s-4);
+    white-space: nowrap;
+  }
+
+  /* Two numbers with their words, which is what makes them readable as a pair
+     rather than as one number the reader has to guess the unit of. */
+  .marks .nums {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+  }
+
+  .marks strong {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .marks strong + .muted {
+    margin-right: 3px;
+  }
+
+  .small {
+    min-height: var(--ctl-sm);
+    font-size: var(--fs-200);
+    font-weight: 400;
+    color: var(--glass-text);
   }
 
   /* The shadow these two panes cast, and when they are entitled to cast one.
@@ -450,6 +542,7 @@
      photographs behind it at any scroll position, so it keeps its shadow whole
      through app.css's initial value. */
   .tally,
+  .marks,
   .bar {
     --glass-lift: 0;
     animation-name: lift;
@@ -474,6 +567,7 @@
      always present is a better failure than one never present. */
   @supports not (animation-timeline: scroll()) {
     .tally,
+    .marks,
     .bar {
       --glass-lift: 1;
     }

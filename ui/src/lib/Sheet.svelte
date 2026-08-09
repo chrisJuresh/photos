@@ -17,6 +17,12 @@
     // a view of them and not of its own state, so a folder excluded from
     // screen 6's table marks the tiles in it too.
     excludedDirs = [],
+    // Grid select mode: whether the tickboxes are shown at all, and the cover
+    // ids of the tiles that are marked. Owned by App, exactly as the rule set
+    // is — a tile displays them and does not hold them, which is what lets a
+    // recycled tile come back with its mark.
+    selecting = false,
+    markedKeys = [],
     onActivate = () => {},
     onOverride = async () => null,
     onExcludeFolder = () => {},
@@ -27,6 +33,11 @@
   let sentinel = $state(null);
   let instance = null;
   let started = "";
+
+  // Marked-ness is looked up once per bind, so the set is built once per change
+  // rather than scanned per tile — ~150 mounted tiles against a marked set that
+  // is however long the reader made it.
+  const lookup = $derived(new Set(markedKeys));
 
   // The chip cycles through the three states an override can be in. `clear`
   // deletes the row rather than storing a third value, so "the rules decide
@@ -89,14 +100,30 @@
     }
   }
 
+  // The grid's tickbox. Added to every tile ever created rather than when select
+  // mode turns on: `extend` runs once at creation and a tile outlives the
+  // toggle, so what the toggle moves is a class on the canvas and nothing else.
+  function extendTick(el) {
+    const box = document.createElement("span");
+    box.className = "tick";
+    el.appendChild(box);
+  }
+
+  // Read from the marked set rather than from the tile, which is what makes a
+  // mark survive recycling: a tile scrolled out is released and the one that
+  // comes back is bound here, against the set as it stands now.
+  function fillMark(el, item) {
+    el.dataset.marked = lookup.has(item.id) ? "on" : "off";
+  }
+
   onMount(() => {
     instance = createSheet(canvas, sentinel, {
       fetchPage: (cursor) => fetchPage(cursor),
       thumbHash: thumbHashToDataURL,
-      extend: triage ? extend : undefined,
-      fill: triage ? fill : undefined,
+      extend: triage ? extend : extendTick,
+      fill: triage ? fill : fillMark,
       onState: (state) => onState(state),
-      activate: async (item, event, tile) => {
+      activate: async (item, event, tile, at) => {
         // A disabled button dispatches no click at all, so the already-excluded
         // case never arrives here and cannot fall through to the reveal either.
         if (event.target.closest(".dirchip")) {
@@ -108,10 +135,14 @@
           // from the tile that was clicked, and this is the one moment anything
           // outside the sheet can know where that tile is. Still an element and
           // not a rect, so the measuring stays at the point of use and this
-          // stays a pass-through — but the box wanted is the photograph's and
-          // not the element's, since a stacked tile is taller than its picture,
-          // and `sheet.js` exports `photoRect` to say which is which.
-          onActivate(item, tile);
+          // stays a pass-through — the sheet does not gain a geometry API. The
+          // box wanted is the photograph's and not the element's, since a
+          // stacked tile is taller than its picture, and `sheet.js` exports
+          // `photoRect` to say which is which.
+          //
+          // The index too, because the overlay walks from it: "the next tile in
+          // the current sort" is the next entry in the sheet's own page order.
+          onActivate(item, tile, at);
           return;
         }
         const decision = NEXT[item.o ?? "null"];
@@ -140,20 +171,50 @@
     instance.setTotal(size);
   });
 
+  // What the overlay needs from the sheet, and the only two things anything
+  // outside it may ask of a tile by index. Exported off the instance rather
+  // than handed up as callbacks, because both are questions asked at a moment —
+  // an arrow press, a close — and neither is state.
+  //
+  // `walkTo` scrolls the sheet to a tile and mounts it, so the overlay can walk
+  // the selection; `focusTile` puts the keyboard back on whichever tile the walk
+  // ended on.
+
+  /** @param {number} at */
+  export function walkTo(at) {
+    return instance?.walkTo(at);
+  }
+
+  /** @param {number} at */
+  export function focusTile(at) {
+    instance?.focus(at);
+  }
+
   // Re-mark the folder chips after a write. `fill` runs when a tile is bound, so
   // without this the tiles already on screen keep the marks they were mounted
   // with. Compared as a value rather than by identity because the counts refresh
   // on every keystroke and hands back a new array each time, and re-binding
   // ~150 tiles for an unchanged rule set is pure work.
-  let marked = "";
+  let dirsBound = "";
   $effect(() => {
     const dirs = excludedDirs.join("\n");
-    if (!instance || dirs === marked) return;
-    marked = dirs;
+    if (!instance || dirs === dirsBound) return;
+    dirsBound = dirs;
+    instance.refill();
+  });
+
+  // The same for the marked set: a mark applied to a tile already on screen has
+  // to appear on it, rather than waiting for that tile to be scrolled away and
+  // recycled back in.
+  let marksBound = "";
+  $effect(() => {
+    const keys = markedKeys.join(",");
+    if (!instance || keys === marksBound) return;
+    marksBound = keys;
     instance.refill();
   });
 </script>
 
-<main id="canvas" bind:this={canvas}>
+<main id="canvas" class:selecting bind:this={canvas}>
   <div id="sentinel" bind:this={sentinel}></div>
 </main>
