@@ -82,10 +82,12 @@ boundary and a page can carry a few covers more than it asked for. That is delib
 the alternative is splitting a burst across two pages.
 
 **How many stacks the whole selection holds is one more number of `total`'s shape**, and
-the count pane is what asks for it: `<stacks> stacks · <photos> photos`, where the first
-is the selection and not the page in front of it. `starts` is 1 exactly where a stack
-begins, so summing it counts them without building one — 410–420 ms unfiltered against
-this catalog on a warm `total` memo, which is the assignment pass's ~380 ms plus the sum.
+the badge on the Stacks pill is what asks for it — the selection's stacks, not the page
+in front of the reader. The count pane beside it reads `<photos> photos` in both modes,
+so the only number that moves when stacking is toggled is the badge's. `starts` is 1
+exactly where a stack begins, so summing it counts them without building one — 410–420 ms
+unfiltered against this catalog on a warm `total` memo, which is the assignment pass's
+~380 ms plus the sum.
 Memoised per selection under the same cap and eviction as the other two. It is the only
 grouping pass a default sort pays for, once, in front of the first page rather than per
 page, and a reader who has not turned stacking on never pays it. The memo key **drops the

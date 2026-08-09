@@ -23,10 +23,9 @@
     stacking = { on: false, window: 4 },
     // The rows the answer holds, and — while stacking is on — the tiles those
     // rows stand for. `tiles` is null when a row is already a tile, which is
-    // what makes the count pane's second number appear and disappear with
-    // stacking rather than the pane having to be told the toggle's state.
-    // The pane says "photos" for them, because that is the reader's word for a
-    // tile and CONTEXT.md's is not.
+    // what lets the pane read photographs in both modes without being told the
+    // toggle's state. `total` is the rows, which is the stack count while
+    // stacking is on and what the pill's badge says.
     total = null,
     tiles = null,
     loading = false,
@@ -42,6 +41,11 @@
   // the remembered one on it, and this is the button that says which it is.
   let theme = $state(current());
   let row = $state(null);
+
+  // The count pane's number, and it is photographs whichever mode is on: with
+  // stacking on the rows are covers and `tiles` is what they collapsed, with it
+  // off a row is already a tile. Null until the first page answers.
+  const photos = $derived(tiles ?? total);
 
   const dimensions = $derived(facets?.dimensions ?? []);
   const sorts = $derived(facets?.sorts ?? []);
@@ -148,22 +152,16 @@
        thing here that is an answer rather than a control, and reading it off a
        photograph is what a bar tuned clear enough to see through makes hard.
        Its own pane gives it its own ground. -->
-  <!-- Two numbers while stacking is on, because one number that silently
-       changes meaning under a toggle is the one failure this pane cannot
-       afford: 10,731 where 24,306 stood, with the word "photos" still beside
-       it, reads as a library that has lost more than half of itself. So the
-       rows say "stacks" and the tiles they collapsed stay on the pane. -->
+  <!-- One number, and it counts photographs in both modes, so the toggle cannot
+       change what it means underneath the reader — the failure this pane cannot
+       afford is 10,731 where 24,306 stood with the word "photos" still beside
+       it, reading as a library that has lost half of itself. The number that
+       does change with the toggle is how many stacks those photographs made,
+       and that is the badge on the Stacks pill, which is where the reader
+       turned stacking on. -->
   <div class="glass tally" use:refract>
-    {#if tiles !== null}
-      <strong>{count(total)}</strong>
-      <span class="muted">{total === 1 ? "stack" : "stacks"}</span>
-      <span class="muted sep">·</span>
-      <strong>{count(tiles)}</strong>
-      <span class="muted">{tiles === 1 ? "photo" : "photos"}</span>
-    {:else}
-      <strong>{total === null ? "…" : count(total)}</strong>
-      <span class="muted">{total === 1 ? "photo" : "photos"}</span>
-    {/if}
+    <strong>{photos === null ? "…" : count(photos)}</strong>
+    <span class="muted">{photos === 1 ? "photo" : "photos"}</span>
     {#if loading}<span class="spin" aria-label="loading"></span>{/if}
   </div>
 
@@ -193,8 +191,8 @@
         </button>
 
         <!-- The count on the pill is what stacking did, readable without
-             opening the panel — the same number the pane's first half says,
-             which is the point: the pill is where you turned it on. -->
+             opening the panel, and the only place that number is said: the
+             pill is where you turned it on. -->
         <button
           class="menu"
           class:open={panel === "stacks"}
@@ -485,12 +483,6 @@
     font-size: var(--fs-400);
     font-weight: 600;
     letter-spacing: -0.01em;
-  }
-
-  /* The gap between the two answers, at the flex row's own gap on either side
-     rather than a wider one: they are two halves of one sentence. */
-  .sep {
-    margin: 0 1px;
   }
 
   .controls {
