@@ -566,6 +566,58 @@ code,
   border-color: var(--drop);
 }
 
+/* The grid's tickbox. Present on every tile ever created and shown only while
+   select mode is on, because a tile outlives the toggle: the class on the canvas
+   is what moves, not the tiles.
+
+   Top-left of the photograph and nowhere else. A stacked tile and an unstacked
+   one are the same box at the same offset, so ticking a run of them is one
+   position the pointer returns to rather than a box that moves with what the
+   tile happens to be. */
+.tick {
+  display: none;
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-1);
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+#canvas.selecting .tick {
+  display: block;
+}
+
+/* Ticked: the accent, and a check drawn as two borders rather than a glyph, so
+   it is the same mark at any tile size and costs no font. */
+#canvas.selecting .tile[data-marked="on"] .tick {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+#canvas.selecting .tile[data-marked="on"] .tick::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 4px;
+  height: 9px;
+  border: solid var(--accent-ink);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* The tile itself says so too. A tickbox 18px across is not legible across a
+   sheet of two hundred tiles, and the marked set is the thing being read. */
+#canvas.selecting .tile[data-marked="on"] {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
 /* ------------------------------------------------------------------ chrome */
 
 h1 {
