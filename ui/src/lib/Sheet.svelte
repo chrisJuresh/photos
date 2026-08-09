@@ -123,7 +123,7 @@
       extend: triage ? extend : extendTick,
       fill: triage ? fill : fillMark,
       onState: (state) => onState(state),
-      activate: async (item, event, tile) => {
+      activate: async (item, event, tile, at) => {
         // A disabled button dispatches no click at all, so the already-excluded
         // case never arrives here and cannot fall through to the reveal either.
         if (event.target.closest(".dirchip")) {
@@ -136,7 +136,10 @@
           // outside the sheet can know where that tile is. Handing over the
           // element rather than a rect keeps the measuring at the point of use
           // and this a pass-through — the sheet does not gain a geometry API.
-          onActivate(item, tile);
+          //
+          // The index too, because the overlay walks from it: "the next tile in
+          // the current sort" is the next entry in the sheet's own page order.
+          onActivate(item, tile, at);
           return;
         }
         const decision = NEXT[item.o ?? "null"];
@@ -164,6 +167,25 @@
     }
     instance.setTotal(size);
   });
+
+  // What the overlay needs from the sheet, and the only two things anything
+  // outside it may ask of a tile by index. Exported off the instance rather
+  // than handed up as callbacks, because both are questions asked at a moment —
+  // an arrow press, a close — and neither is state.
+  //
+  // `walkTo` scrolls the sheet to a tile and mounts it, so the overlay can walk
+  // the selection; `focusTile` puts the keyboard back on whichever tile the walk
+  // ended on.
+
+  /** @param {number} at */
+  export function walkTo(at) {
+    return instance?.walkTo(at);
+  }
+
+  /** @param {number} at */
+  export function focusTile(at) {
+    instance?.focus(at);
+  }
 
   // Re-mark the folder chips after a write. `fill` runs when a tile is bound, so
   // without this the tiles already on screen keep the marks they were mounted
