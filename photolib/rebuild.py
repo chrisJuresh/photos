@@ -38,6 +38,14 @@ The subprocess inherits the server's console, so a Ctrl-C aimed at the grid
 takes the rebuild with it. That is the right way round: `group` runs its writes
 in transactions and is idempotent, so an interrupted rebuild rolls back to its
 last commit and the next run puts it right.
+
+Its *input* is not inherited. A job started from a button has no reader at a
+keyboard, so a step that ever paused for one would hang with nobody to answer
+it -- and a server started without a console of its own has no standard input to
+hand down in the first place, which on Windows is not an empty stream but an
+invalid handle that fails the spawn before the step runs. `DEVNULL` is the only
+stdin that means the same thing from a console, from a hidden window and from a
+scheduler.
 """
 
 from __future__ import annotations
@@ -84,10 +92,18 @@ def _spawn(root: Path, args: tuple[str, ...], emit: Callable[[str], None]) -> in
     stderr is folded into stdout because the popup shows one stream and a
     traceback interleaved with the report in the order it happened is what makes
     a failed run readable.
+
+    stdin is `DEVNULL` rather than inherited: no step reads it, nobody is at a
+    keyboard to feed one that did, and an uninherited stdin is the difference
+    between a step that ends at EOF and a step that never starts. Left to
+    itself, Windows hands the child `GetStdHandle(STD_INPUT_HANDLE)` -- the
+    process-wide handle, which a parent launched with no console does not have,
+    and duplicating an invalid one raises `WinError 6` out of `Popen` itself.
     """
     process = subprocess.Popen(  # noqa: S603
         [sys.executable, *args],
         cwd=root,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
