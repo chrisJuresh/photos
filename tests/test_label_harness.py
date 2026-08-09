@@ -361,19 +361,60 @@ def test_the_frames_on_screen_are_the_ones_the_view_was_widened_to() -> None:
     assert question.surrounding(8) == [B, A, E]  # asking for more than there is
 
 
-def test_a_labels_file_from_before_the_view_could_widen_is_refused(tmp_path: Path) -> None:
-    """It records one neighbour each side, which is a different claim from what
-    was on screen. There is no migration machinery here on purpose, so this says
-    what is at stake rather than quietly rewriting the reader's answers."""
-    path = tmp_path / "labels.sqlite3"
+def older(path: Path, rows: list[tuple]) -> None:
+    """A labels file in the shape written before the view could be widened."""
     old = sqlite3.connect(path)
     old.execute(
         "CREATE TABLE answer (members TEXT PRIMARY KEY, camera TEXT, before_sha TEXT,"
-        " after_sha TEXT, margin INTEGER, verdict TEXT, evicted TEXT, included TEXT)"
+        " after_sha TEXT, margin INTEGER, verdict TEXT, evicted TEXT, included TEXT,"
+        " answered_at TEXT)"
     )
-    old.execute("INSERT INTO answer VALUES ('x', 'Lumix', NULL, NULL, 1, 'accept', '[]', '[]')")
+    old.executemany("INSERT INTO answer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
     old.commit()
     old.close()
 
-    with pytest.raises(label.LabelsRefused, match="1 answer"):
-        label.store(path)
+
+def test_answers_from_before_the_view_could_widen_are_carried_over(tmp_path: Path) -> None:
+    """Exact rather than a guess: the older table's two columns are precisely
+    what was on screen when the view was one frame either side. The reader's
+    answers are the one thing here that is not re-derivable, so they are not
+    made to move a file to keep them."""
+    path = tmp_path / "labels.sqlite3"
+    older(
+        path,
+        [
+            (label.key((A, B)), "Lumix", C, D, 2, "merge", "[]", f'["{C}"]', "2026-08-09"),
+            (label.key((D, E)), "Sony", None, None, 7, "accept", "[]", "[]", "2026-08-09"),
+        ],
+    )
+
+    conn = label.store(path)
+    try:
+        carried = label.answers(conn)
+    finally:
+        conn.close()
+
+    assert carried[label.key((A, B))]["surrounding"] == [C, D]
+    assert carried[label.key((A, B))]["verdict"] == "merge"
+    assert carried[label.key((A, B))]["included"] == [C]
+    # Nothing either side of it, which is a real state and not a missing one.
+    assert carried[label.key((D, E))]["surrounding"] == []
+    assert carried[label.key((D, E))]["verdict"] == "accept"
+
+
+def test_carrying_over_happens_once_and_a_second_open_changes_nothing(tmp_path: Path) -> None:
+    path = tmp_path / "labels.sqlite3"
+    older(path, [(label.key((A, B)), "Lumix", C, None, 2, "accept", "[]", "[]", "2026-08-09")])
+
+    label.store(path).close()
+    conn = label.store(path)
+    try:
+        carried = label.answers(conn)
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+
+    assert carried[label.key((A, B))]["surrounding"] == [C]
+    assert tables == {"answer"}

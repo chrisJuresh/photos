@@ -32,7 +32,11 @@ its own snapshot and restore machinery, and these labels are disposable
 calibration data that will be re-derived if the descriptor changes. It is not a
 migrated database either, for the same reason -- a disposable table has no
 business in the shipped schema, so this module creates its own and `*.sqlite3` in
-`.gitignore` is what keeps it out of git.
+`.gitignore` is what keeps it out of git. The reader's *answers* are the
+exception to all of that disposability, because an evening of them cannot be
+re-derived from anything: when this module changes the shape it writes, it
+carries them forward rather than asking for the file to be moved aside. See
+`_carry_over`.
 
 Frames are served from the same 1536px substrate tree the grid's overlay draws
 from, so what the reader judges is what the grid will draw. It reads the catalog
@@ -408,28 +412,57 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 """
 
 
-class LabelsRefused(RuntimeError):
-    """Raised before anything is written. Nothing was changed."""
+_CARRY = """
+INSERT INTO answer
+  (members, camera, surrounding, margin, verdict, evicted, included, answered_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"""
 
 
-def _refuse_if_older(conn: sqlite3.Connection, path: Path) -> None:
-    """Refuse a labels file written before the reader could widen the view.
+def _carry_over(conn: sqlite3.Connection) -> int:
+    """Bring answers written before the view could be widened into its shape.
 
-    That file records one neighbour each side; this one records what was on
-    screen, which is a different claim and the one ticket 34 has to read. There
-    is no migration because there is no migration machinery here on purpose --
-    so this says how many answers are at stake and lets the reader decide, rather
-    than quietly rewriting them into a shape they were not given in.
+    Not a migration framework and not the start of one -- this converts one
+    known shape that this harness itself wrote, and goes with the directory. It
+    is here because it is **exact**: the older table stored `before_sha` and
+    `after_sha`, which is precisely what was on screen when the view was one
+    frame either side, so there is nothing to guess and nothing lost.
+
+    The alternative was refusing and asking the reader to move the file aside,
+    which is what this did first. That is the wrong trade: their answers are the
+    one thing here that is not re-derivable, and making them handle a file to
+    keep them is a cost with nothing on the other side of it.
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(answer)")}
     if not columns or "surrounding" in columns:
-        return
-    held = conn.execute("SELECT count(*) FROM answer").fetchone()[0]
-    raise LabelsRefused(
-        f"{path} holds {held} answer(s) recorded before the view could be widened, "
-        "which say which frames were shown only as one either side. Move it aside "
-        "to start a fresh round -- or say so and the old answers can be carried over."
+        return 0
+
+    conn.execute("BEGIN")
+    conn.execute("ALTER TABLE answer RENAME TO answer_before_widening")
+    conn.execute(SCHEMA)
+    older = conn.execute(
+        "SELECT members, camera, before_sha, after_sha, margin, verdict, evicted,"
+        " included, answered_at FROM answer_before_widening"
+    ).fetchall()
+    conn.executemany(
+        _CARRY,
+        [
+            (
+                members,
+                camera,
+                json.dumps([sha for sha in (before, after) if sha]),
+                margin,
+                given,
+                evicted,
+                included,
+                when,
+            )
+            for members, camera, before, after, margin, given, evicted, included, when in older
+        ],
     )
+    conn.execute("DROP TABLE answer_before_widening")
+    conn.execute("COMMIT")
+    return len(older)
 
 
 def store(path: Path) -> sqlite3.Connection:
@@ -446,12 +479,10 @@ def store(path: Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode = WAL")
-    try:
-        _refuse_if_older(conn, path)
-    except LabelsRefused:
-        conn.close()
-        raise
     conn.execute(SCHEMA)
+    carried = _carry_over(conn)
+    if carried:
+        print(f"carried {carried} answer(s) over from before the view could be widened")
     return conn
 
 
@@ -861,7 +892,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except LabelsRefused as exc:
-        sys.exit(f"refused: {exc}")
+    sys.exit(main())
