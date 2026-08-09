@@ -17,6 +17,7 @@
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
   import Sheet from "./lib/Sheet.svelte";
+  import { photoRect } from "./lib/sheet.js";
   import { remember, restore } from "./lib/stack.js";
   import Table from "./lib/Table.svelte";
   import Tree from "./lib/Tree.svelte";
@@ -469,7 +470,10 @@
   function activate(item, tile) {
     if (mode === "grid") {
       const frames = item.m ?? [{ id: item.id, s: item.s, w: item.w, h: item.h }];
-      opened = { frames, origin: tile.getBoundingClientRect() };
+      // The photograph's rect and not the tile's: a stacked tile's element is
+      // taller than its picture by the deck above it, and the overlay has to
+      // fly out of the picture.
+      opened = { frames, origin: photoRect(tile) };
       return;
     }
     guard(() => api.revealOrigin(item.id));

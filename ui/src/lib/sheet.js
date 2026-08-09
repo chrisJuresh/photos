@@ -24,7 +24,16 @@
 //     the line before, so a fresh window's requests leave immediately — see
 //     `drainPlaceholders`
 
-import { GAP, TARGET_H, packRows, rowBoxes, visibleRows } from "./layout.js";
+import {
+  DECK_H,
+  DECK_MAX,
+  ROW_GAP,
+  TARGET_H,
+  deck,
+  packRows,
+  rowBoxes,
+  visibleRows,
+} from "./layout.js";
 
 // How much laid-out runway to keep ahead of the reader before asking for another
 // page. One page is roughly 2,500px of rows, so this is about one page of slack.
@@ -47,14 +56,25 @@ const AHEAD = 2;
 // still the length of the track, it just stops being linear in the deep tail.
 const MAX_CANVAS_PX = 30_000_000;
 
-// A tile's image, by the tile element that owns it. `acquire` is the only thing
-// that creates one, and `mount` and `release` are the only things that need it
-// back. Both used to read `el.firstChild`, which was true only because every
-// `extend` so far appends behind the image; the first one to put an element in
-// front of it would have had `release` clear the wrong node's src instead, on a
-// path that fails silently. The reference is held here so the order stops
-// mattering.
-const images = new WeakMap();
+// A tile's inner elements, by the tile element that owns them: the photograph's
+// box, the image in it, and the deck's cards. `acquire` is the only thing that
+// creates them, and `mount`, `release` and `placeholder` are the only things
+// that need them back. They used to be read as `el.firstChild`, which was true
+// only because every `extend` so far appends behind the image; the first one to
+// put an element in front of it would have had `release` clear the wrong node's
+// src instead, on a path that fails silently. The references are held here so
+// the order stops mattering.
+const parts = new WeakMap();
+
+/** The photograph's box inside a tile — what a click flies out of.
+ *
+ * A stacked tile's element is taller than its photograph, by the strip its deck
+ * rises into, so its own rect starts above the image. Exported because the
+ * overlay's flight has to start from the picture and not from the box around it,
+ * and this file is the one that knows the difference. */
+export function photoRect(tile) {
+  return (parts.get(tile)?.photo ?? tile).getBoundingClientRect();
+}
 
 export function createSheet(canvas, sentinel, options) {
   const items = []; // page order, never reordered
@@ -64,7 +84,10 @@ export function createSheet(canvas, sentinel, options) {
   const pending = []; // mounted, still owed a ThumbHash placeholder
 
   let packed = 0; // items consumed into rows
-  let nextTop = 0; // y of the next row to commit
+  // y of the next row to commit. It starts at DECK_H rather than at 0 so the
+  // first row has the same room above it as every other one — the strip is left
+  // uniformly or the rows are spaced raggedly, and ragged is the worse defect.
+  let nextTop = DECK_H;
   let cursor = null; // the envelope's `next`, passed straight back
   let total = null; // rows the whole query has, or null while unknown
   // The tiles those rows stand for, or null when a row is already a tile —
@@ -90,7 +113,7 @@ export function createSheet(canvas, sentinel, options) {
     if (width <= 0) return;
     packed = packRows(items, packed, width, atEnd, (from, to, height) => {
       rows.push({ top: nextTop, height, from, to });
-      nextTop += height + GAP;
+      nextTop += height + ROW_GAP;
     });
     stretch();
   }
@@ -110,7 +133,12 @@ export function createSheet(canvas, sentinel, options) {
     // sensible per-row occupancy, and guessing one asks for a 278M px canvas.
     if (total === null || exhausted || width <= 0 || packed >= total) return 0;
     const perRow = rows.length ? packed / rows.length : Math.max(1, width / TARGET_H);
-    const rowHeight = rows.length ? nextTop / rows.length : TARGET_H + GAP;
+    // `nextTop` carries the leading strip as well as the rows, so it is taken
+    // back out before the mean: an estimate that counted it once per row would
+    // reserve a page too much on a short answer.
+    const rowHeight = rows.length
+      ? (nextTop - DECK_H) / rows.length
+      : TARGET_H + ROW_GAP;
     const wanted = Math.round(((total - packed) / perRow) * rowHeight);
     return Math.max(0, Math.min(wanted, MAX_CANVAS_PX - nextTop));
   }
@@ -138,28 +166,75 @@ export function createSheet(canvas, sentinel, options) {
     if (tile) return tile;
     const el = document.createElement("div");
     el.className = "tile";
+    // The deck first, so it paints under everything, and its cards deepest
+    // first, so each one is painted over by the wider card in front of it and
+    // only its top sliver shows. `cards` is held the other way round — nearest
+    // the photograph first — because that is the order `deck` returns.
+    const strip = document.createElement("div");
+    strip.className = "deck";
+    strip.style.height = DECK_H + "px";
+    const cards = [];
+    for (let i = 0; i < DECK_MAX; i++) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.hidden = true;
+      cards.push(card);
+    }
+    for (let i = cards.length - 1; i >= 0; i--) strip.appendChild(cards[i]);
+    el.appendChild(strip);
+    // The photograph's own box, so that a tile whose element is taller than its
+    // picture still frames the picture — and the ThumbHash behind it — exactly
+    // where an unstacked tile in the same row frames its own.
+    const photo = document.createElement("div");
+    photo.className = "tile-photo";
     const img = document.createElement("img");
     img.decoding = "async";
     // No loading="lazy": it layers the browser's own viewport heuristic on top
     // of our windowing, and the two disagree at the edges.
     img.addEventListener("load", () => el.classList.add("loaded"));
     img.addEventListener("error", () => el.classList.add("missing"));
-    el.appendChild(img);
-    images.set(el, img);
+    photo.appendChild(img);
+    el.appendChild(photo);
+    parts.set(el, { img, photo, strip, cards });
     if (options.extend) options.extend(el);
     return el;
   }
 
   function release(index, el) {
-    const img = images.get(el);
+    const { img, photo } = parts.get(el);
     // Cancels an in-flight request. Without this, fast scrolling queues hundreds
     // of fetches for tiles nobody will see.
     img.removeAttribute("src");
     el.classList.remove("loaded", "missing", "error");
-    el.style.backgroundImage = "";
+    photo.style.backgroundImage = "";
     el.remove();
     mounted.delete(index);
     pool.push(el);
+  }
+
+  // How tall a tile's element is above its photograph. Nothing for a tile that
+  // stands for one frame, which is every tile with stacking off.
+  function strip(item) {
+    return item.n > 1 ? DECK_H : 0;
+  }
+
+  // Bind the pooled cards to this item. Every one of them is written on every
+  // bind — a card the deck does not reach is hidden rather than left as it was —
+  // so recycling a tile from a stack of forty onto one of two, or onto none,
+  // leaves nothing behind.
+  function dress(el, item, w) {
+    const { strip: deckEl, cards } = parts.get(el);
+    const spec = deck(item.n, w);
+    deckEl.hidden = spec.length === 0;
+    for (let i = 0; i < cards.length; i++) {
+      const card = spec[i];
+      cards[i].hidden = card === undefined;
+      if (card === undefined) continue;
+      cards[i].style.top = card.top + "px";
+      cards[i].style.left = card.inset + "px";
+      cards[i].style.right = card.inset + "px";
+      cards[i].style.opacity = String(card.opacity);
+    }
   }
 
   function mount(index, x, y, w, h, urgent) {
@@ -168,7 +243,8 @@ export function createSheet(canvas, sentinel, options) {
     if (!el) {
       el = acquire();
       el.dataset.index = String(index);
-      const img = images.get(el);
+      const img = parts.get(el).img;
+      dress(el, item, w);
       // Before the src, because the hint is read when the request is created and
       // ignored afterwards — which also means it only ever decides the order
       // *within* a freshly built window: a reset, a screen change, a first paint,
@@ -184,15 +260,20 @@ export function createSheet(canvas, sentinel, options) {
       canvas.appendChild(el);
       mounted.set(index, el);
     }
+    // The element grows upward by the strip and the photograph does not move:
+    // `y` is the row's top and stays the frame's top, stacked or not, so every
+    // photograph in a row shares its top edge and its bottom one.
+    const above = strip(item);
     el.style.width = w + "px";
-    el.style.height = h + "px";
-    el.style.transform = "translate(" + x + "px," + y + "px)";
+    el.style.height = h + above + "px";
+    el.style.transform = "translate(" + x + "px," + (y - above) + "px)";
+    parts.get(el).photo.style.height = h + "px";
   }
 
   function placeholder(el, item) {
     if (!item.th) return;
     if (item.url === undefined) item.url = options.thumbHash(item.th);
-    if (item.url) el.style.backgroundImage = "url(" + item.url + ")";
+    if (item.url) parts.get(el).photo.style.backgroundImage = "url(" + item.url + ")";
   }
 
   // Decoding one ThumbHash is ~1.1 ms of canvas work — ~130 ms for a screenful —
@@ -317,7 +398,7 @@ export function createSheet(canvas, sentinel, options) {
     for (const [index, el] of Array.from(mounted)) release(index, el);
     rows.length = 0;
     packed = 0;
-    nextTop = 0;
+    nextTop = DECK_H;
     pack(exhausted);
     render();
 
@@ -369,7 +450,7 @@ export function createSheet(canvas, sentinel, options) {
       rows.length = 0;
       pending.length = 0;
       packed = 0;
-      nextTop = 0;
+      nextTop = DECK_H;
       cursor = null;
       // A new predicate is a new answer and therefore a new size. Keeping the
       // old one would reserve the previous screen's height for this one.

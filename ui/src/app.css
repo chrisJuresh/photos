@@ -458,18 +458,32 @@ code,
 
 /* Absolute + transform: repositioning a recycled tile is compositor work, not
    layout. The box is sized from the stored width/height before any image is
-   requested, so an image arriving later cannot shift anything. */
+   requested, so an image arriving later cannot shift anything.
+
+   A tile that stands for a stack is taller than its photograph by the deck's
+   strip, which rises into the row gap above it; `.tile-photo` is the photograph
+   and is anchored to the bottom, so a stacked tile and an unstacked one in the
+   same row put their pictures in exactly the same place. (Not `.frame`: a frame
+   is a member of a stack, and the overlay's own class already means that.) */
 .tile {
   position: absolute;
   top: 0;
   left: 0;
   overflow: hidden;
+  cursor: pointer;
+  contain: strict;
+}
+
+.tile-photo {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
   border-radius: 3px;
   background-color: var(--tile-empty);
   background-size: cover;
   background-position: center;
-  cursor: pointer;
-  contain: strict;
 }
 
 .tile img {
@@ -485,10 +499,32 @@ code,
   opacity: 1;
 }
 
+/* The deck: card edges rising above the photograph, like a deck seen from
+   slightly above. Its height is written once per element by `sheet.js`, which
+   owns the constant; the cards are nested boxes reaching down to the
+   photograph's top edge, painted back to front, so each shows one sliver. */
+.deck {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.card {
+  position: absolute;
+  bottom: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+  background-color: var(--tile-empty);
+}
+
 /* Only 102,605 of the 686,351 kept files have a tile. The other 85% are these,
    and they are the normal case rather than an error state: the path is what
    identifies them, so it is shown rather than the tile being hidden. */
-.tile.missing {
+.tile.missing .tile-photo {
   background-color: var(--tile-missing);
 }
 

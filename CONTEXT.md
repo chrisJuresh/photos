@@ -26,6 +26,15 @@ frame of its middle-exposure third. Chosen from the members present in the curre
 selection, never fixed in advance.
 _Avoid_: representative (that word is taken — see below), thumbnail, hero, key photo
 
+**Deck**:
+The card edges a tile draws above its photograph when it stands for a stack of two
+or more — a deck of cards seen from slightly above. It says *that* there is depth,
+never how much: the strip is one constant height at every size, and the edges in it
+saturate at six. The count is the overlay's to give. Rises into the gap between
+rows, so the photograph never moves — see
+`docs/adr/0002-decks-rise-into-the-row-gap.md`.
+_Avoid_: badge, stack indicator, count, pile
+
 **Representative**:
 The one file of a tile whose bytes are served and revealed. A property of the tile,
 decided at build time, unrelated to stacking.
