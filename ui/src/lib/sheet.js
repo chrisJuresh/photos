@@ -61,8 +61,8 @@ export function createSheet(canvas, sentinel, options) {
   // The tiles those rows stand for, or null when a row is already a tile —
   // which is every query except a stacked one. `total` is what the sheet
   // reserves height for and so has to be the number of rows it will hold; the
-  // tiles they collapsed are the count pane's other number, and nothing here
-  // uses them for anything but reporting.
+  // tiles they collapsed are what the count pane says instead of it while
+  // stacking is on, and nothing here uses them for anything but reporting.
   let tiles = null;
   let exhausted = false;
   let inflight = false;
