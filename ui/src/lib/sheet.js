@@ -443,11 +443,11 @@ export function createSheet(canvas, sentinel, options) {
 
   // ------------------------------------------------------------- the marquee
 
-  // A press on the canvas rubber-bands a box over the tiles it crosses. Three
-  // things about it live here rather than above the sheet, and all three for the
-  // same reason: this file holds `rows`, `items` and `width`, which is the whole
-  // of the geometry the box is tested against. Nothing here knows what a mark
-  // is — the seams hand up the tiles the box covers and the caller decides.
+  // A press on the canvas rubber-bands a box over the tiles it crosses. It lives
+  // here rather than above the sheet because this file holds `rows`, `items` and
+  // `width`, which is the whole of the geometry the box is tested against.
+  // Nothing here knows what a mark is — the seams hand up the tiles the box
+  // covers and the caller decides what to do about them.
   //
   // Coordinates are the canvas's own throughout, so a wheel-scroll mid-drag
   // extends the box over content rather than dragging it over the window: the
@@ -460,7 +460,7 @@ export function createSheet(canvas, sentinel, options) {
   // A finished drag leaves a click behind it, on whichever element the press and
   // the release have in common. It is not a mark, and it is the one click select
   // mode must not act on.
-  let swept = false;
+  let sweptClick = false;
 
   // The pointer, in canvas coordinates. Read per event rather than cached: the
   // canvas moves under a scroll, and the drag is meant to notice.
@@ -503,7 +503,7 @@ export function createSheet(canvas, sentinel, options) {
   }
 
   function onPointerDown(event) {
-    swept = false;
+    sweptClick = false;
     // Shift is the other gesture: it extends from the last tile touched, and a
     // press that could be either would have to guess which.
     if (!sweeping || event.button !== 0 || event.shiftKey) return;
@@ -554,7 +554,7 @@ export function createSheet(canvas, sentinel, options) {
     drag = null;
     if (band) band.hidden = true;
     if (!live) return;
-    swept = true;
+    sweptClick = true;
     options.sweepEnd();
   }
 
@@ -562,8 +562,8 @@ export function createSheet(canvas, sentinel, options) {
 
   // One delegated listener. Per-tile listeners and recycling are incompatible.
   function onClick(event) {
-    if (swept) {
-      swept = false;
+    if (sweptClick) {
+      sweptClick = false;
       return;
     }
     const tile = event.target.closest(".tile");
@@ -699,6 +699,7 @@ export function createSheet(canvas, sentinel, options) {
       clearTimeout(reflowTimer);
       cancelAnimationFrame(placeholderFrame);
       cancelAnimationFrame(sweepFrame);
+      band?.remove();
     },
   };
 }

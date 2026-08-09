@@ -92,12 +92,13 @@
   // "everything between these two in the current sort", and the sheet's order
   // is that sort. Null until something has been touched.
   let markAnchor = $state(null);
-  // A drag in progress: the marked set as it stood when the press landed, and
-  // the verdict the tile under the pointer fixed for the whole of it. Both are
-  // re-applied on every move, which is what makes the preview live and a tile
-  // the box has moved back off revert. Not `$state` — nothing reads them.
-  let sweptFrom = null;
-  let sweptMark = true;
+  // The drag in progress, or null: `{from, marking}` — the marked set as it
+  // stood when the press landed, and the verdict the tile under the pointer
+  // fixed for the whole of it. Both are re-applied on every move, which is what
+  // makes the preview live and a tile the box has moved back off revert. One
+  // object rather than two variables, so there is no half-set drag to describe.
+  // Not `$state`: it decides what a move computes and nothing draws it.
+  let dragging = null;
 
   const screen = $derived(SCREENS[index]);
   const showTable = $derived(screen.table !== false);
@@ -551,8 +552,7 @@
   // Fixed here, once, because a box whose meaning changed under the hand while
   // it was being extended would be unusable.
   function sweepStart(item, at) {
-    sweptFrom = marks;
-    sweptMark = item === null || !isMarked(item);
+    dragging = { from: marks, marking: item === null || !isMarked(item) };
     if (at !== null) markAnchor = at;
   }
 
@@ -561,12 +561,12 @@
   // back to what it was. The drag never touches a mark outside its own box:
   // this is an evidence-gathering tool and the reader sweeps several separate
   // runs into one report. Clearing is the button that says Clear.
-  function sweepOver(swept) {
-    marks = sweep(sweptFrom, swept.map(stackOf), sweptMark);
+  function sweepMove(covered) {
+    marks = sweep(dragging.from, covered.map(stackOf), dragging.marking);
   }
 
   function sweepEnd() {
-    sweptFrom = null;
+    dragging = null;
   }
 
   function unmarkAll() {
@@ -811,7 +811,7 @@
         onOverride={override}
         onExcludeFolder={excludeFolder}
         onSweepStart={sweepStart}
-        onSweepMove={sweepOver}
+        onSweepMove={sweepMove}
         onSweepEnd={sweepEnd}
         onState={(state) => (sheet = { ...sheet, ...state })}
       />

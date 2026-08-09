@@ -172,6 +172,12 @@
   // Whether a press rubber-bands. The same fact the `.selecting` class on the
   // canvas carries — the tickboxes are shown by CSS and the gesture is armed
   // here, from one prop, so the two cannot disagree about which mode is on.
+  //
+  // Said twice on purpose, and the mount is the one that cannot go: `instance`
+  // is a plain `let` rather than `$state`, so this effect does not re-run when
+  // it is assigned. Its first pass has nothing to arm, and a sheet that mounts
+  // with select mode already on — leaving triage and coming back, say — would
+  // then never be armed at all, because `selecting` is not about to change.
   $effect(() => {
     instance?.setSweeping(selecting);
   });
@@ -235,9 +241,17 @@
   // The same for the marked set: a mark applied to a tile already on screen has
   // to appear on it, rather than waiting for that tile to be scrolled away and
   // recycled back in.
-  let marksBound = "";
+  //
+  // By identity and not by value, which is the opposite of the rule above and
+  // for the reason that rule gives: the folder list is rebuilt on every
+  // keystroke whether or not it changed, and this one is derived from `marks`,
+  // which is only reassigned when a mark actually moves. So identity is already
+  // the exact signal — and a marquee makes the difference matter, because a
+  // sweep can leave thousands of keys and joining them into a string to compare
+  // is then real work on every frame of a drag.
+  let marksBound = null;
   $effect(() => {
-    const keys = markedKeys.join(",");
+    const keys = markedKeys;
     if (!instance || keys === marksBound) return;
     marksBound = keys;
     instance.refill();
