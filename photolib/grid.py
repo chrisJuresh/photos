@@ -337,16 +337,22 @@ def _frame(row) -> dict:
     `_photo` without the ThumbHash: a frame is drawn from `/d/`, which is a
     1536px read behind a click that has already happened, and a placeholder for
     it would be a second decode of a hash the cover has already shown.
+
+    These four keys are also spelled out in `App.svelte`'s `activate`, which
+    builds this shape from a tile when the tile is its own only frame. Renaming
+    one of them here is a change in two files, and the second one is in Svelte.
     """
     return {"id": row[0], "s": row[1], "w": row[2], "h": row[3]}
 
 
 def _frames(rows, members: tuple | list) -> dict:
-    """`{"m": [...]}` for a stack worth opening, and nothing for one that is not.
+    """`{"m": [...]}` for a stack the tile cannot stand in for on its own.
 
-    A stack of one opens nothing — clicking it reveals in Explorer, as an
-    unstacked tile always has — so the key is absent rather than a list of one.
-    That is 6,297 of the 10,929 rows a four-second window leaves.
+    A stack of one is its own only frame, and the cover already carries an id, a
+    hash and dimensions — which is the whole of a frame — so the client builds
+    that list rather than being sent it. The key is absent rather than a
+    one-element list saying what the row beside it already says. That is 6,297
+    of the 10,929 rows a four-second window leaves.
     """
     if len(members) < 2:
         return {}

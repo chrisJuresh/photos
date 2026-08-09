@@ -105,7 +105,10 @@ what a bracketed set or a burst becomes in the grid, drawn as one tile and fanne
 the sheet when it is clicked. It is formed at query time over whatever the filters select
 and never stored, so removing a member splits its stack in two and the cover is resolved
 per query rather than materialised. It is grid-only: `/api/triage/*` is untouched and a
-triage screen never collapses anything. The overlay draws its frames from the 1536px
+triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
+not and with stacking off as well: a tile with no siblings is drawn as the one frame it
+stands for, and revealing in Explorer is the second press, on the frame. Triage is the
+exception and still reveals on the first. The overlay draws its frames from the 1536px
 substrate tree on the NVMe, served by `/d/<sha256>.webp` and filled by
 `python -m photolib.substrates` below. `docs/adr/0001-stack-on-capture-time-not-phash.md`
 records why this groups on capture time and not on the perceptual hash that exists for

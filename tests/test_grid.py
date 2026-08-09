@@ -671,10 +671,10 @@ def test_a_cover_carries_the_frames_it_collapsed(stacked):
     then draw a set the grid never returned. So the members ride with the cover
     that stands for them.
 
-    A stack of one carries none. It opens nothing -- clicking it reveals in
-    Explorer, exactly as an unstacked tile always has -- and on the real corpus
-    that is 6,297 of the 10,929 rows, every one of which would otherwise carry a
-    one-element list saying so.
+    A stack of one carries none. It opens as itself -- the cover is already an
+    id, a hash and dimensions, which is a frame, so the client makes the list of
+    one instead of being sent it -- and on the real corpus that is 6,297 of the
+    10,929 rows, every one of which would otherwise repeat the row beside it.
     """
     sha = {row[0]: row[1] for row in stacked.rows}
     groups = expected_stacks(stacked.rows)

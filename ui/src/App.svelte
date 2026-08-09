@@ -456,19 +456,27 @@
     return api.page(candidate, cursor);
   }
 
-  // A stack opens; everything else reveals, exactly as it always has. `m` is
-  // the page's own answer to what a stack holds and it is absent on a stack of
-  // one, so "is there anything to open" is a key test and not a size test.
+  // A tile in the grid opens, always. `m` is the page's own answer to what a
+  // stack holds and it is absent on a stack of one and on every tile while
+  // stacking is off — so the tile stands in for itself there, which it can
+  // because a tile already carries everything a frame is: its id, its hash and
+  // its dimensions. That is why one rule covers both settings of a switch the
+  // payload does not mention.
+  //
+  // Triage is the other client of this sheet and keeps its single click: its
+  // tiles are source files, revealed as origins, and most of them have no
+  // substrate for an overlay to draw.
   function activate(item, tile) {
-    if (mode === "grid" && item.m) {
-      opened = { frames: item.m, origin: tile.getBoundingClientRect() };
+    if (mode === "grid") {
+      const frames = item.m ?? [{ id: item.id, s: item.s, w: item.w, h: item.h }];
+      opened = { frames, origin: tile.getBoundingClientRect() };
       return;
     }
-    guard(() => (mode === "grid" ? api.revealPhoto(item.id) : api.revealOrigin(item.id)));
+    guard(() => api.revealOrigin(item.id));
   }
 
-  // The second click: a frame inside an open stack. It closes on the way out,
-  // because the reveal was the thing it was opened to do.
+  // The second press: a frame inside the open overlay. It closes on the way
+  // out, because the reveal was the thing it was opened to do.
   function revealFrame(frame) {
     opened = null;
     guard(() => api.revealPhoto(frame.id));

@@ -1,10 +1,10 @@
 <script>
-  // An opened stack: its frames over a blurred grid, each one a click away from
-  // Explorer. So a stacked photograph takes two clicks to reveal and everything
-  // else takes the one it always took.
+  // An opened tile: its frames over a blurred grid, each one a click away from
+  // Explorer. So revealing a photograph in the grid takes two presses — the
+  // tile, then the frame — whether the tile stood for fifty captures or one.
   //
   // This floats above the sheet and never touches it. The sheet's rows are
-  // immutable once packed, and the whole of "opening a stack costs you your
+  // immutable once packed, and the whole of "opening a tile costs you your
   // place" would be re-packing them to make room — so nothing here is in the
   // sheet's flow, nothing here changes its width, and closing it puts the
   // reader back on the row they were reading.
@@ -23,6 +23,12 @@
   // the pane covers the header rather than clearing it, so there is no edge here
   // that is different from the others.
   const PAD = 40;
+
+  // A tile that stood for one photograph opens as one frame, so the label has
+  // to say that rather than "1 frames in this stack" — there is no stack.
+  const label = $derived(
+    frames.length === 1 ? "one photograph" : `${frames.length} frames in this stack`,
+  );
 
   let width = $state(0);
   let height = $state(0);
@@ -167,7 +173,7 @@
     pane?.focus();
     return () => {
       // Back where the reader was. `focus` and not `click`: restoring focus to
-      // the tile must not re-open the stack it just closed.
+      // the tile must not re-open the tile it just closed.
       if (from instanceof HTMLElement && document.contains(from)) from.focus();
     };
   });
@@ -186,7 +192,7 @@
   class="glass pane"
   bind:this={pane}
   role="dialog"
-  aria-label="{frames.length} frames in this stack"
+  aria-label={label}
   tabindex="-1"
 >
   <div class="frames" style:inset="{PAD}px">
