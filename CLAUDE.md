@@ -76,7 +76,10 @@ dies around the two-minute mark with a `KeyboardInterrupt` — read variously as
 hung task and a test failure, and every reading costs a re-run from the top. **An agent runs
 the full suite through the script below**, which starts it on a console of its own and returns
 at once; wait for `pytest.done`, which holds the exit code, and read `pytest.out` for the
-report. A single test file is short enough to run directly.
+report. Both live in a directory of this checkout's own under `%TEMP%` — the script prints
+the two paths when it starts, and those are the ones to read, because a second worktree
+running the suite at the same time has its own. A single test file is short enough to run
+directly.
 `Start-Process -RedirectStandardOutput` is not a workaround: redirecting makes the child
 inherit the caller's console, which is the thing being escaped.
 
