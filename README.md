@@ -43,7 +43,7 @@ The arrow never points the other way: `photolib.grid` imports nothing from `arch
 python -m pytest tests -q
 ```
 
-1,036 tests, temporary databases only — none of them opens a path from `config.toml`. Tests
+1,038 tests, temporary databases only — none of them opens a path from `config.toml`. Tests
 that need `ffmpeg`, `exiftool` or `rawpy` skip when the binary is absent rather than failing,
 and none of them loads `torch` or a model: the fingerprint pass's encoder is a seam.
 

@@ -64,8 +64,8 @@ The root build is a plain Python package with no venv. Its dependencies are `pyt
 and `numpy`, plus `rawpy` for Phase 2b's DNG path and `torch` for the fingerprint pass;
 `ffmpeg` and `exiftool` are external binaries reached through PATH, and only Phase 2b needs
 them. Tests that need a binary skip when it is absent rather than failing, and no test loads
-`torch` or a model at all — the encoder is a seam the suite passes a stand-in through. Tests run against temporary databases only; none of them
-opens a path from `config.toml`.
+`torch` or a model at all — the encoder is a seam the suite passes a stand-in through. Tests
+run against temporary databases only; none of them opens a path from `config.toml`.
 
 ```bash
 python -m pytest tests -q
@@ -142,9 +142,9 @@ nothing. It reads `G:`: run it in the background and leave the drive alone while
 python -m photolib.substrates
 ```
 
-To give every published tile a **fingerprint** — the DINOv2 ViT-S/14 embedding that
+To give every published tile a **fingerprint** — the vector
 `docs/adr/0003-stack-on-verified-match.md` screens candidate pairs with before anything
-expensive looks at them. Nothing reads these vectors yet and no tile looks different after a
+expensive looks at them, computed by DINOv2 ViT-S/14. Nothing reads these vectors yet and no tile looks different after a
 pass. It reads the substrate tree and the catalog, both on the NVMe, and never opens `G:`, so
 it cannot collide with anything reading the vault. Resumable, idempotent, and it names the
 tiles whose substrate is missing rather than letting them become tiles with no vector. The

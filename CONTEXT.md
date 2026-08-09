@@ -103,8 +103,10 @@ It is the cheap screen in front of the match: two frames whose fingerprints disa
 not be the same picture and are never checked properly, and everything that survives is
 decided by the match rather than by this. High recall is what it is for; it is not evidence
 on its own, and no reader-facing knob is a threshold on it. Stored under the identity of the
-model that produced it, so two models are two populations and never one.
-_Avoid_: embedding (that is the implementation), signature, descriptor, hash, match
+model that produced it, so two models are two populations and never one. *Embedding* is the
+implementation and belongs where the model is being talked about — `photolib/fingerprints.py`
+says it and should; everywhere the thing itself is meant, it is a fingerprint.
+_Avoid_: signature, descriptor, hash, match
 
 **Linkage**:
 How much has to match before frames are one stack. *Complete* — every pair inside the

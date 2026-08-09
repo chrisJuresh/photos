@@ -25,9 +25,9 @@ from photolib.fingerprints import (
     FingerprintsRefused,
     embed_all,
     from_blob,
+    photograph_shas,
     preprocess,
     stored,
-    tile_shas,
     to_blob,
     worklist,
 )
@@ -381,10 +381,39 @@ def test_run_honours_a_limit(corpus: Corpus, tmp_path: Path, migrated) -> None:
         conn.close()
 
 
-def test_tile_shas_is_ordered(corpus: Corpus) -> None:
+def test_run_names_every_missing_tile_rather_than_the_first_few(
+    corpus: Corpus, tmp_path: Path, migrated, capsys
+) -> None:
+    """A hole in the derivative tree is the thing that must not go quiet, so the
+    list is not truncated however long it gets."""
+    corpus.add("ff")
+    orphans = {corpus.add(f"{n:02x}", substrate=False) for n in range(25)}
+    corpus.conn.close()
+
+    fingerprints.run(synthetic_config(tmp_path, migrated), encode=ones)
+
+    report = capsys.readouterr().out
+    assert all(orphan in report for orphan in orphans)
+    assert "more" not in report
+
+
+def test_two_tiles_naming_one_frame_are_fingerprinted_once(corpus: Corpus) -> None:
+    """Nothing in the schema stops `photo.rep_sha256` repeating, and a duplicate
+    would be counted twice in "how many it wrote"."""
+    sha256 = corpus.add("1")
+    corpus.conn.execute(
+        "INSERT INTO photo (id, rep_sha256, sort_key) VALUES (99, ?, '2021-01-02T00:00:00')",
+        (sha256,),
+    )
+
+    assert photograph_shas(corpus.conn) == [sha256]
+    assert corpus.embed(corpus.worklist()[0])["written"] == 1
+
+
+def test_photograph_shas_is_ordered(corpus: Corpus) -> None:
     """A stable order is what makes an interrupted pass resume rather than
     wander: the same tiles come back in the same sequence."""
     for seed in "3142":
         corpus.add(seed)
 
-    assert tile_shas(corpus.conn) == sorted(tile_shas(corpus.conn))
+    assert photograph_shas(corpus.conn) == sorted(photograph_shas(corpus.conn))

@@ -65,14 +65,18 @@ class FingerprintsRefused(RuntimeError):
     """Raised before anything is stored. Nothing was written."""
 
 
-# --- what to embed -----------------------------------------------------------
+# --- what to fingerprint -----------------------------------------------------
 
-# `IS NOT` rather than `<>` so a tile whose kind was never determined is embedded
+# `IS NOT` rather than `<>` so a tile whose kind was never determined is included
 # rather than silently dropped: the criterion is "not a video", and NULL is not a
 # video. Every published tile today is image, raw_image or video, and the raw ones
 # are two thousand of them -- `kind = 'image'` would be the wrong filter.
-_TILES_QUERY = """
-SELECT photo.rep_sha256 FROM photo
+#
+# DISTINCT because nothing in the schema stops two tiles naming one representative.
+# Nothing does today, but a duplicate here would be fingerprinted twice and counted
+# twice, and the report's job is to say how many tiles got a vector.
+_PHOTOGRAPHS_QUERY = """
+SELECT DISTINCT photo.rep_sha256 FROM photo
 JOIN file ON file.sha256 = photo.rep_sha256
 WHERE file.state = 'published' AND file.kind IS NOT 'video'
 ORDER BY photo.rep_sha256
@@ -85,9 +89,14 @@ INSERT OR REPLACE INTO fingerprint (model, version, sha256, vector) VALUES (?, ?
 """
 
 
-def tile_shas(conn: sqlite3.Connection) -> list[str]:
-    """Every published tile's representative frame, videos excluded."""
-    return [row[0] for row in conn.execute(_TILES_QUERY)]
+def photograph_shas(conn: sqlite3.Connection) -> list[str]:
+    """Every published tile that is a photograph rather than a video, in order.
+
+    Not `substrates.tile_shas`, which is every tile and unordered: a video has
+    nothing to fingerprint, and a stable order is what lets an interrupted pass
+    resume rather than wander.
+    """
+    return [row[0] for row in conn.execute(_PHOTOGRAPHS_QUERY)]
 
 
 def stored(conn: sqlite3.Connection, model: str = MODEL, version: str = VERSION) -> set[str]:
@@ -113,7 +122,7 @@ def worklist(
     done = stored(conn, model, version)
     on_disk = present(substrate_root)
     todo, missing = [], []
-    for sha256 in tile_shas(conn):
+    for sha256 in photograph_shas(conn):
         if sha256 in done:
             continue
         (todo if sha256 in on_disk else missing).append(sha256)
@@ -141,7 +150,7 @@ def preprocess(path: Path) -> np.ndarray:
     return array.transpose(2, 0, 1)
 
 
-def load_encoder(device: str | None = None) -> Callable[[np.ndarray], np.ndarray]:
+def load_encoder() -> Callable[[np.ndarray], np.ndarray]:
     """DINOv2 ViT-S/14 as one callable over a preprocessed batch.
 
     `torch` and the weights are both deferred to here: nothing about the worklist,
@@ -151,7 +160,7 @@ def load_encoder(device: str | None = None) -> Callable[[np.ndarray], np.ndarray
     import torch
 
     model = torch.hub.load("facebookresearch/dinov2", MODEL, verbose=False)
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model.eval().to(device)
 
     def encode(batch: np.ndarray) -> np.ndarray:
@@ -197,9 +206,9 @@ def embed_all(
         for chunk in batches(todo, max(batch, 1)):
             paths = [substrate_path(substrate_root, sha256) for sha256 in chunk]
             frames, readable = [], []
-            for sha256, frame in zip(chunk, pool.map(_decode, paths)):
-                if isinstance(frame, str):
-                    unreadable.append((sha256, frame))
+            for sha256, (frame, reason) in zip(chunk, pool.map(_decode, paths)):
+                if reason is not None:
+                    unreadable.append((sha256, reason))
                 else:
                     readable.append(sha256)
                     frames.append(frame)
@@ -231,17 +240,19 @@ def embed_all(
     }
 
 
-def _decode(path: Path) -> np.ndarray | str:
-    """`preprocess`, returning the reason as a string where the file will not open.
+def _decode(path: Path) -> tuple[np.ndarray | None, str | None]:
+    """`preprocess`, as `(frame, reason it would not decode)` -- one of them None.
 
     A substrate that cannot be decoded is the one thing here that would otherwise
-    end a twenty-minute pass irrecoverably: resuming re-reaches the same file and
-    fails again, so it has to be survivable rather than fatal.
+    end a four-minute pass irrecoverably: resuming re-reaches the same file and
+    fails again, so it has to be survivable rather than fatal. This is the
+    boundary the filesystem is read across, and the tagged pair is the shape
+    `substrates.copy_one` uses for the same job.
     """
     try:
-        return preprocess(path)
+        return preprocess(path), None
     except (OSError, ValueError) as exc:
-        return str(exc)
+        return None, str(exc)
 
 
 # --- report ------------------------------------------------------------------
@@ -251,7 +262,6 @@ def run(
     config: Config | None = None,
     *,
     encode: Callable[[np.ndarray], np.ndarray] | None = None,
-    batch: int = BATCH,
     limit: int | None = None,
 ) -> int:
     config = config or load()
@@ -271,25 +281,27 @@ def run(
         if limit is not None:
             todo = todo[:limit]
         print(f"todo      {len(todo):,} tiles to fingerprint")
+        # Every one of them, not the first twenty: a tile with no substrate gets no
+        # vector, and the whole point of saying so is that it cannot go quiet. A
+        # long list here means a large hole in the derivative tree, which is
+        # exactly the thing that should be hard to scroll past.
         print(f"missing   {len(missing):,} tiles with no substrate, so no vector:")
-        for sha256 in missing[:20]:
+        for sha256 in missing:
             print(f"          {sha256}")
-        if len(missing) > 20:
-            print(f"          ... and {len(missing) - 20:,} more")
 
         if not todo:
             print("\nnothing to do: every tile with a substrate already has a vector")
             return 0
 
-        result = embed_all(conn, todo, config.substrate_root, encode or load_encoder(), batch=batch)
+        result = embed_all(conn, todo, config.substrate_root, encode or load_encoder())
 
         elapsed = max(result["elapsed_s"], 1e-6)
         print(
             f"\nstored    {result['written']:,} vectors in "
             f"{int(elapsed) // 60}m{int(elapsed) % 60:02d}s, {result['written'] / elapsed:,.0f}/s"
         )
-        print(f"unreadable {len(result['unreadable']):,} substrates that would not decode")
-        for sha256, reason in result["unreadable"][:20]:
+        print(f"corrupt   {len(result['unreadable']):,} substrates that would not decode")
+        for sha256, reason in result["unreadable"]:
             print(f"          {sha256}  {reason}")
 
         total = len(stored(conn))
@@ -301,12 +313,11 @@ def run(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--batch", type=int, default=BATCH)
     parser.add_argument(
         "--limit", type=int, help="fingerprint at most this many, for a throughput measurement"
     )
     args = parser.parse_args()
     try:
-        sys.exit(run(batch=args.batch, limit=args.limit))
+        sys.exit(run(limit=args.limit))
     except FingerprintsRefused as exc:
         sys.exit(f"refused: {exc}")
