@@ -61,11 +61,13 @@ procedure in passing, and do not treat the gap as a reason to redesign anything.
 ## Running and verifying
 
 The root build is a plain Python package with no venv. Its dependencies are `pytest`, `pillow`
-and `numpy`, plus `rawpy` for Phase 2b's DNG path and `torch` for the fingerprint pass;
-`ffmpeg` and `exiftool` are external binaries reached through PATH, and only Phase 2b needs
-them. Tests that need a binary skip when it is absent rather than failing, and no test loads
-`torch` or a model at all — the encoder is a seam the suite passes a stand-in through. Tests
-run against temporary databases only; none of them opens a path from `config.toml`.
+and `numpy`, plus `rawpy` for Phase 2b's DNG path, `torch` for the fingerprint pass and
+`opencv-python` for the match pass; `ffmpeg` and `exiftool` are external binaries reached
+through PATH, and only Phase 2b needs them. Tests that need a binary skip when it is absent
+rather than failing, and no test loads `torch` or a model at all — the encoder is a seam the
+suite passes a stand-in through. OpenCV is the exception and is exercised for real: the Match
+is a number about pictures, so `tests/test_matches.py` asserts it over pictures it draws.
+Tests run against temporary databases only; none of them opens a path from `config.toml`.
 
 ```bash
 python -m pytest tests -q
@@ -177,6 +179,28 @@ table it wrote grew the catalog from 1,757 MB to 2,517 MB.
 
 ```bash
 python -m photolib.candidates
+```
+
+To give every candidate the screen let through a **Match** — the count of distinctive points
+the two frames agree on under a single transform, which is the number the whole of ADR 0003
+rests on. The seam is `match(frame_a, frame_b)`, taking two images rather than two sha256s,
+so what the number means is asserted over pictures `tests/test_matches.py` draws: a copy at a
+different exposure and a copy nudged a few pixels both keep it high, two unrelated textures
+drop it to nothing. SIFT from the installed OpenCV, capped at 800 points a frame, matched
+with Lowe's ratio and fitted by RANSAC to a homography — a homography because a handheld
+reposition is very nearly a rotation about the camera's own centre, and a transform that
+explains more explains unrelated frames too. Its named failure is a bracket end blown out
+past having any texture left: no keypoints, so a Match of zero, which ADR 0003 accepts as one
+true stack drawn as two. **The count is stored and no verdict is derived from it**, because
+*strictness* is the reader's threshold on the Match and ADR 0003 leaves its value for the
+labelling harness — a pair with no row was not checked, not checked and found wanting.
+Frames are read from the substrate tree at 1024px on the long edge, and fan-outs are walked
+in capture order so a frame is described once rather than once per pair. It reads the
+substrates and the catalog, both on the NVMe, never opens `G:`, and does not attach
+`state.sqlite3`. Resumable, idempotent, and it refuses while a writer holds the catalog.
+
+```bash
+python -m photolib.matches
 ```
 
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:

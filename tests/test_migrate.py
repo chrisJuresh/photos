@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 9
+LATEST = 10
 
 
 def test_applies_from_empty(pair):
@@ -27,9 +27,10 @@ def test_applies_from_empty(pair):
     # regenerable, so it belongs on this side -- Phase 4's promotion ledger, which
     # is machine-produced and would otherwise bloat the one irreplaceable file,
     # Phase 5's grouping, which is derived from all of them, the fingerprints the
-    # match pass screens with, which are re-derivable from the substrates, and the
-    # candidate pairs it screens, which are re-derivable from those.
-    # Decisions stay in state, and migrations 005 to 009 add nothing there.
+    # match pass screens with, which are re-derivable from the substrates, the
+    # candidate pairs it screens, which are re-derivable from those, and the
+    # Matches it verifies the survivors with, likewise.
+    # Decisions stay in state, and migrations 005 to 010 add nothing there.
     assert table_names(catalog) == {
         "schema_version",
         "origin",
@@ -49,6 +50,7 @@ def test_applies_from_empty(pair):
         "near_band",
         "fingerprint",
         "candidate_pair",
+        "pair_match",
     }
     assert table_names(state) == {"schema_version", "triage_rule", "triage_override"}
 
