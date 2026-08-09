@@ -242,6 +242,34 @@ schema. Frames come from the substrate tree. Its one test is the sampling.
 python -m harness.label --open
 ```
 
+To turn those answers into the two numbers the grid inherits — the **calibration report**.
+It replays every label against a sweep of strictness values and all three linkage rules,
+and says how well each setting reproduces what the reader actually said. **Precision and
+recall are reported apart and never blended**, because they are not equally important: the
+binding constraint is precision — *never open a stack and see two unrelated photographs* —
+and recall is best-effort under it, so precision is a floor a setting clears before its
+recall counts rather than a ranking. Ordering on precision alone returns the corner of the
+sweep, where a setting stacks almost nothing and is therefore almost never wrong.
+**Every comparison is scoped to the frames that were on screen when the answer was
+given** — the `surrounding` column — because a label says *the frames I was shown are
+right* and never *this stack is complete*; a strictness that pulls in a frame the reader
+never saw is not contradicting them, and scoring it would measure the width of the
+harness's window. The frame past the end of the run is separated out for the same reason
+in reverse: no strictness reaches it, so what the reader said about it is evidence about
+the 3600s fence. Confident labels are scored apart from the not-sure ones, and every
+setting **names the labelled cases it gets wrong** rather than only counting them.
+`--precision` moves the floor and `--linkage` narrows which rules are in the running, so a
+decision to set one aside is a command rather than an argument made afterwards. It reads
+the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate and never touches
+`G:`; it writes nothing at all. Its output is `docs/adr/0003-stack-on-verified-match.md`'s
+"What the labels settled", which records strictness 20 and *matches most members* — and
+the ceilings behind them, including that 224 of the 3,712 pairs the reader kept together
+carry no Match row at all.
+
+```bash
+python -m harness.calibrate
+```
+
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
 it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
 then drops the facet vocabulary and every `total` the server had memoised — no restart.

@@ -65,6 +65,10 @@ than probable. Its failure mode is named and accepted: a bracket end too blown o
 verify against a distant member splits one true stack into two adjacent ones, showing
 the same picture twice — the lesser evil, and measurable against the fixture.
 
+> **Superseded by the labels.** The failure mode above is not the lesser evil at this
+> library's scale, and "What the labels settled" below replaces this default with
+> *matches most members*. The reasoning here stands; the measurement disagreed with it.
+
 **The window survives as a fence**, at or below which two consecutive captures *may*
 belong to one stack. Default and slider ceiling both 3600s. Its cost saturates — see the
 table below — and it exists now only to stop two coincidentally identical frames from
@@ -140,9 +144,108 @@ subset, and disagreement in the grey band is expected rather than fitted to.
 Two rounds of about thirty sets: the first calibrates the threshold, the second — drawn
 after re-running with the first round's answers — checks the work.
 
-## What is deliberately not settled here
+## What the labels settled
 
-The strictness threshold, whether the embedding screen can be tightened enough to skip
-geometry on most pairs, and whether complete linkage needs softening to "matches most
-members". All three are questions for the fixture, and answering them by argument before
-the labels exist is how this feature got its first two windows.
+**Strictness 20, linkage "matches most members".** Recorded 2026-08-10 from round one of
+the labelling harness — thirty sets, every one answered with certainty, replayed by
+`harness/calibrate.py`. The command that returns this setting is:
+
+```bash
+python -m harness.calibrate --linkage complete,majority
+```
+
+### What the labels are, and what they are not
+
+Thirty answers, 5,368 labelled pairs over 25 runs — 3,712 pairs the reader kept together
+and 1,656 they pushed apart. **Every comparison is scoped to the frames that were on
+screen when the answer was given.** A label says *the frames I was shown are right* and
+never *this stack is complete*; the harness's view is widened by the reader but never
+reaches the whole run, so scoring outside that scope would measure the width of the window
+rather than the threshold, and would push this section towards a stricter setting than the
+labels justify.
+
+Three ceilings sit above every setting, and none of them is the threshold's fault:
+
+- **224 of the 3,712 pairs the reader kept together carry no Match row at all** — the
+  fingerprint screen rejected them at 0.40, or a substrate was missing. No strictness
+  reaches them, so 6.0% of recall is gone before a threshold is chosen.
+- **246 more were checked and agreed on nothing.** That is the linkage's problem rather
+  than the screen's, and it is what decides the next section.
+- **The strongest pair the reader pushed apart scores 256 points**, so no strictness in the
+  sweep reaches perfect precision. 42 of the 53 false positives at the chosen setting are
+  one thirteen-frame set where the reader kept six frames and evicted seven that the
+  geometry cannot tell apart from them.
+
+The positive evidence is also unbalanced in a way worth stating rather than discovering
+later: the reader's **five longest sets — 42, 39, 37, 28 and 24 frames — are 79% of the
+pairs they kept together**, because a set of *n* frames is *n(n−1)/2* pairs. Those five
+sets contain no frame the reader pushed out at all.
+
+### Precision and recall, reported separately and never blended
+
+Precision is the binding constraint — *never open a stack and see two unrelated
+photographs* — and recall is best-effort under it, so the report treats precision as a
+floor rather than as a ranking. Ordering on precision alone returns the corner of the
+sweep, where a setting stacks almost nothing and is therefore almost never wrong.
+
+| linkage | strictness | precision | recall | pairs stacked | wrongly stacked | cases with a disagreement |
+|---|---|---|---|---|---|---|
+| complete | 20 | 92.8% | 18.5% | 686 | 53 | 23/30 |
+| **majority** | **20** | **96.0%** | **34.2%** | **1,271** | **53** | **21/30** |
+| complete | 40 | 97.3% | 12.6% | 469 | 13 | 24/30 |
+| neighbour | 25 | 95.1% | 44.7% | 1,658 | 85 | 18/30 |
+
+Both counts are reported because they answer different questions. A pair is the unit the
+threshold works in and the unit "two unrelated photographs in one stack" is about, but it
+weights a long burst quadratically; a case is one vote each and is coarse for the same
+reason. `python -m harness.calibrate` prints the whole sweep, the frontier, and the
+labelled cases every setting gets wrong.
+
+### Complete linkage does need softening — the answer is yes
+
+At strictness 20, "matches most members" beats complete linkage on **both** counts at
+once: 96.0% against 92.8% precision, 34.2% against 18.5% recall, stacking 1,271 pairs
+against 686 for the same 53 mistakes. It does so at every strictness from 40 upwards too,
+and at 12 and 25.
+
+The reason is structural rather than incidental. Complete linkage requires every pair
+inside a stack to match, and 224 of the reader's kept pairs have no Match row at all — so
+**a burst holding one such pair cannot be one stack under complete linkage at any
+strictness.** The reader's five longest sets each hold several. Complete linkage cannot
+express any of them, which is the failure mode this ADR named and accepted as the lesser
+evil; at 42 frames it is not the lesser evil.
+
+"Matches most members" is strictly most, so a frame agreeing with half a stack does not
+join it: a tie is not most, and precision breaks ties.
+
+### What was measured and not adopted
+
+`python -m harness.calibrate` over all three rules returns **neighbour linkage at
+strictness 25** — 95.1% precision, 44.7% recall, the best recall of anything clearing the
+report's 95% precision floor. It is not the default, for a reason in the evidence rather
+than in taste: **the runs where a chain does its work carry no frames the reader pushed
+out.** The five long drags are 79% of the pairs kept together and contribute not one pair
+pushed apart, so these labels cannot price a chaining rule's failure — a chain that walks
+a whole run into one stack scores perfectly on them. Complete and majority linkage make
+precision a property of the stack; a chain does not, and one round of labels that cannot
+see the difference is not enough to make it the default.
+
+### The fence is not what is losing frames
+
+60 frames past the end of a run were drawn beside a set and left out, and **none was
+called a member**. The 3600s window's value is untouched by this round.
+
+### What round two is for
+
+This ADR asks for two rounds and the second is the check. It should deliberately sample
+runs where a chain would cross a scene change — a pan, a walk between subjects — because
+round one holds none, and that is the single question standing between neighbour linkage
+and the default. Round one drew its sets at a provisional strictness of 20 with complete
+linkage; round two draws at 20 with *matches most members*.
+
+## What is still deliberately not settled here
+
+Whether the embedding screen can be tightened enough to skip geometry on most pairs. The
+labels say the live question is the opposite one: at 0.40 the screen already costs 6.0% of
+the pairs the reader kept together, and that is a floor on recall no strictness can lift.
+Loosening it is the change worth measuring.

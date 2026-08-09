@@ -208,10 +208,25 @@ def match(points: Points, a: str, b: str) -> int:
     return points.get((b, a), 0) if found is None else found
 
 
+def complete(
+    holding: Sequence[str], frame: str, points: Points, strictness: int
+) -> bool:
+    """ADR 0003's linkage: a frame joins only if it agrees with all of the stack.
+
+    Named rather than inlined because `harness.calibrate` replays the labels
+    against this rule and against the softer ones ADR 0003 leaves open, and the
+    rule it calls complete linkage has to be this one and not a second copy of it.
+    """
+    return all(match(points, member, frame) >= strictness for member in holding)
+
+
 def link(
-    run: Sequence[str], points: Points, strictness: int = STRICTNESS
+    run: Sequence[str],
+    points: Points,
+    strictness: int = STRICTNESS,
+    joins=complete,
 ) -> list[list[str]]:
-    """One run cut into stacks, by complete linkage at `strictness`.
+    """One run cut into stacks, by `joins` at `strictness`.
 
     ADR 0003: every pair inside a stack must match, not merely each frame and its
     predecessor -- so a frame joins the stack in hand only if it agrees with all
@@ -223,7 +238,7 @@ def link(
     stacks: list[list[str]] = []
     holding: list[str] = []
     for frame in run:
-        if holding and all(match(points, member, frame) >= strictness for member in holding):
+        if holding and joins(holding, frame, points, strictness):
             holding.append(frame)
         else:
             if holding:
