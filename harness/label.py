@@ -158,6 +158,19 @@ class Question:
     before: tuple[Near, ...]
     after: tuple[Near, ...]
     margin: int  # points between the weakest evidence and `STRICTNESS`
+    # The first frame this camera took *outside* the run, each side, with the
+    # seconds to it -- or None where the library itself ends.
+    #
+    # It is drawn always, however narrow the view, and it is the reader's check
+    # on the two things the harness otherwise asks them to take on trust: that
+    # the run ended because the shooting ended, and that the clock is telling the
+    # truth. A frame 23 hours away that is plainly the same photograph is a wrong
+    # timestamp, and nothing else in this screen could show that. It is drawn
+    # apart from the run because it is not a candidate -- ADR 0003's fence makes
+    # the window necessary, so this frame cannot join the stack -- but the reader
+    # may still say it belongs, and that answer is evidence about the fence
+    # rather than about the threshold.
+    outside: tuple[Near | None, Near | None] = (None, None)
 
     def nearest(self) -> tuple[str | None, str | None]:
         """The frame each side of the stack, which is where the margin is decided."""
@@ -167,8 +180,16 @@ class Question:
         )
 
     def surrounding(self, shown: int) -> list[str]:
-        """The frames outside the stack the reader was actually shown."""
-        return [sha for sha, _ in self.before[:shown]] + [sha for sha, _ in self.after[:shown]]
+        """The frames outside the stack the reader was actually shown.
+
+        The two beyond the run are always among them, because they are always
+        drawn -- see `outside`.
+        """
+        return (
+            [sha for sha, _ in self.before[:shown]]
+            + [sha for sha, _ in self.after[:shown]]
+            + [near[0] for near in self.outside if near is not None]
+        )
 
 
 def match(points: Points, a: str, b: str) -> int:
@@ -365,7 +386,30 @@ def plan(
             (method, version),
         )
     }
-    return spread(questions(runs, points, strictness), wanted)
+    asked = spread(questions(runs, points, strictness), wanted)
+
+    # The frame just past each end of every run. The run is where the context
+    # stops, and from inside the harness a run that ended looks exactly like a
+    # view that was capped -- which is what the reader read it as. Drawing the
+    # frame beyond it, with the hours to it, tells those two apart and lets a
+    # wrong timestamp show itself. It comes from the same population the runs
+    # were cut out of, so it costs a lookup and no second pass.
+    at = {sha256: index for index, (_c, _s, _k, sha256) in enumerate(frames)}
+    ends = {}
+    for camera, run in runs:
+        first, last = at[run[0][0]], at[run[-1][0]]
+        ends[run[0][0]] = (
+            (frames[first - 1][3], frames[first][1] - frames[first - 1][1])
+            if first > 0 and frames[first - 1][0] == camera
+            else None,
+            (frames[last + 1][3], frames[last + 1][1] - frames[last][1])
+            if last + 1 < len(frames) and frames[last + 1][0] == camera
+            else None,
+        )
+    heads = {sha256: run[0][0] for _camera, run in runs for sha256, _secs in run}
+    return [
+        replace(question, outside=ends[heads[question.members[0]]]) for question in asked
+    ]
 
 
 # --- what the reader answers --------------------------------------------------
@@ -644,6 +688,13 @@ class LabelServer(ThreadingHTTPServer):
                 # local move, like going back to revise is.
                 "before": [{"sha": sha, "gap": gap} for sha, gap in question.before],
                 "after": [{"sha": sha, "gap": gap} for sha, gap in question.after],
+                # Always sent and always drawn, whatever the view is widened
+                # to: the frame past each end of the run is the reader's check
+                # on the clock. See `Question.outside`.
+                "outside": [
+                    None if near is None else {"sha": near[0], "gap": near[1]}
+                    for near in question.outside
+                ],
                 "camera": question.camera,
                 "margin": question.margin,
                 "answer": given.get(key(question.members)),

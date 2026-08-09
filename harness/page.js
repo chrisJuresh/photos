@@ -50,12 +50,13 @@ function elapsed(seconds) {
   return `${(gap / 3600).toFixed(1)}h`;
 }
 
-function frame(sha, role, marked, gap) {
+function frame(sha, role, marked, gap, beyond) {
   const button = document.createElement("button");
   button.className = `frame ${role}`;
   button.dataset.sha = sha;
   button.dataset.role = role;
   button.dataset.gap = gap;
+  button.dataset.beyond = beyond ? "1" : "";
 
   const image = document.createElement("img");
   image.src = `/d/${sha}.webp`;
@@ -78,23 +79,29 @@ function frame(sha, role, marked, gap) {
 // rather than through `draw`, because a drag paints as it goes and redrawing
 // under a held pointer would replace the elements it is dragging over.
 function paint(button, marked) {
-  const { sha, role, gap } = button.dataset;
+  const { sha, role, gap, beyond } = button.dataset;
   button.classList.toggle(role === "member" ? "marked-out" : "marked-in", marked);
   button.querySelector(".caption").textContent = marked
     ? role === "member"
       ? "does not belong"
       : "should be included"
     : role === "neighbour"
-      ? `${elapsed(Number(gap))} away`
+      ? `${elapsed(Number(gap))} away${beyond ? " · past the run" : ""}`
       : sha.slice(0, 8);
 }
 
 // A box rather than a group: CONTEXT.md keeps "group" off the stack, and this is
 // the stack as drawn, with the border that states the claim being judged.
-function box(entries, role, marked) {
+function box(entries, classes, marked) {
   const holder = document.createElement("div");
-  holder.className = `box ${role}`;
-  for (const { sha, gap } of entries) holder.append(frame(sha, role, marked(sha), gap));
+  holder.className = `box ${classes}`;
+  // The class list may carry more than the role -- `neighbour beyond` -- and a
+  // frame only ever knows the role, which is what decides what marking it means.
+  const [role] = classes.split(" ");
+  const beyond = classes.includes("beyond");
+  for (const { sha, gap } of entries) {
+    holder.append(frame(sha, role, marked(sha), gap, beyond));
+  }
   return holder;
 }
 
@@ -141,6 +148,21 @@ function columns(count, width, height) {
   return Math.max(1, Math.min(count, Math.floor((width + GAP) / (FLOOR * 1.5 + GAP))));
 }
 
+// Redrawing is rebuilding every frame on screen, and a widened view holds
+// hundreds of them. A held key repeats about thirty times a second, so drawing
+// once per press is quadratic work on a growing DOM -- measured by spamming the
+// widen key on a 723-frame run, which stopped answering altogether. One draw per
+// animation frame instead: the presses still all count, they just land together.
+let pending = false;
+function redraw() {
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(() => {
+    pending = false;
+    draw();
+  });
+}
+
 function draw() {
   const set = sample.sets[at];
   const mark = marksFor(at);
@@ -152,10 +174,16 @@ function draw() {
   const before = set.before.slice(0, shown);
   const after = set.after.slice(0, shown);
 
+  // The frame past each end of the run, drawn however narrow the view is. It is
+  // not a candidate -- the fence rules it out -- so it stands in its own box
+  // outside the dashed ones, and the reader can still say it belongs, which
+  // would mean the fence or the clock is wrong rather than the threshold.
   const boxes = [];
+  if (set.outside[0]) boxes.push(box([set.outside[0]], "neighbour beyond", outside));
   if (before.length) boxes.push(box([...before].reverse(), "neighbour", outside));
   boxes.push(box(asFrames(set.members), "member", (sha) => (mark.out.has(sha) ? "out" : null)));
   if (after.length) boxes.push(box(after, "neighbour", outside));
+  if (set.outside[1]) boxes.push(box([set.outside[1]], "neighbour beyond", outside));
 
   // A box's share of the width is how many frames are in it, which is what gives
   // every frame on screen about the same area however lopsided the run is: 155
@@ -190,7 +218,8 @@ function draw() {
     available === 0
       ? "nothing either side of it in the run"
       : `showing ${Math.min(shown, set.before.length)} of ${set.before.length} before` +
-        ` · ${Math.min(shown, set.after.length)} of ${set.after.length} after`
+        ` · ${Math.min(shown, set.after.length)} of ${set.after.length} after`,
+    ended(set, shown)
   );
   said.textContent = answer
     ? `answered: ${VERDICTS[answer.verdict]} — record again to revise it`
@@ -202,6 +231,27 @@ function strong(text) {
   const node = document.createElement("strong");
   node.textContent = text;
   return node;
+}
+
+// Why the context stops, once it has. A run that ended and a view that was
+// capped look identical from inside the harness -- both are simply "no more
+// frames" -- and the reader read the first as the second. So when a side is
+// fully shown, say what is beyond it: the shooting picked up again a day later,
+// or the camera has nothing else at all.
+function ended(set, shown) {
+  const [before, after] = set.outside;
+  const done = (side, near) =>
+    shown < side.length
+      ? null
+      : near === null
+        ? "nothing else from this camera"
+        : `${elapsed(near.gap)} to the frame drawn past it`;
+  const ends = [
+    ["before it", done(set.before, before)],
+    ["after it", done(set.after, after)],
+  ].filter(([, said]) => said);
+  if (!ends.length) return "";
+  return ` · the run ends ${ends.map(([side, said]) => `${side}: ${said}`).join(", ")}`;
 }
 
 function countUp() {
@@ -314,8 +364,13 @@ function setMark(button, marked) {
   paint(button, marked);
 }
 
+// Whether the pointer already dealt with this press, so the `click` that follows
+// it does not toggle the frame a second time.
+let taken = false;
+
 stage.addEventListener("pointerdown", (event) => {
   const button = event.target.closest(".frame");
+  taken = false;
   if (!button || event.button !== 0) return;
   event.preventDefault();
   dragging = {
@@ -340,9 +395,25 @@ for (const ending of ["pointerup", "pointercancel"]) {
   stage.addEventListener(ending, () => {
     if (!dragging) return;
     dragging = null;
+    taken = true;
     send(false, false);
   });
 }
+
+// A frame is a button, and a button can be pressed without a pointer -- from the
+// keyboard, or by anything driving the page. The pointer path above is what
+// makes dragging work and it swallows the common case, so this is the same
+// answer for a press that never came from a pointer at all.
+stage.addEventListener("click", (event) => {
+  if (taken) {
+    taken = false;
+    return;
+  }
+  const button = event.target.closest(".frame");
+  if (!button) return;
+  setMark(button, !held(button.dataset.role).has(button.dataset.sha));
+  send(false, false);
+});
 
 // Vim keys, because the reader's hand is on the home row and the answer keys are
 // there too. The arrows and `+`/`-` still work and are simply not advertised.
@@ -357,6 +428,11 @@ const KEYS = {
   // out to more of the run, `j` is down and back to less of it.
   k: () => widen(1),
   j: () => widen(-1),
+  // The whole run at once and back again. A run reaches 723 frames either side
+  // of a stack in this library, and stepping there one frame at a time is not a
+  // way to get there.
+  g: () => widen(Infinity),
+  0: () => widen(-Infinity),
   "=": () => widen(1),
   "+": () => widen(1),
   "-": () => widen(-1),
@@ -397,6 +473,8 @@ function widen(by) {
   // press always moves the view by one and never spends itself closing a gap
   // between the two.
   const current = showing(set);
+  // `by` may be Infinity, which is the whole run, or -Infinity, which is back to
+  // one frame either side. Both land inside the same clamp.
   const next = Math.min(Math.max(current + by, pinned), beside(set));
   // Only when a mark is what stopped it. At the narrowest view there is nothing
   // to narrow and nothing to explain.
@@ -407,7 +485,7 @@ function widen(by) {
   }
   if (next === wanted) return;
   wanted = next;
-  draw();
+  redraw();
 }
 
 (async () => {

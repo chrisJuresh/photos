@@ -222,8 +222,12 @@ once. The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the r
 `k` widens the view when the answer turns on what is past the edge, **with no ceiling** — one
 frame each side is enough for 46% of candidate stacks but only 27% of the least decisive ones,
 and every ceiling picked for it so far has been hit, so the whole run rides with the set. That
-is 3,808 frames and about 316 KB over a round's thirty sets. The frames shrink to a floor and
-then the box scrolls, rather than the view stopping. **What an
+is 3,808 frames and about 316 KB over a round's thirty sets. `g` shows the whole run and `0`
+comes back. The frames shrink to a floor and then the box scrolls, rather than the view
+stopping. **The frame past each end of the run is drawn too**, dotted and always — the fence
+rules it out of the stack, so it is there as the reader's check that the run ended because the
+shooting ended and that the clock is telling the truth; a frame 23 hours away that is plainly
+the same photograph is a wrong timestamp, and nothing else on the screen could show that. **What an
 answer says is bounded by what was on screen for it**, which is stored per answer and is the
 column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
 that the stack is complete. Sets are drawn from wherever the Match is least decisive and

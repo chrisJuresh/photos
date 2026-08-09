@@ -119,11 +119,30 @@ main {
    704px each. Reference material should not crowd out the subject. */
 .box.member { min-width: 32%; }
 
-/* Context, never the thing being judged. */
+/* Context, never the thing being judged -- and never a sliver either. A share of
+   the frame count is the right rule until one side dwarfs the other: at 723
+   frames before a stack and 84 after, the after side came out 123px wide and
+   laid its 84 frames in a single scrolling column. An eighth of the stage is the
+   floor under that. */
 .box.neighbour {
+  min-width: max(140px, 12%);
   border-style: dashed;
   background: none;
 }
+
+/* The frame past the end of the run. Outside the fence, so it cannot join the
+   stack -- it is drawn so the reader can check that the run ended because the
+   shooting ended and that the clock is telling the truth. Dotted and narrow,
+   because it is a check and not part of the question. */
+.box.beyond {
+  flex: 0 0 auto;
+  min-width: 96px;
+  max-width: 12%;
+  border-style: dotted;
+  border-color: #4a4a4a;
+}
+.box.beyond .frame img { opacity: 0.4; }
+.box.beyond .frame.marked-in img { opacity: 1; }
 
 .frame {
   min-width: 0;

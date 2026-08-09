@@ -367,6 +367,32 @@ def test_the_frames_on_screen_are_the_ones_the_view_was_widened_to() -> None:
     assert question.surrounding(8) == [B, A, E]  # asking for more than there is
 
 
+def test_the_frames_past_the_run_are_always_among_those_shown() -> None:
+    """They are drawn however narrow the view is, so an answer is always partly
+    about them -- including `accept`, which then says the frame a day away does
+    not belong either. That is the reader's check on the clock."""
+    question = Question(
+        camera="Lumix",
+        members=(C, D),
+        before=((B, 2),),
+        after=((E, 3),),
+        margin=0,
+        outside=((A, 84_439), (F, 86_398)),
+    )
+
+    assert question.surrounding(1) == [B, E, A, F]
+    assert question.surrounding(99) == [B, E, A, F]
+
+
+def test_a_run_at_the_edge_of_the_library_has_nothing_past_it() -> None:
+    question = Question(
+        camera="Lumix", members=(A, B), before=(), after=((C, 3),), margin=0,
+        outside=(None, (D, 90_000)),
+    )
+
+    assert question.surrounding(1) == [C, D]
+
+
 def older(path: Path, rows: list[tuple]) -> None:
     """A labels file in the shape written before the view could be widened."""
     old = sqlite3.connect(path)
