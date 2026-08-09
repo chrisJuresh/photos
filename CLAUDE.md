@@ -208,6 +208,29 @@ against a median of 5 beyond two minutes.
 python -m photolib.matches
 ```
 
+To judge those Matches. **`harness/` is scaffolding with a stated end of life** — the
+labelling harness ADR 0003 says the strictness threshold will be settled by, and it is
+expected to be deleted whole once the grid ticket lands. It is not part of the shipped
+website: nothing in `photolib/` imports it, no route of `photolib.grid` reaches it, and the
+arrow points the way `archive/pipeline/`'s does. It shows one candidate stack at a time with
+the frame before and after it, which is what lets one screen answer both of the reader's
+complaints — *does this stack hold something that does not belong*, and *is it missing
+something that should be here*. Space accepts the stack as drawn, clicking a member says it
+does not belong, clicking a neighbour says it should have been included, and `u` records
+**not sure**, which is a first-class answer rather than a skip. Sets are drawn from wherever
+the Match is least decisive and dealt out a camera at a time, so a threshold calibrated on the
+body the operator shoots most does not quietly misbehave on the other four; `STRICTNESS` in
+that module is a provisional line to disagree with and not the answer. Answers go to a
+`labels.sqlite3` of its own beside the catalog — **never `state.sqlite3`**, which holds
+irreplaceable triage decisions — and it is not a migrated database, because a disposable table
+has no business in the shipped schema. Frames come from the same substrate tree the overlay
+draws from. Stopping it loses nothing and an answer already given comes back with its set so it
+can be revised. Its one test is the sampling, over scores written in the test file.
+
+```bash
+python -m harness.label --open
+```
+
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
 it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
 then drops the facet vocabulary and every `total` the server had memoised — no restart.

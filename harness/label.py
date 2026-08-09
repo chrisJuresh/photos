@@ -1,0 +1,725 @@
+"""The screen where twelve anecdotes become a few hundred judgements.
+
+**This is scaffolding with a stated end of life.** `docs/adr/0003-stack-on-verified-match.md`
+leaves the reader's *strictness* -- the threshold on the Match -- unsettled on
+purpose, and says how it will be settled: a labelling harness, thrown away
+afterwards, showing candidate stacks with the frame before and after each one and
+recording merge / split / **not sure**. This is that harness. It is not part of
+the shipped website, nothing in `photolib/` imports it, no route of
+`photolib.grid` reaches it, and it is expected to be deleted whole once the grid
+ticket lands.
+
+It shows one candidate stack at a time **with its neighbours**, which is what
+lets a single screen answer both of the reader's complaints at once: *does this
+stack hold something that does not belong*, and *is it missing something that
+should be here*. Accepting the stack as drawn is one keystroke, because that is
+the common case and it should cost almost nothing. Clicking a member says it does
+not belong; clicking a neighbour says it should have been included. **Not sure**
+is a first-class answer and not a skip -- the reader has said outright that some
+of these are grey, and a grey area recorded as grey is worth more than a forced
+verdict.
+
+Which sets it shows is the point of it. `STRICTNESS` below is a *provisional*
+line drawn only so there is something to disagree with; every set is chosen for
+how little the Match commits to it, so the reader's evening lands where it moves
+the real threshold most. The sample is then spread over the cameras, so a
+threshold calibrated on the body the operator shoots most does not quietly
+misbehave on the other four.
+
+Answers go to a `labels.sqlite3` of the harness's own, beside the catalog on the
+NVMe. **Never `state.sqlite3`**: that holds irreplaceable triage decisions and has
+its own snapshot and restore machinery, and these labels are disposable
+calibration data that will be re-derived if the descriptor changes. It is not a
+migrated database either, for the same reason -- a disposable table has no
+business in the shipped schema, so this module creates its own and `*.sqlite3` in
+`.gitignore` is what keeps it out of git.
+
+Frames are served from the same 1536px substrate tree the grid's overlay draws
+from, so what the reader judges is what the grid will draw. It reads the catalog
+and the substrates, both on the NVMe, and never opens `G:`.
+
+    python -m harness.label --open
+
+Stopping it loses nothing: every answer is committed as it is given, the sample
+is deterministic, and an answer already given comes back with its set so it can
+be revised rather than repeated.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sqlite3
+import sys
+import threading
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from photolib import candidates, matches
+from photolib.config import load, substrate_path
+
+# The provisional line the sets are drawn at. **Not the answer this harness
+# exists to find** -- it is a place to stand while asking, and every set below is
+# chosen for sitting near it rather than for being on one side of it.
+#
+# 20 because that is where the two populations `photolib.matches` measured start
+# to separate: pairs a second or less apart score a median of 283 and 94% of them
+# reach 20 or more, against a median of 5 beyond two minutes. A reader's answers
+# are what will move it.
+STRICTNESS = 20
+
+# How many sets are worth judging. ADR 0003: two rounds of about thirty, the
+# first calibrating the threshold and the second -- drawn after re-running with
+# the first round's answers -- checking the work.
+SETS = 60
+
+DEFAULT_PORT = 8771  # the grid is on 8770 and this is not the grid
+
+LABELS = "labels.sqlite3"  # beside the catalog, which is where the NVMe is named
+
+STATIC_DIR = Path(__file__).resolve().parent
+
+Points = dict[tuple[str, str], int]
+Run = tuple[str | None, list[str]]  # a camera, and its consecutive captures
+
+
+# --- forming the sets ---------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Question:
+    """One candidate stack, its neighbours, and how little the Match commits."""
+
+    camera: str | None
+    members: tuple[str, ...]
+    before: str | None  # the frame before the stack in its run, if there is one
+    after: str | None
+    margin: int  # points between the weakest evidence and `STRICTNESS`
+
+
+def score(points: Points, a: str, b: str) -> int:
+    """The Match between two frames, or zero where there is no row.
+
+    A pair with no row is a pair the harness has no evidence for -- the screen
+    rejected it, or a substrate it needed was missing. `photolib.matches` is
+    careful to keep those two apart from a checked zero and this is not: what a
+    set is drawn from is evidence that two frames are one picture, and absent
+    evidence and no agreement come to the same drawing.
+
+    Either order, because a run's order is the enumeration's order and a caller
+    should not have to reproduce it to ask a question about two frames.
+    """
+    found = points.get((a, b))
+    return points.get((b, a), 0) if found is None else found
+
+
+def link(
+    run: Sequence[str], points: Points, strictness: int = STRICTNESS
+) -> list[list[str]]:
+    """One run cut into stacks, by complete linkage at `strictness`.
+
+    ADR 0003: every pair inside a stack must match, not merely each frame and its
+    predecessor -- so a frame joins the stack in hand only if it agrees with all
+    of it. The walk is forward and greedy, which is what `photolib.browse` does
+    with the window, and its failure is the one the reader is being asked about:
+    a frame the walk consumed early can agree with every member of the stack it
+    was placed before. That split is a coin toss and `questions` scores it as one.
+    """
+    stacks: list[list[str]] = []
+    holding: list[str] = []
+    for frame in run:
+        if holding and all(score(points, member, frame) >= strictness for member in holding):
+            holding.append(frame)
+        else:
+            if holding:
+                stacks.append(holding)
+            holding = [frame]
+    if holding:
+        stacks.append(holding)
+    return stacks
+
+
+def _margin(
+    members: Sequence[str],
+    neighbours: Iterable[str | None],
+    points: Points,
+    strictness: int,
+) -> int:
+    """How far the weakest thing this drawing rests on sits from the line.
+
+    Two kinds of evidence and they are the reader's two complaints. A pair
+    *inside* the stack barely above the line is a frame that may not belong; a
+    neighbour *outside* it barely below is a frame that may be missing. Both are
+    a distance from `strictness`, so the least decisive of them is one number.
+
+    A neighbour is judged on its weakest pair against the stack, because complete
+    linkage is what it would have had to satisfy. Floored at zero, so a neighbour
+    that agrees with every member and was split off anyway -- which the forward
+    walk can do -- reads as the coin toss it is rather than as a negative.
+    """
+    weakest = [
+        score(points, early, late) - strictness
+        for index, early in enumerate(members)
+        for late in members[index + 1 :]
+    ]
+    weakest += [
+        strictness - min(score(points, neighbour, member) for member in members)
+        for neighbour in neighbours
+        if neighbour is not None
+    ]
+    return max(min(weakest, default=0), 0)
+
+
+def questions(
+    runs: Iterable[Run], points: Points, strictness: int = STRICTNESS
+) -> list[Question]:
+    """Every candidate stack there is to ask about, with its neighbours.
+
+    A stack of one is not asked about -- CONTEXT.md has a stack be the same
+    photograph taken more than once -- but it is still drawn, as the neighbour of
+    whichever stack it borders. Which is the whole shape of the second complaint:
+    the frame that should have been included is usually sitting right there.
+    """
+    asked: list[Question] = []
+    for camera, run in runs:
+        stacks = link(run, points, strictness)
+        at = 0
+        for stack in stacks:
+            before = run[at - 1] if at else None
+            after = run[at + len(stack)] if at + len(stack) < len(run) else None
+            at += len(stack)
+            if len(stack) < 2:
+                continue
+            asked.append(
+                Question(
+                    camera=camera,
+                    members=tuple(stack),
+                    before=before,
+                    after=after,
+                    margin=_margin(stack, (before, after), points, strictness),
+                )
+            )
+    return asked
+
+
+def spread(asked: Sequence[Question], wanted: int = SETS) -> list[Question]:
+    """The least decisive sets, taken a camera at a time.
+
+    Least decisive first is what puts the reader's time where it moves the
+    threshold most. Round-robin over the cameras is the other half of the ask: the
+    operator shoots one body far more than the other four, so a straight ranking
+    would hand back an evening of that body alone and calibrate a number that
+    quietly misbehaves everywhere else.
+
+    Deterministic -- ties break on the members, and the cameras are ordered by
+    their own best set -- because answers are keyed on the frames and a reader who
+    stops and comes back has to be shown the same sets in the same order for the
+    counter to mean anything.
+    """
+    queues: dict[str | None, list[Question]] = {}
+    for question in sorted(asked, key=lambda q: (q.margin, q.members)):
+        queues.setdefault(question.camera, []).append(question)
+    order = sorted(
+        queues, key=lambda camera: (queues[camera][0].margin, camera is None, camera or "")
+    )
+
+    picked: list[Question] = []
+    while len(picked) < wanted and any(queues.values()):
+        for camera in order:
+            if queues[camera]:
+                picked.append(queues[camera].pop(0))
+                if len(picked) == wanted:
+                    break
+    return picked
+
+
+def plan(
+    conn: sqlite3.Connection,
+    *,
+    strictness: int = STRICTNESS,
+    wanted: int = SETS,
+    ceiling: int = candidates.CEILING,
+    method: str = matches.METHOD,
+    version: str = matches.VERSION,
+) -> list[Question]:
+    """The sets to ask about, read from the catalog and from nothing else.
+
+    The population and the runs are `photolib.candidates`' own, so what this asks
+    about is what that pass enumerated: the frames are cut into runs the same way
+    and a pair it never considered a candidate is a pair with no Match here.
+    """
+    frames = candidates.population(conn)
+    camera_of = {sha256: camera for camera, _secs, _kind, sha256 in frames}
+    runs = [(camera_of[run[0]], run) for run in candidates.runs(frames, ceiling)]
+    points: Points = {
+        (early, late): count
+        for early, late, count in conn.execute(
+            "SELECT sha_early, sha_late, points FROM pair_match WHERE method = ? AND version = ?",
+            (method, version),
+        )
+    }
+    return spread(questions(runs, points, strictness), wanted)
+
+
+# --- what the reader answers --------------------------------------------------
+
+VERDICTS = ("accept", "split", "merge", "both", "unsure")
+
+
+def verdict(*, evicted: Sequence[str], included: Sequence[str], unsure: bool) -> str:
+    """What a set of clicks and a keystroke amount to.
+
+    Five answers rather than three, because a reader who both evicts a frame and
+    pulls a neighbour in has said two things and `both` is what they said. Not
+    sure outranks everything: it is the answer, not the absence of one, and a
+    click the reader then decided they were unsure about must not survive as a
+    verdict.
+    """
+    if unsure:
+        return "unsure"
+    if evicted and included:
+        return "both"
+    if evicted:
+        return "split"
+    if included:
+        return "merge"
+    return "accept"
+
+
+def key(members: Sequence[str]) -> str:
+    """What an answer is filed under: the stack it was about, as drawn.
+
+    The frames and not a set number, because the sample moves when the
+    provisional strictness does -- so an answer keyed on its position in a list
+    would come back attached to a different photograph.
+    """
+    return ",".join(members)
+
+
+# Not a migration. A disposable table has no business in the shipped schema, so
+# this is created by the harness that owns it and goes when the harness does.
+# `margin` and `camera` ride along with the answer because reading the labels
+# afterwards means asking how the verdicts fell across the grey band and across
+# the bodies, and neither question can be re-derived once the sample has moved.
+SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS answer (
+  members    TEXT PRIMARY KEY,  -- the stack as drawn, comma-joined. See `key`.
+  camera     TEXT,
+  before_sha TEXT,
+  after_sha  TEXT,
+  margin     INTEGER NOT NULL,
+  verdict    TEXT NOT NULL CHECK (verdict IN ({', '.join(f"'{v}'" for v in VERDICTS)})),
+  evicted    TEXT NOT NULL,     -- JSON: members the reader said do not belong
+  included   TEXT NOT NULL,     -- JSON: neighbours the reader said should be in
+  answered_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+_RECORD = """
+INSERT OR REPLACE INTO answer
+  (members, camera, before_sha, after_sha, margin, verdict, evicted, included)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+def store(path: Path) -> sqlite3.Connection:
+    """The labels database, created if it is not there yet.
+
+    Its own file and its own connection: the catalog is not attached and
+    `state.sqlite3` has no name here at all, which is what makes "these labels
+    never reach the triage decisions" a fact about the code.
+
+    One connection shared across the server's threads rather than one per thread
+    as `photolib.grid` has, because there is exactly one reader at one keyboard
+    and every use of it goes through `LabelServer`'s lock. `check_same_thread` is
+    off because that is what the lock is for.
+    """
+    conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute(SCHEMA)
+    return conn
+
+
+def record(
+    conn: sqlite3.Connection,
+    *,
+    members: Sequence[str],
+    camera: str | None,
+    before: str | None,
+    after: str | None,
+    margin: int,
+    evicted: Sequence[str],
+    included: Sequence[str],
+    unsure: bool,
+) -> str:
+    """File one answer, replacing whatever the reader said about it before."""
+    given = verdict(evicted=evicted, included=included, unsure=unsure)
+    conn.execute(
+        _RECORD,
+        (
+            key(members),
+            camera,
+            before,
+            after,
+            margin,
+            given,
+            json.dumps(list(evicted)),
+            json.dumps(list(included)),
+        ),
+    )
+    return given
+
+
+def answers(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Every answer given, by the stack it was about."""
+    return {
+        row[0]: {
+            "members": row[0].split(","),
+            "camera": row[1],
+            "verdict": row[2],
+            "evicted": json.loads(row[3]),
+            "included": json.loads(row[4]),
+        }
+        for row in conn.execute(
+            "SELECT members, camera, verdict, evicted, included FROM answer"
+        )
+    }
+
+
+# --- the page -----------------------------------------------------------------
+
+STATIC_ROUTES = {
+    "/": ("page.html", "text/html; charset=utf-8"),
+    "/page.css": ("page.css", "text/css; charset=utf-8"),
+    "/page.js": ("page.js", "text/javascript; charset=utf-8"),
+}
+
+# 64 lowercase hex cannot traverse, cannot be absolute and cannot hold a
+# separator, so the pattern is the containment proof. `photolib.grid` spells the
+# same route the same way and for the same reason.
+SUBSTRATE_ROUTE = re.compile(r"^/d/([0-9a-f]{64})\.webp$")
+
+MAX_ANSWER_BODY = 8 * 1024
+
+SECURITY_HEADERS = (
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "no-referrer"),
+    ("X-Frame-Options", "DENY"),
+    (
+        "Content-Security-Policy",
+        "default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    ),
+)
+
+
+class LabelServer(ThreadingHTTPServer):
+    """Threaded for `photolib.grid.GridServer`'s reason: keep-alive plus one
+    thread is a hang rather than a slowdown, and a set draws up to a dozen 1536px
+    frames at once."""
+
+    daemon_threads = True
+    allow_reuse_address = False
+
+    def __init__(self, address, handler, asked: list[Question], labels, substrate_root):
+        self.asked = asked
+        self.labels = labels
+        self.substrate_root = substrate_root
+        # Every touch of the labels database goes through this, which is what
+        # lets one connection serve threaded requests -- see `store`.
+        self._lock = threading.Lock()
+        super().__init__(address, handler)
+        port = self.server_address[1]
+        self.allowed_hosts = frozenset({f"127.0.0.1:{port}", f"localhost:{port}"})
+        self.allowed_origins = frozenset(
+            {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        )
+
+    def judge(self, **answer) -> dict:
+        """Record one answer and hand back the sample it changed.
+
+        One lock over the write and the read that follows it, so the counter the
+        reader is shown is the count as of their own keystroke.
+        """
+        with self._lock:
+            record(self.labels, **answer)
+            return self._payload()
+
+    def payload(self) -> dict:
+        with self._lock:
+            return self._payload()
+
+    def _payload(self) -> dict:
+        """The whole sample, with whatever the reader has already said about it.
+
+        All of it at once: sixty sets of shas is a few tens of kilobytes, and
+        sending it whole is what makes going back to revise an answer a local
+        move rather than a round trip.
+        """
+        given = answers(self.labels)
+        sets = [
+            {
+                "members": list(question.members),
+                "before": question.before,
+                "after": question.after,
+                "camera": question.camera,
+                "margin": question.margin,
+                "answer": given.get(key(question.members)),
+            }
+            for question in self.asked
+        ]
+        return {
+            "sets": sets,
+            "strictness": STRICTNESS,
+            "given": sum(1 for entry in sets if entry["answer"] is not None),
+            # What is left to judge is what is left in the sample, which is
+            # ADR 0003's two rounds of thirty unless the catalog held fewer.
+            "useful": len(sets),
+        }
+
+
+class LabelHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 30
+    server_version = "photolib-label-harness"
+    sys_version = ""
+
+    server: LabelServer
+
+    def log_request(self, code="-", size="-") -> None:
+        if isinstance(code, int) and code >= 400:
+            self.log_message('"%s" %s', self.requestline, code)
+
+    def _respond(self, status: int, body: bytes = b"", headers: tuple = ()) -> None:
+        self.send_response(status)
+        for name, value in SECURITY_HEADERS:
+            self.send_header(name, value)
+        for name, value in headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD" and body:
+            self.wfile.write(body)
+
+    def _json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self._respond(status, body, (("Content-Type", "application/json"),))
+
+    def _host_ok(self) -> bool:
+        return (self.headers.get("Host") or "").strip().lower() in self.server.allowed_hosts
+
+    def do_GET(self) -> None:
+        if not self._host_ok():
+            self._json(403, {"error": "host"})
+            return
+        path = self.path.partition("?")[0]
+        substrate = SUBSTRATE_ROUTE.match(path)
+        if path in STATIC_ROUTES:
+            self._static(path)
+        elif path == "/api/sets":
+            self._json(200, self.server.payload())
+        elif substrate:
+            self._frame(substrate.group(1))
+        else:
+            self._respond(404)
+
+    do_HEAD = do_GET
+
+    def do_POST(self) -> None:
+        if not self._host_ok():
+            self.close_connection = True
+            self._json(403, {"error": "host"})
+            return
+        if self.path.partition("?")[0] != "/api/answer":
+            self.close_connection = True
+            self._respond(404)
+            return
+        self._answer()
+
+    def _static(self, route: str) -> None:
+        name, content_type = STATIC_ROUTES[route]
+        try:
+            body = (STATIC_DIR / name).read_bytes()
+        except OSError:
+            self._respond(404)
+            return
+        self._respond(
+            200, body, (("Content-Type", content_type), ("Cache-Control", "no-cache"))
+        )
+
+    def _frame(self, sha256: str) -> None:
+        """One 1536px substrate, by content hash -- the tree the overlay draws from."""
+        etag = f'"{sha256}"'
+        if self.headers.get("If-None-Match") == etag:
+            self._respond(304, b"", (("ETag", etag),))
+            return
+        try:
+            body = substrate_path(self.server.substrate_root, sha256).read_bytes()
+        except OSError:
+            self._respond(404)
+            return
+        self._respond(
+            200,
+            body,
+            (
+                ("Content-Type", "image/webp"),
+                ("Cache-Control", "private, max-age=31536000, immutable"),
+                ("ETag", etag),
+            ),
+        )
+
+    def _answer(self) -> None:
+        """Record one judgement. The only write this process makes.
+
+        The body names a stack rather than describing one: it is matched against
+        the sample this server is serving, and an answer about anything else is a
+        404. So the reader's marks are checked against the frames actually drawn
+        -- a member that is not a member, or a neighbour that is not a neighbour,
+        cannot be filed.
+        """
+        payload = self._json_body()
+        if payload is None:
+            return
+        members = payload.get("members")
+        if not isinstance(members, list) or not all(isinstance(sha, str) for sha in members):
+            self._json(400, {"error": "members"})
+            return
+        question = next(
+            (q for q in self.server.asked if list(q.members) == members), None
+        )
+        if question is None:
+            self._json(404, {"error": "members"})
+            return
+
+        marks = {}
+        for field, allowed in (
+            ("evicted", set(question.members)),
+            ("included", {question.before, question.after} - {None}),
+        ):
+            value = payload.get(field, [])
+            if not isinstance(value, list) or not set(value) <= allowed:
+                self._json(400, {"error": field})
+                return
+            marks[field] = value
+        unsure = payload.get("unsure", False)
+        if not isinstance(unsure, bool):
+            self._json(400, {"error": "unsure"})
+            return
+
+        self._json(
+            200,
+            self.server.judge(
+                members=question.members,
+                camera=question.camera,
+                before=question.before,
+                after=question.after,
+                margin=question.margin,
+                evicted=marks["evicted"],
+                included=marks["included"],
+                unsure=unsure,
+            ),
+        )
+
+    def _json_body(self) -> dict | None:
+        """A validated JSON object body, or None having already answered.
+
+        `photolib.grid._json_body`'s gauntlet, short: same origin, an explicit
+        JSON content type so a cross-origin attempt needs a preflight there is no
+        handler for, and a size budget checked before a byte is read.
+        """
+        origin = self.headers.get("Origin")
+        if origin not in self.server.allowed_origins:
+            self.close_connection = True
+            self._json(403, {"error": "origin"})
+            return None
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            self.close_connection = True
+            self._json(415, {"error": "content-type"})
+            return None
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None or not raw_length.strip().isdigit():
+            self.close_connection = True
+            self._json(411, {"error": "body"})
+            return None
+        length = int(raw_length)
+        if length > MAX_ANSWER_BODY:
+            self.close_connection = True
+            self._json(413, {"error": "body"})
+            return None
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self._json(400, {"error": "body"})
+            return None
+        if not isinstance(payload, dict):
+            self._json(400, {"error": "body"})
+            return None
+        return payload
+
+
+# --- running it ---------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m harness.label", description=__doc__)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--open", action="store_true", help="open a browser once bound")
+    parser.add_argument(
+        "--sets", type=int, default=SETS, help="how many sets to sample (default 60)"
+    )
+    parser.add_argument(
+        "--strictness",
+        type=int,
+        default=STRICTNESS,
+        help="the provisional Match threshold the sets are drawn at",
+    )
+    args = parser.parse_args(argv)
+
+    config = load()
+    labels_db = config.catalog_db.parent / LABELS
+    conn = candidates.catalog(config.catalog_db, read_only=True)
+    try:
+        asked = plan(conn, strictness=args.strictness, wanted=args.sets)
+    finally:
+        conn.close()
+    if not asked:
+        print(
+            "nothing to judge: no candidate stack has two frames at this strictness. "
+            "Run python -m photolib.matches first."
+        )
+        return 1
+
+    labels = store(labels_db)
+    server = LabelServer(
+        ("127.0.0.1", args.port), LabelHandler, asked, labels, config.substrate_root
+    )
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    cameras = sorted({question.camera or "(unnamed)" for question in asked})
+    print(f"labelling harness on {url}  -- disposable, see the module docstring")
+    print(f"  strictness      {args.strictness} provisional, {matches.METHOD}")
+    print(f"  sets            {len(asked)} sampled, least decisive first")
+    print(f"  cameras         {', '.join(cameras)}")
+    print(f"  margins         {asked[0].margin} to {asked[-1].margin} points from the line")
+    print(f"  labels          {labels_db}")
+    print(f"  substrates      {config.substrate_root}")
+    print(f"  answers given   {len(answers(labels))}")
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        server.server_close()
+        labels.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
