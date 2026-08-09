@@ -25,12 +25,14 @@
 #   powershell -NoProfile -File scripts\run-tests.ps1
 #
 # It returns immediately. Wait for <out>\pytest.done -- it holds the exit code --
-# and read <out>\pytest.out for the report.
+# and read <out>\pytest.out for the report. <out> is this checkout's own and is
+# printed on start; read it from there rather than assuming a fixed path.
 
 param(
-    # Where the transcript and the exit-code marker go. Anywhere but the repo:
+    # Where the transcript and the exit-code marker go. Defaults to a directory
+    # of this checkout's own under %TEMP% -- see below. Anywhere but the repo:
     # rule 5 keeps run logs out of git.
-    [string] $OutDir = (Join-Path $env:TEMP 'photos-tests'),
+    [string] $OutDir,
     # Passed through to pytest, so a subset is `-Target tests/test_grid.py`.
     [string] $Target = 'tests'
 )
@@ -38,6 +40,25 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
+
+if (-not $OutDir) {
+    # One output directory per checkout. The default used to be a single shared
+    # `photos-tests`, and the first thing a run does is delete the transcript and
+    # the marker in it, so two worktrees running at once clobbered each other:
+    # one waits for `pytest.done` and reads a pass count another tree produced.
+    # That was seen on 2026-08-09, as three runs of one unchanged tree reporting
+    # 966, 959 and 966 passed. The leaf name says which tree it is at a glance,
+    # and the path hash keeps two worktrees with the same leaf apart.
+    $sha = [System.Security.Cryptography.SHA1]::Create()
+    try {
+        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($repo.ToLowerInvariant()))
+    } finally {
+        $sha.Dispose()
+    }
+    $tag = -join ($bytes[0..3] | ForEach-Object { $_.ToString('x2') })
+    $OutDir = Join-Path $env:TEMP ('photos-tests-' + (Split-Path -Leaf $repo) + '-' + $tag)
+}
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 $out = Join-Path $OutDir 'pytest.out'
