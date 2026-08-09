@@ -73,7 +73,7 @@ const parts = new WeakMap();
  * overlay's flight has to start from the picture and not from the box around it,
  * and this file is the one that knows the difference. */
 export function photoRect(tile) {
-  return (parts.get(tile)?.photo ?? tile).getBoundingClientRect();
+  return parts.get(tile).photo.getBoundingClientRect();
 }
 
 export function createSheet(canvas, sentinel, options) {
@@ -195,7 +195,9 @@ export function createSheet(canvas, sentinel, options) {
     img.addEventListener("error", () => el.classList.add("missing"));
     photo.appendChild(img);
     el.appendChild(photo);
-    parts.set(el, { img, photo, strip, cards });
+    // `above` is written by the first `bindDeck`, which always runs before the
+    // element is positioned.
+    parts.set(el, { img, photo, strip, cards, above: 0 });
     if (options.extend) options.extend(el);
     return el;
   }
@@ -212,28 +214,27 @@ export function createSheet(canvas, sentinel, options) {
     pool.push(el);
   }
 
-  // How tall a tile's element is above its photograph. Nothing for a tile that
-  // stands for one frame, which is every tile with stacking off.
-  function strip(item) {
-    return item.n > 1 ? DECK_H : 0;
-  }
-
-  // Bind the pooled cards to this item. Every one of them is written on every
-  // bind — a card the deck does not reach is hidden rather than left as it was —
-  // so recycling a tile from a stack of forty onto one of two, or onto none,
-  // leaves nothing behind.
-  function dress(el, item, w) {
-    const { strip: deckEl, cards } = parts.get(el);
+  // Bind the pooled cards to this item, and record how tall the element stands
+  // above its photograph — nothing for a tile that stands for one frame, which
+  // is every tile with stacking off. `deck` decides both, so the element's
+  // height and its card count cannot disagree about whether there is a stack.
+  //
+  // Every card is written on every bind — one the deck does not reach is hidden
+  // rather than left as it was — so recycling a tile from a stack of forty onto
+  // one of two, or onto none, leaves nothing behind.
+  function bindDeck(el, item, w) {
+    const bits = parts.get(el);
     const spec = deck(item.n, w);
-    deckEl.hidden = spec.length === 0;
-    for (let i = 0; i < cards.length; i++) {
+    bits.above = spec.length ? DECK_H : 0;
+    bits.strip.hidden = spec.length === 0;
+    for (let i = 0; i < bits.cards.length; i++) {
       const card = spec[i];
-      cards[i].hidden = card === undefined;
+      bits.cards[i].hidden = card === undefined;
       if (card === undefined) continue;
-      cards[i].style.top = card.top + "px";
-      cards[i].style.left = card.inset + "px";
-      cards[i].style.right = card.inset + "px";
-      cards[i].style.opacity = String(card.opacity);
+      bits.cards[i].style.top = card.top + "px";
+      bits.cards[i].style.left = card.inset + "px";
+      bits.cards[i].style.right = card.inset + "px";
+      bits.cards[i].style.opacity = String(card.opacity);
     }
   }
 
@@ -244,7 +245,7 @@ export function createSheet(canvas, sentinel, options) {
       el = acquire();
       el.dataset.index = String(index);
       const img = parts.get(el).img;
-      dress(el, item, w);
+      bindDeck(el, item, w);
       // Before the src, because the hint is read when the request is created and
       // ignored afterwards — which also means it only ever decides the order
       // *within* a freshly built window: a reset, a screen change, a first paint,
@@ -261,13 +262,13 @@ export function createSheet(canvas, sentinel, options) {
       mounted.set(index, el);
     }
     // The element grows upward by the strip and the photograph does not move:
-    // `y` is the row's top and stays the frame's top, stacked or not, so every
-    // photograph in a row shares its top edge and its bottom one.
-    const above = strip(item);
+    // `y` is the row's top and stays the photograph's top, stacked or not, so
+    // every photograph in a row shares its top edge and its bottom one.
+    const { above, photo } = parts.get(el);
     el.style.width = w + "px";
     el.style.height = h + above + "px";
     el.style.transform = "translate(" + x + "px," + (y - above) + "px)";
-    parts.get(el).photo.style.height = h + "px";
+    photo.style.height = h + "px";
   }
 
   function placeholder(el, item) {
@@ -326,8 +327,8 @@ export function createSheet(canvas, sentinel, options) {
   // and waiting for an intersection event that will never fire again stalls the
   // sheet one page short — permanently.
   function needsMore() {
-    // Without this guard an unpacked layout has nextTop 0 forever, and the fill
-    // loop below would page the entire corpus into memory in one go.
+    // Without this guard an unpacked layout keeps its empty nextTop forever, and
+    // the fill loop below would page the entire corpus into memory in one go.
     if (width <= 0) return false;
     return nextTop - (origin() + window.innerHeight) < PREFETCH_PX;
   }

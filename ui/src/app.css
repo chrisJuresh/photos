@@ -500,8 +500,9 @@ code,
 }
 
 /* The deck: card edges rising above the photograph, like a deck seen from
-   slightly above. Its height is written once per element by `sheet.js`, which
-   owns the constant; the cards are nested boxes reaching down to the
+   slightly above. Its height is written once per element by `sheet.js`, from
+   the `DECK_H` that `layout.js` owns along with the rest of the deck's
+   geometry; the cards are nested boxes reaching down to the
    photograph's top edge, painted back to front, so each shows one sliver. */
 .deck {
   position: absolute;
