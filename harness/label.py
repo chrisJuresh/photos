@@ -102,7 +102,25 @@ SETS = 30
 # never by the Match: a bracket end blown out past having any texture left scores
 # nothing and is exactly the member ADR 0003 expects to be missed, so choosing
 # context by the Match would hide the failure the reader is here to find.
-CONTEXT = 8
+#
+# Eight was the first ceiling and the reader hit it: a long burst of the same
+# subject is still the same subject eight frames out, and the question "where
+# does this end" cannot be answered from inside the part that looks alike.
+#
+# 60 rather than a smaller number that would need raising again. It is chosen to
+# stop being the thing in the way: measured over the sets a round samples, the
+# runs they sit in are 2 to 56 frames long for all but four of the thirty, so at
+# this reach the reader sees the whole run nearly every time and the cap is not
+# what stops them. The four that are longer -- 286, 384, 443, 810 and 1,435
+# frames -- have no width that would show them whole, and nothing useful to show
+# if it did.
+#
+# The cost is paid once, in the payload: 30 sets carrying up to 120 frames each
+# is around 300 KB over the loopback, which buys widening with no round trip.
+# What bounds the view in practice is the room on screen rather than this number
+# -- past ten or so either side the frames are small, which the reader can see
+# for themselves and narrow back from.
+CONTEXT = 60
 SHOWN = 1
 
 DEFAULT_PORT = 8771  # the grid is on 8770 and this is not the grid
@@ -630,6 +648,10 @@ class LabelServer(ThreadingHTTPServer):
         return {
             "sets": sets,
             "shown": SHOWN,
+            # The client honours this rather than keeping its own copy: the
+            # server refuses an answer claiming a wider view than it allows, and
+            # two constants drifting apart would be a refusal nobody can see.
+            "context": CONTEXT,
             "strictness": STRICTNESS,
             "given": sum(1 for entry in sets if entry["answer"] is not None),
             # What is left to judge is what is left in the sample, which is

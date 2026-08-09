@@ -52,9 +52,10 @@ function elapsed(seconds) {
 
 function frame(sha, role, marked, gap) {
   const button = document.createElement("button");
-  button.className = `frame ${role}` + (marked ? ` marked-${marked}` : "");
+  button.className = `frame ${role}`;
   button.dataset.sha = sha;
   button.dataset.role = role;
+  button.dataset.gap = gap;
 
   const image = document.createElement("img");
   image.src = `/d/${sha}.webp`;
@@ -63,13 +64,24 @@ function frame(sha, role, marked, gap) {
 
   const caption = document.createElement("span");
   caption.className = "caption";
-  caption.textContent =
-    marked === "out" ? "does not belong"
-    : marked === "in" ? "should be included"
-    : role === "neighbour" ? `${elapsed(gap)} away`
-    : sha.slice(0, 8);
   button.append(caption);
+  paint(button, marked !== null);
   return button;
+}
+
+// A frame's marked state, written straight onto the element. Straight onto it
+// rather than through `draw`, because a drag paints as it goes and redrawing
+// under a held pointer would replace the elements it is dragging over.
+function paint(button, marked) {
+  const { sha, role, gap } = button.dataset;
+  button.classList.toggle(role === "member" ? "marked-out" : "marked-in", marked);
+  button.querySelector(".caption").textContent = marked
+    ? role === "member"
+      ? "does not belong"
+      : "should be included"
+    : role === "neighbour"
+      ? `${elapsed(Number(gap))} away`
+      : sha.slice(0, 8);
 }
 
 // A box rather than a group: CONTEXT.md keeps "group" off the stack, and this is
@@ -85,7 +97,6 @@ const asFrames = (shas) => shas.map((sha) => ({ sha, gap: 0 }));
 
 const GAP = 6; // must match the `gap` the boxes are laid out with
 const CAPTION = 22; // the strip under each frame that is not photograph
-const CONTEXT = 8; // how far the view widens; `harness/label.py` bounds it too
 
 // How many columns to lay a stack out in. CSS can do this with `auto-fit` and it
 // gets it wrong for the job: `auto-fit` packs in as many columns as will fit the
@@ -125,21 +136,28 @@ function draw() {
   const before = set.before.slice(0, shown);
   const after = set.after.slice(0, shown);
 
-  stage.replaceChildren();
-  if (before.length) stage.append(box([...before].reverse(), "neighbour", outside));
-  const members = box(asFrames(set.members), "member", (sha) =>
-    mark.out.has(sha) ? "out" : null
-  );
-  stage.append(members);
-  if (after.length) stage.append(box(after, "neighbour", outside));
-  // After appending, because the count is chosen against the room the box
-  // actually got. `style.setProperty` and never `setAttribute("style", …)`:
-  // the CSP carries no `unsafe-inline`, which blocks the attribute and not the
-  // CSSOM — the same distinction CLAUDE.md draws for Svelte.
-  members.style.setProperty(
-    "--columns",
-    columns(set.members.length, members.clientWidth, members.clientHeight)
-  );
+  const boxes = [];
+  if (before.length) boxes.push(box([...before].reverse(), "neighbour", outside));
+  boxes.push(box(asFrames(set.members), "member", (sha) => (mark.out.has(sha) ? "out" : null)));
+  if (after.length) boxes.push(box(after, "neighbour", outside));
+
+  // A box's share of the width is how many frames are in it, so widening the
+  // view grows the context boxes instead of crushing what is already in them.
+  // `style.setProperty` and never `setAttribute("style", …)`: the CSP carries no
+  // `unsafe-inline`, which blocks the attribute and not the CSSOM — the same
+  // distinction CLAUDE.md draws for Svelte.
+  for (const holder of boxes) {
+    holder.style.setProperty("--share", holder.children.length);
+  }
+  stage.replaceChildren(...boxes);
+  // After appending, because each count is chosen against the room its box
+  // actually got.
+  for (const holder of boxes) {
+    holder.style.setProperty(
+      "--columns",
+      columns(holder.children.length, holder.clientWidth, holder.clientHeight)
+    );
+  }
 
   const answer = set.answer;
   const available = beside(set);
@@ -251,37 +269,90 @@ window.addEventListener("resize", () => {
   settling = setTimeout(draw, 150);
 });
 
-stage.addEventListener("click", (event) => {
+// A drag marks a run of frames in one go, because a stack of a dozen near
+// identical frames is where the reader most wants to say "these three do not
+// belong" and least wants to say it three times. It paints as the pointer
+// travels and records once, on release -- so a drag is one answer and not one
+// per frame, and a plain click is a drag over a single frame.
+//
+// The drag keeps to the role it started on: dragging out of the stack and
+// across a neighbour would otherwise turn "these do not belong" into "and pull
+// that one in", which is two different claims from one gesture.
+let dragging = null;
+
+function held(role) {
+  return role === "member" ? marksFor(at).out : marksFor(at).in;
+}
+
+function setMark(button, marked) {
+  const set = held(button.dataset.role);
+  if (marked) set.add(button.dataset.sha);
+  else set.delete(button.dataset.sha);
+  paint(button, marked);
+}
+
+stage.addEventListener("pointerdown", (event) => {
   const button = event.target.closest(".frame");
-  if (!button) return;
-  const mark = marksFor(at);
-  const held = button.dataset.role === "member" ? mark.out : mark.in;
-  const sha = button.dataset.sha;
-  if (held.has(sha)) held.delete(sha);
-  else held.add(sha);
-  send(false, false);
+  if (!button || event.button !== 0) return;
+  event.preventDefault();
+  dragging = {
+    role: button.dataset.role,
+    marked: !held(button.dataset.role).has(button.dataset.sha),
+  };
+  setMark(button, dragging.marked);
+  stage.setPointerCapture(event.pointerId);
 });
+
+stage.addEventListener("pointermove", (event) => {
+  if (!dragging) return;
+  const button = document
+    .elementFromPoint(event.clientX, event.clientY)
+    ?.closest(".frame");
+  if (!button || button.dataset.role !== dragging.role) return;
+  if (held(dragging.role).has(button.dataset.sha) === dragging.marked) return;
+  setMark(button, dragging.marked);
+});
+
+for (const ending of ["pointerup", "pointercancel"]) {
+  stage.addEventListener(ending, () => {
+    if (!dragging) return;
+    dragging = null;
+    send(false, false);
+  });
+}
+
+// Vim keys, because the reader's hand is on the home row and the answer keys are
+// there too. The arrows and `+`/`-` still work and are simply not advertised.
+const KEYS = {
+  " ": () => send(false, true),
+  u: () => send(true, true),
+  l: () => step(1),
+  h: () => step(-1),
+  ArrowRight: () => step(1),
+  ArrowLeft: () => step(-1),
+  // Vertical for how much is on screen, horizontal for which set: `k` is up and
+  // out to more of the run, `j` is down and back to less of it.
+  k: () => widen(1),
+  j: () => widen(-1),
+  "=": () => widen(1),
+  "+": () => widen(1),
+  "-": () => widen(-1),
+  _: () => widen(-1),
+};
 
 document.addEventListener("keydown", (event) => {
   if (!sample) return;
-  if (event.key === " ") {
-    event.preventDefault();
-    send(false, true);
-  } else if (event.key === "u" || event.key === "U") {
-    send(true, true);
-  } else if (event.key === "ArrowRight") {
-    step(1);
-  } else if (event.key === "ArrowLeft") {
-    step(-1);
-  } else if (event.key === "+" || event.key === "=") {
-    widen(1);
-  } else if (event.key === "-" || event.key === "_") {
-    widen(-1);
-  } else if (event.key === "Backspace") {
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
+  if (event.key === "Backspace") {
     event.preventDefault();
     marks.set(at, { out: new Set(), in: new Set() });
     send(false, false);
+    return;
   }
+  const pressed = KEYS[event.key] || KEYS[event.key.toLowerCase()];
+  if (!pressed) return;
+  event.preventDefault(); // space would scroll, and would press a focused frame
+  pressed();
 });
 
 // Changing the view is not an answer, so it posts nothing.
@@ -303,7 +374,7 @@ function widen(by) {
   // press always moves the view by one and never spends itself closing a gap
   // between the two.
   const current = showing(set);
-  const next = Math.min(Math.max(current + by, pinned), CONTEXT);
+  const next = Math.min(Math.max(current + by, pinned), sample.context);
   // Only when a mark is what stopped it. At the narrowest view there is nothing
   // to narrow and nothing to explain.
   if (next === current && by < 0 && pinned > 1) {

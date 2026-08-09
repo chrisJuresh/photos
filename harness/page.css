@@ -83,10 +83,26 @@ main {
   gap: 10px;
 }
 
+/* Each box takes room in proportion to how many frames it holds, and lays them
+   out in the column count that draws them largest -- both boxes the same way.
+   The neighbours used to take a fixed 18% however many frames were in them,
+   which is fine at one and useless at eight: 28px of photograph each, all of
+   them looking alike because nothing that small looks different. A share of the
+   width is the rule that holds at both ends.
+
+   Wrapping matters for the same reason. A row is the obvious arrangement and
+   the wrong one: eight frames across a 1280px window leaves each photograph
+   130px wide in a 465px-tall slot, a strip of picture between two bands of
+   nothing. */
 .box {
-  min-width: 0;
+  flex: var(--share, 1) 1 0;
+  min-width: 110px;
   min-height: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(var(--columns, 1), 1fr);
+  grid-auto-rows: minmax(90px, 1fr);
+  align-content: center;
+  overflow-y: auto;
   gap: 6px;
   padding: 8px;
   border: 1px solid #3a3a3a;
@@ -94,26 +110,15 @@ main {
   background: var(--panel);
 }
 
-/* The stack takes the room that is left, and **wraps** rather than staying on
-   one line. A row is the obvious arrangement and the wrong one: eight frames
-   across a 1280px window leaves each photograph 130px wide in a 465px-tall
-   slot, which is a strip of picture between two bands of nothing, and the
-   reader cannot see the difference they are being asked to judge. `auto-fit`
-   does the counting, so a stack of three gets three big tiles and a burst of
-   twelve wraps to a third row and scrolls inside its own border. */
-.box.member {
-  flex: 1 1 0;
-  display: grid;
-  grid-template-columns: repeat(var(--columns, 1), 1fr);
-  grid-auto-rows: minmax(90px, 1fr);
-  align-content: center;
-  overflow-y: auto;
-}
+/* The stack keeps a third of the stage however far the view is widened. A pure
+   share of the frame count reads well until the context outnumbers the stack,
+   and then it puts the thing being judged in the smallest box on screen: at
+   sixteen either side of a stack of six, the stack had 275px and the context
+   704px each. Reference material should not crowd out the subject. */
+.box.member { min-width: 32%; }
 
-/* Context, never the thing being judged, so a fixed slice either side. */
+/* Context, never the thing being judged. */
 .box.neighbour {
-  flex: 0 0 18%;
-  align-items: stretch;
   border-style: dashed;
   background: none;
 }
@@ -122,6 +127,9 @@ main {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* A drag across frames marks them, so the pointer must not be taken by a
+     scroll gesture halfway through one. */
+  touch-action: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -134,7 +142,6 @@ main {
   cursor: pointer;
 }
 
-.box.neighbour .frame { flex: 1 1 auto; }
 
 /* Sized by the frame, never by the file: the picture is letterboxed into
    whatever room its share of the row leaves. */

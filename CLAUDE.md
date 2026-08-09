@@ -217,9 +217,12 @@ lets one screen answer both of the reader's complaints: *does this stack hold so
 does not belong*, and *is it missing something that should be here*. Space accepts the stack
 as drawn, clicking a member says it does not belong, clicking a neighbour says it should have
 been included — each click is recorded as it is made — and `u` records **not sure**, which is
-an answer rather than a skip. `+` widens the view when the answer turns on what is past the
-edge: one frame each side is enough for 46% of candidate stacks but only 27% of the least
-decisive ones, and no fixed width settles it when a run can reach 1,435 frames. **What an
+an answer rather than a skip; dragging across several frames marks them together and records
+once. The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the run is on screen.
+`k` widens the view when the answer turns on what is past the edge: one frame each side is
+enough for 46% of candidate stacks but only 27% of the least decisive ones, and no fixed width
+settles it when a run can reach 1,435 frames, so it reaches 60 either side — enough to see the
+whole run for 24 of the 30 sets a round samples. **What an
 answer says is bounded by what was on screen for it**, which is stored per answer and is the
 column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
 that the stack is complete. Sets are drawn from wherever the Match is least decisive and
