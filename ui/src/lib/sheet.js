@@ -24,7 +24,7 @@
 //     the line before, so a fresh window's requests leave immediately — see
 //     `drainPlaceholders`
 
-import { GAP, TARGET_H, aspect, packRows, visibleRows } from "./layout.js";
+import { GAP, TARGET_H, packRows, rowBoxes, visibleRows } from "./layout.js";
 
 // How much laid-out runway to keep ahead of the reader before asking for another
 // page. One page is roughly 2,500px of rows, so this is about one page of slack.
@@ -46,6 +46,15 @@ const AHEAD = 2;
 // ~80M px, so the reservation below stops well short of the cliff: the bar is
 // still the length of the track, it just stops being linear in the deep tail.
 const MAX_CANVAS_PX = 30_000_000;
+
+// A tile's image, by the tile element that owns it. `acquire` is the only thing
+// that creates one, and `mount` and `release` are the only things that need it
+// back. Both used to read `el.firstChild`, which was true only because every
+// `extend` so far appends behind the image; the first one to put an element in
+// front of it would have had `release` clear the wrong node's src instead, on a
+// path that fails silently. The reference is held here so the order stops
+// mattering.
+const images = new WeakMap();
 
 export function createSheet(canvas, sentinel, options) {
   const items = []; // page order, never reordered
@@ -136,12 +145,13 @@ export function createSheet(canvas, sentinel, options) {
     img.addEventListener("load", () => el.classList.add("loaded"));
     img.addEventListener("error", () => el.classList.add("missing"));
     el.appendChild(img);
+    images.set(el, img);
     if (options.extend) options.extend(el);
     return el;
   }
 
   function release(index, el) {
-    const img = el.firstChild;
+    const img = images.get(el);
     // Cancels an in-flight request. Without this, fast scrolling queues hundreds
     // of fetches for tiles nobody will see.
     img.removeAttribute("src");
@@ -158,7 +168,7 @@ export function createSheet(canvas, sentinel, options) {
     if (!el) {
       el = acquire();
       el.dataset.index = String(index);
-      const img = el.firstChild;
+      const img = images.get(el);
       // Before the src, because the hint is read when the request is created and
       // ignored afterwards — which also means it only ever decides the order
       // *within* a freshly built window: a reset, a screen change, a first paint,
@@ -204,14 +214,8 @@ export function createSheet(canvas, sentinel, options) {
   }
 
   function placeRow(row, urgent) {
-    let x = 0;
-    for (let i = row.from; i < row.to; i++) {
-      const last = i === row.to - 1;
-      // The last tile takes the remainder, so a row is exactly `width` wide and
-      // rounding never accumulates into a ragged right edge.
-      const w = last ? width - x : Math.round(aspect(items[i]) * row.height);
-      mount(i, x, row.top, w, row.height, urgent);
-      x += w + GAP;
+    for (const box of rowBoxes(row, items, width)) {
+      mount(box.index, box.x, row.top, box.w, row.height, urgent);
     }
   }
 
