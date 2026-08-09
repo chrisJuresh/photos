@@ -407,6 +407,29 @@ def test_a_substrate_that_will_not_decode_is_reported_and_costs_only_its_pairs(
     assert corpus.pairs() == {(a, b)}
 
 
+def test_a_corrupt_substrate_leaves_a_pass_unfinished_rather_than_wrong(
+    corpus: Corpus,
+) -> None:
+    """A fan-out is done when it carries every Match it is owed, so one partner
+    that will not decode keeps its fan-out on the worklist for ever -- which is
+    how the corruption keeps being reported, exactly as an undecodable substrate
+    keeps being reported by `photolib.fingerprints`. The cost is that the run's
+    readable pairs are checked again; what must not happen is their Match moving.
+    """
+    a = corpus.add("1", 0, texture=1)
+    b = corpus.add("2", 2, texture=1)
+    corrupt = corpus.add("3", 4)
+    substrate_path(corpus.substrates, corrupt).write_bytes(b"not a webp")
+    corpus.survivors(a, b, corrupt)
+    corpus.check()
+    before = corpus.rows()
+
+    again = corpus.check()
+
+    assert corpus.rows() == before
+    assert [sha256 for sha256, _ in again["unreadable"]] == [corrupt]
+
+
 def test_a_frame_that_gains_a_substrate_later_is_checked_after_all(corpus: Corpus) -> None:
     """The reason the worklist reads the tally and not just the name: fill the hole
     and the frames already checked owe a Match each against the newcomer."""
@@ -517,14 +540,16 @@ def test_the_pass_refuses_while_a_writer_holds_the_catalog(
     corpus: Corpus, tmp_path: Path, migrated
 ) -> None:
     """Invariant 6, reached through `candidates.refuse_if_busy` rather than
-    restated: this pass takes the catalog's write lock the same way."""
+    restated -- but surfacing as this module's own refusal, so the command line
+    catches one type and a borrowed check is not a traceback."""
     corpus.add("1", 0)
     corpus.conn.close()
     writer = catalog(migrated[0])
     writer.execute("BEGIN IMMEDIATE")
     try:
-        with pytest.raises(CandidatesRefused, match="another writer holds the catalog"):
+        with pytest.raises(MatchesRefused, match="another writer holds the catalog"):
             matches.run(synthetic_config(tmp_path, migrated, corpus.substrates))
+        assert not issubclass(MatchesRefused, CandidatesRefused)
     finally:
         writer.execute("ROLLBACK")
         writer.close()

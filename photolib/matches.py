@@ -42,7 +42,10 @@ Resumable and idempotent in `photolib.candidates`' shape: the work already done 
 one query rather than half a million probes, a transaction holds whole frames'
 fan-outs so an interruption costs at most the chunk in flight, a screened-out pair
 is never re-checked because it is never selected, and a second run of a finished
-pass writes nothing and says so.
+pass writes nothing and says so. A pass over a substrate that will not decode is
+not a finished pass and does not claim to be: that fan-out stays on the worklist
+and is re-checked every run, which is how the corruption goes on being reported
+rather than going quiet, and no Match already stored moves when it is.
 """
 
 from __future__ import annotations
@@ -95,13 +98,18 @@ class MatchesRefused(RuntimeError):
 
 @dataclass(frozen=True)
 class Features:
-    """One frame's distinctive points, and what each of them looks like."""
+    """One frame's distinctive points, and what each of them looks like.
 
-    points: np.ndarray  # (N, 2) float32, in pixels
+    `coords` and not `points`, although these are the points: the Match is a
+    count of points, `pair_match.points` is that count, and one module cannot
+    spell the coordinates and the count the same way.
+    """
+
+    coords: np.ndarray  # (N, 2) float32, in pixels
     descriptors: np.ndarray | None  # (N, 128) float32, None when there are none
 
     def __len__(self) -> int:
-        return len(self.points)
+        return len(self.coords)
 
 
 def features(frame: np.ndarray) -> Features:
@@ -113,7 +121,7 @@ def features(frame: np.ndarray) -> Features:
     gray = frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
     found, descriptors = cv2.SIFT_create(nfeatures=KEYPOINTS).detectAndCompute(gray, None)
     return Features(
-        points=np.array([point.pt for point in found], dtype=np.float32).reshape(-1, 2),
+        coords=np.array([point.pt for point in found], dtype=np.float32).reshape(-1, 2),
         descriptors=descriptors,
     )
 
@@ -142,8 +150,8 @@ def agree(a: Features, b: Features) -> int:
         return 0
 
     _, inliers = cv2.findHomography(
-        a.points[[point.queryIdx for point in kept]],
-        b.points[[point.trainIdx for point in kept]],
+        a.coords[[point.queryIdx for point in kept]],
+        b.coords[[point.trainIdx for point in kept]],
         cv2.RANSAC,
         REPROJECTION,
     )
@@ -385,14 +393,21 @@ def run(config: Config | None = None, *, limit: int | None = None) -> int:
 
     conn = candidates.catalog(config.catalog_db)
     try:
-        candidates.refuse_if_busy(conn)
+        # The writer refusal is `candidates`' and is borrowed whole rather than
+        # restated, but a caller should not have to know that: every way this
+        # pass declines to run is one exception type, and the command line
+        # catches one thing rather than reaching for another module's.
+        try:
+            candidates.refuse_if_busy(conn)
+        except candidates.CandidatesRefused as exc:
+            raise MatchesRefused(str(exc)) from exc
         # Before the enumeration rather than after it, for `candidates.run`'s
         # reason: there is nothing to verify until the screen has run, and the
         # refusal should not cost a walk over the catalog first.
-        screen = (fingerprints.MODEL, fingerprints.VERSION)
-        if conn.execute(_ANY_CANDIDATE, screen).fetchone() is None:
+        model, screened_at = fingerprints.MODEL, fingerprints.VERSION
+        if conn.execute(_ANY_CANDIDATE, (model, screened_at)).fetchone() is None:
             raise MatchesRefused(
-                f"no candidate pairs at {screen[0]} version {screen[1]}: "
+                f"no candidate pairs at {model} version {screened_at}: "
                 "run python -m photolib.candidates first"
             )
 
@@ -404,7 +419,7 @@ def run(config: Config | None = None, *, limit: int | None = None) -> int:
             flush=True,
         )
         print(f"substrate {config.substrate_root}")
-        print(f"screen    {screen[0]} version {screen[1]}")
+        print(f"screen    {model} version {screened_at}")
         print(f"pairs     {work.survivors:,} survivors, {work.checkable:,} checkable")
         # Named rather than counted, and every one of them, for
         # `candidates.run`'s reason: a survivor whose substrate is missing is a
