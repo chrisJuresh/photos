@@ -1,10 +1,11 @@
 """Tests for the labelling harness's sampling, and for where its answers go.
 
 The harness is scaffolding with a stated end of life, so this file is
-deliberately narrow: what is under test is the part ticket 33 says is worth
-testing -- the pure functions over Match scores that decide which sets the
-reader is shown -- plus the one thing a reader would lose if it were wrong,
-which is an answer already given.
+deliberately narrow: what is under test is the part tickets 33 and 35 say is
+worth testing -- the pure functions over Match scores that decide which sets the
+reader is shown, including which round is asking and what a chain would have
+walked into each stack -- plus the one thing a reader would lose if it were
+wrong, which is an answer already given.
 
 Nothing here starts a server, reads a substrate, or opens a path from
 config.toml. Scores are integers written in the test, so every expectation
@@ -67,6 +68,16 @@ def test_a_pair_with_no_row_is_read_as_agreeing_on_nothing() -> None:
     """The screen rejected it or a substrate was missing. Either way the harness
     has no evidence the two frames are one picture, and draws them apart."""
     assert label.link([A, B], {}) == [[A], [B]]
+
+
+def test_matches_most_members_lets_in_a_frame_complete_linkage_keeps_out() -> None:
+    """The softening ADR 0003 left open and its labels chose. Strictly most, so a
+    frame agreeing with half a stack does not join: a tie is not most."""
+    points = scores(ab=HIGH, bc=HIGH, ac=LOW)
+
+    assert label.majority([A, B], C, points, STRICTNESS) is False  # one of two
+    assert label.majority([A, B, C], D, scores(ad=HIGH, bd=HIGH, cd=LOW), STRICTNESS) is True
+    assert label.neighbour([A, B], C, points, STRICTNESS) is True  # only B decides
 
 
 # --- which sets are worth the reader's evening -------------------------------
@@ -211,12 +222,107 @@ def test_a_stack_nothing_borders_and_nothing_strains_is_decisive() -> None:
     assert asked.margin == HIGH - STRICTNESS
 
 
+# --- round two: drawing at the settled rule, and pricing the chain ------------
+
+
+def test_the_sets_are_drawn_under_the_rule_the_labels_settled() -> None:
+    """ADR 0003 argued from complete linkage and its labels chose "matches most
+    members", so a bare draw is round two's. D agrees with two of the three
+    members and joins; complete linkage would leave it out over the pair it
+    disagrees with."""
+    points = scores(ab=HIGH, ac=HIGH, bc=HIGH, ad=LOW, bd=HIGH, cd=HIGH)
+
+    assert label.link([A, B, C, D], points, joins=label.complete) == [[A, B, C], [D]]
+    assert one([A, B, C, D], points).members == (A, B, C, D)
+
+
+def test_a_chain_that_reaches_past_the_stack_is_counted() -> None:
+    """Round two's question, and the one round one could not ask: where would a
+    chain of frames each like its predecessor walk a stack through a scene change
+    that the settled rule stops at. E is like D and like nothing else, so single
+    linkage takes it and "matches most members" does not."""
+    asked = one(
+        [A, B, C, D, E],
+        scores(ab=HIGH, ac=HIGH, ad=HIGH, bc=HIGH, bd=HIGH, cd=HIGH, de=HIGH),
+    )
+
+    assert asked.members == (A, B, C, D)
+    assert asked.chain == 1  # E, which the chain would have walked into it
+
+
+def test_a_stack_a_chain_would_draw_the_same_way_has_no_chain_to_price() -> None:
+    assert one([A, B, C], scores(bc=HIGH)).chain == 0
+
+
+def test_a_chain_that_breaks_inside_the_stack_and_walks_on_still_counts() -> None:
+    """The sharpest case there is, and the one an anchor on the first member scores
+    zero. D joins as two of three, which is the softening earning its keep; single
+    linkage breaks at C and then chains E in from D. The chain does cross a
+    boundary the settled rule drew, so the count has to see it."""
+    points = scores(ab=HIGH, ac=HIGH, bc=HIGH, ad=HIGH, bd=HIGH, cd=LOW, de=HIGH)
+    asked = one([A, B, C, D, E], points)
+
+    assert asked.members == (A, B, C, D)
+    assert label.link([A, B, C, D, E], points, joins=label.neighbour) == [
+        [A, B, C],
+        [D, E],
+    ]
+    assert asked.chain == 1  # E, chained on from D after the break at C
+
+
+def test_a_chain_that_only_cuts_the_stack_up_prices_nothing() -> None:
+    """The rules disagree the other way about: D joins as two of three and single
+    linkage stops at the frame before it with nothing left to walk. Nothing crosses
+    a boundary, so there is nothing for round two to price."""
+    asked = one([A, B, C, D], scores(ab=HIGH, ac=HIGH, ad=HIGH, bc=HIGH, bd=HIGH, cd=LOW))
+
+    assert asked.members == (A, B, C, D)
+    assert asked.chain == 0
+
+
+def test_a_chain_reaching_the_frames_before_the_stack_counts_too() -> None:
+    """A boundary is a boundary whichever side of the stack it sits on: a chain that
+    drags in what came before is the same failure as one that drags in what came
+    after. D agrees with only one of the three frames before it, so the settled rule
+    starts a stack there and the chain walks the whole run into one."""
+    points = scores(ab=HIGH, ac=HIGH, bc=HIGH, ad=LOW, bd=LOW, cd=HIGH, de=HIGH)
+    asked = ask([A, B, C, D, E], points)
+
+    assert label.link([A, B, C, D, E], points, joins=label.neighbour) == [
+        [A, B, C, D, E]
+    ]
+    assert [question.members for question in asked] == [(A, B, C), (D, E)]
+    assert asked[0].chain == 2  # D and E, after it
+    assert asked[1].chain == 3  # A, B and C, before it
+
+
+def test_a_set_an_earlier_round_answered_is_not_asked_again() -> None:
+    settled = Question(camera="Lumix", members=(A, B), before=(), after=(), margin=0)
+    fresh = Question(camera="Lumix", members=(C, D), before=(), after=(), margin=0)
+
+    assert label.unanswered([settled, fresh], {label.key(settled.members)}) == [fresh]
+
+
+def test_a_stack_that_has_grown_a_frame_is_a_question_the_reader_has_not_seen() -> None:
+    """The sets are keyed on the stack as drawn, and round two cuts the runs with a
+    different rule. A stack that has gained a member is a different claim, so
+    dropping it because it overlaps one already answered would drop the question."""
+    grown = Question(camera="Lumix", members=(A, B, C), before=(), after=(), margin=0)
+
+    assert label.unanswered([grown], {label.key((A, B))}) == [grown]
+
+
 # --- spreading the reader's time -----------------------------------------
 
 
-def asking(camera: str, margin: int, seed: str) -> Question:
+def asking(camera: str, margin: int, seed: str, chain: int = 0) -> Question:
     return Question(
-        camera=camera, members=(sha_of(seed),), before=(), after=(), margin=margin
+        camera=camera,
+        members=(sha_of(seed),),
+        before=(),
+        after=(),
+        margin=margin,
+        chain=chain,
     )
 
 
@@ -225,6 +331,36 @@ def test_the_least_decisive_sets_come_first() -> None:
     early = asking("Lumix", 1, "b")
 
     assert label.spread([late, early], 2) == [early, late]
+
+
+def test_the_sets_a_chain_would_walk_through_come_before_them() -> None:
+    """The margin cannot rank round two's question and that is why the chain leads
+    it: a run single linkage walks straight through can sit hundreds of points clear
+    of the line at every boundary it crosses, and the distance alone would rank it
+    last."""
+    walked = asking("Lumix", HIGH, "a", chain=3)
+    indecisive = asking("Lumix", 0, "b")
+
+    assert label.spread([indecisive, walked], 2) == [walked, indecisive]
+
+
+def test_a_longer_walk_comes_before_a_shorter_one() -> None:
+    far = asking("Lumix", 9, "a", chain=5)
+    near = asking("Lumix", 0, "b", chain=1)
+
+    assert label.spread([near, far], 2) == [far, near]
+
+
+def test_the_camera_spread_survives_the_chain_leading_the_ranking() -> None:
+    """A rule calibrated on the body the operator shoots most must not quietly
+    misbehave on the other four, whichever question the round is asking."""
+    lumix = [asking("Lumix", 0, seed, chain=walk) for walk, seed in zip((4, 3, 2), "abc")]
+    sony = [asking("Sony", 0, "d", chain=1)]
+
+    picked = label.spread([*lumix, *sony], 4)
+
+    assert {question.camera for question in picked} == {"Lumix", "Sony"}
+    assert picked[1] == sony[0]
 
 
 def test_the_sample_spans_more_than_one_camera() -> None:
@@ -295,10 +431,21 @@ ASKED = Question(
     camera="Lumix", members=(A, B), before=(), after=((C, 3), (D, 9)), margin=2
 )
 
+OTHER = Question(camera="Sony", members=(C, D), before=(), after=(), margin=0)
+
 
 def given(conn, **marks) -> None:
     label.record(
-        conn, ASKED, **{"shown": 1, "evicted": (), "included": (), "unsure": False, **marks}
+        conn,
+        ASKED,
+        **{
+            "shown": 1,
+            "evicted": (),
+            "included": (),
+            "unsure": False,
+            "round": label.ROUND,
+            **marks,
+        },
     )
 
 
@@ -340,15 +487,44 @@ def test_an_answer_records_the_stack_it_was_about() -> None:
     assert stored["camera"] == "Lumix"
 
 
+def test_an_answer_records_which_round_asked_it(answers) -> None:
+    """Round two's answers are a check on the setting round one chose, so an answer
+    that did not say which round asked it could not be told from the evidence it is
+    checking."""
+    given(answers, round=2)
+
+    assert label.answers(answers)[label.key((A, B))]["round"] == 2
+
+
+def test_the_counter_reads_the_round_in_hand(answers) -> None:
+    """"How many more are useful" is a question about this sitting, and an earlier
+    round's answers are not in the sample at all."""
+    given(answers, round=1)
+
+    assert label.answers(answers, 2) == {}
+    assert len(label.answers(answers, 1)) == 1
+    assert len(label.answers(answers)) == 1  # every round, which is what the report reads
+
+
+def test_only_an_earlier_round_keeps_a_set_out_of_the_sample(answers) -> None:
+    """An answer given in the round in hand comes back with its set so it can be
+    revised; a set an earlier round settled is a question already answered."""
+    given(answers, round=1)
+    label.record(answers, OTHER, shown=1, evicted=(), included=(), unsure=False, round=2)
+
+    assert label.answered_before(answers, 2) == {label.key((A, B))}
+    assert label.answered_before(answers, 1) == set()
+
+
 def test_an_answer_records_which_frames_outside_the_stack_were_on_screen() -> None:
     """Ticket 34 turns on this: `accept` says the frames the reader was shown are
     right, and never that the stack is complete. A strictness that pulls in a
     frame they never saw is not contradicting them."""
     conn = label.store(Path(":memory:"))
     try:
-        label.record(conn, ASKED, shown=1, evicted=(), included=(), unsure=False)
+        given(conn, shown=1)
         narrow = label.answers(conn)[label.key((A, B))]["surrounding"]
-        label.record(conn, ASKED, shown=2, evicted=(), included=(), unsure=False)
+        given(conn, shown=2)
         wide = label.answers(conn)[label.key((A, B))]["surrounding"]
     finally:
         conn.close()
@@ -429,9 +605,69 @@ def test_answers_from_before_the_view_could_widen_are_carried_over(tmp_path: Pat
     assert carried[label.key((A, B))]["surrounding"] == [C, D]
     assert carried[label.key((A, B))]["verdict"] == "merge"
     assert carried[label.key((A, B))]["included"] == [C]
+    assert carried[label.key((A, B))]["round"] == 1
     # Nothing either side of it, which is a real state and not a missing one.
     assert carried[label.key((D, E))]["surrounding"] == []
     assert carried[label.key((D, E))]["verdict"] == "accept"
+
+
+def roundless(path: Path, rows: list[tuple]) -> None:
+    """A labels file in the shape written before there was a second round to name."""
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE answer (members TEXT PRIMARY KEY, camera TEXT, surrounding TEXT,"
+        " margin INTEGER, verdict TEXT, evicted TEXT, included TEXT, answered_at TEXT)"
+    )
+    old.executemany("INSERT INTO answer VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    old.commit()
+    old.close()
+
+
+def test_answers_written_before_rounds_existed_are_round_one(tmp_path: Path) -> None:
+    """Exact rather than a guess, like the widening carry-over: round one is all
+    that had run when the column did not exist. So the reader is dealt round two
+    without re-labelling an evening of sets to say which round they were."""
+    path = tmp_path / "labels.sqlite3"
+    roundless(
+        path,
+        [(label.key((A, B)), "Lumix", f'["{C}"]', 2, "accept", "[]", "[]", "2026-08-10")],
+    )
+
+    conn = label.store(path)
+    try:
+        carried = label.answers(conn)
+        # And they are what round two will not ask again.
+        settled = label.answered_before(conn, 2)
+    finally:
+        conn.close()
+
+    assert carried[label.key((A, B))]["round"] == 1
+    assert carried[label.key((A, B))]["surrounding"] == [C]
+    assert settled == {label.key((A, B))}
+
+
+def test_naming_the_round_happens_once_and_a_second_open_leaves_it_alone(
+    tmp_path: Path,
+) -> None:
+    """The column is added once. A second open must not stamp round one over an
+    answer given since -- which is the round in hand's whole evening."""
+    path = tmp_path / "labels.sqlite3"
+    roundless(
+        path, [(label.key((A, B)), "Lumix", "[]", 2, "accept", "[]", "[]", "2026-08-10")]
+    )
+
+    first = label.store(path)
+    label.record(first, OTHER, shown=1, evicted=(), included=(), unsure=False, round=2)
+    first.close()
+
+    conn = label.store(path)
+    try:
+        stored = label.answers(conn)
+    finally:
+        conn.close()
+
+    assert stored[label.key((A, B))]["round"] == 1
+    assert stored[label.key((C, D))]["round"] == 2
 
 
 def test_carrying_over_happens_once_and_a_second_open_changes_nothing(tmp_path: Path) -> None:

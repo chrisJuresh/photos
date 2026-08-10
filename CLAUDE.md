@@ -230,13 +230,26 @@ shooting ended and that the clock is telling the truth; a frame 23 hours away th
 the same photograph is a wrong timestamp, and nothing else on the screen could show that. **What an
 answer says is bounded by what was on screen for it**, which is stored per answer and is the
 column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
-that the stack is complete. Sets are drawn from wherever the Match is least decisive and
-dealt out a camera at a time; `STRICTNESS` there is a provisional line to disagree with and
-not the answer. One run is one of ADR 0003's two rounds of thirty, and the second round is a
-second run at whatever the first round moved the line to — `--strictness` and `--sets` say so.
-Answers go to a `labels.sqlite3` of its own beside the catalog, **never `state.sqlite3`**, and
-it is not a migrated database because a disposable table has no business in the shipped
-schema. Frames come from the substrate tree. Its one test is the sampling.
+that the stack is complete. Answers go to a `labels.sqlite3` of its own beside the catalog,
+**never `state.sqlite3`**, and it is not a migrated database because a disposable table has no
+business in the shipped schema. Frames come from the substrate tree. Its one test is the
+sampling.
+
+**One run is one of ADR 0003's two rounds of thirty, and which round it is decides which sets
+are dealt.** `--strictness`, `--linkage`, `--sets` and `--round` say so, and their defaults are
+round two: strictness 20 with *matches most members*, which is what round one settled rather
+than what the ADR argued from. Round one ranked its sets by how little the Match committed to
+them; round two leads on **the chain** — how many frames single linkage would drag across a
+boundary the settled rule drew, either side of the stack and counted over every member rather
+than the first, which is where a pan or a walk between subjects shows up — and breaks ties on
+that margin. Measured over this catalog: 20 of round two's 30 sets have a chain to price, one
+of them dragging 48 frames, at margins up to 244 points where the least-decisive ranking would
+never have looked. That population is the one round one holds none of and the
+single question standing between neighbour linkage and the default; the reader is not told which
+sets those are, because that would prime the rejection the round exists to observe. Both rounds
+are still dealt out a camera at a time and in the same deterministic order, **a set an earlier
+round answered is not asked again**, and the counter counts the round in hand. Round one's
+existing answers carry over as round one with nothing re-labelled.
 
 ```bash
 python -m harness.label --open
@@ -258,10 +271,16 @@ harness's window. The frame past the end of the run is separated out for the sam
 in reverse: no strictness reaches it, so what the reader said about it is evidence about
 the 3600s fence. Confident labels are scored apart from the not-sure ones, and every
 setting **names the labelled cases it gets wrong** rather than only counting them.
-`--precision` moves the floor and `--linkage` narrows which rules are in the running, so a
-decision to set one aside is a command rather than an argument made afterwards. It reads
+**The rounds are scored apart and never pooled**: the earliest round is the evidence a
+setting is chosen from, every later one is replayed against that choice without voting on
+it — pooling them would let the check recommend the thing it is checking — and round two's
+own section prices the chain at the chosen strictness, which is the comparison round one's
+labels could not make. `--precision` moves the floor and `--linkage` narrows which rules are
+in the running, so a decision to set one aside is a command rather than an argument made
+afterwards. It reads
 the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate and never touches
-`G:`; it writes nothing at all. The ceiling is not a knob: it is the fence the Match rows
+`G:`; it writes no label and no report, and the only thing it can put in the labels file is
+the round-one stamp the harness would have written anyway. The ceiling is not a knob: it is the fence the Match rows
 were computed behind, so cutting the runs anywhere else would replay the labels over pairs
 that were never checked.
 

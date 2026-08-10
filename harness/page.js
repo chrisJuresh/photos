@@ -21,6 +21,15 @@ const marks = new Map(); // index -> { out: Set, in: Set }
 const beside = (set) => Math.max(set.before.length, set.after.length);
 const showing = (set) => Math.min(wanted, beside(set));
 
+// The reader's words for the linkage rules, not the map keys. ADR 0003 and
+// CONTEXT.md call the middle one "matches most members" everywhere it is written
+// down, and this line is the one place the operator reads it.
+const LINKAGES = {
+  complete: "complete",
+  majority: "matches most members",
+  neighbour: "neighbour",
+};
+
 const VERDICTS = {
   accept: "accepted as drawn",
   split: "holds a frame that does not belong",
@@ -210,7 +219,8 @@ function draw() {
   about.replaceChildren(
     `set ${at + 1} of ${sample.sets.length} · ${set.members.length} frames · `,
     strong(set.camera || "unnamed camera"),
-    ` · ${set.margin} points from the provisional line of ${sample.strictness} · `,
+    ` · ${set.margin} points from the line of ${sample.strictness}` +
+      ` under ${LINKAGES[sample.linkage] || sample.linkage} linkage · `,
     // Each side counted separately, because they run out separately: a stack
     // five frames from the end of its run shows five after it however far the
     // view is widened, and "5 of 5 after" says the run ended where "showing 30
@@ -254,9 +264,15 @@ function ended(set, shown) {
   return ` · the run ends ${ends.map(([side, said]) => `${side}: ${said}`).join(", ")}`;
 }
 
+// The count is the round in hand and says so. An earlier round's answers are not
+// in this sample at all -- its sets are not asked again -- so a count over every
+// answer ever given would say "thirty more are useful" to a reader who has just
+// sat down to thirty new ones.
 function countUp() {
   const left = Math.max(sample.useful - sample.given, 0);
   count.replaceChildren(
+    strong(`round ${sample.round}`),
+    " · ",
     strong(`${sample.given}`),
     sample.given === 1 ? " judgement given · about " : " judgements given · about ",
     strong(`${left}`),

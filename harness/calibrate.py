@@ -44,12 +44,25 @@ reads as the stack as drawn, so the grey block is context and never a target.
 cases it gets wrong and the pair that bound each one, rather than only counting
 them.
 
+**The rounds are scored apart.** ADR 0003 asks for two, and the second is a check
+rather than more of the first: the earliest round's labels are the evidence a
+setting is chosen from, and every later round is replayed against that choice
+without voting on it. Pooling them would let the check recommend the thing it is
+checking, and an agreement between the two would then be arithmetic rather than a
+finding. Round two is also drawn where a *chain* crosses a boundary the settled
+rule drew -- the population round one held none of -- so it is the round that can
+finally price the rule ADR 0003 declined by argument. See `rounds` and `check`.
+
     python -m harness.calibrate
 
 It reads the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate
-and never touches `G:`. It writes nothing at all: its output is a recommendation
-for `docs/adr/0003-stack-on-verified-match.md`, which a person writes down. It
-goes with the rest of `harness/` when the grid ticket lands.
+and never touches `G:`. It writes no label and no report -- its output is a
+recommendation for `docs/adr/0003-stack-on-verified-match.md`, which a person
+writes down. The one thing it can put in the labels file is the round-one stamp
+`harness.label._carry_over` would have written anyway, because it opens that file
+through the same `store`: reading answers whose round is not recorded yet is what
+would otherwise be impossible. It goes with the rest of `harness/` when the grid
+ticket lands.
 """
 
 from __future__ import annotations
@@ -85,38 +98,12 @@ SWEEP = (1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 60, 100)
 PRECISION = 0.95
 
 
-def _majority(
-    holding: Sequence[str], frame: str, points: Points, strictness: int
-) -> bool:
-    """"Matches most members" -- the softening ADR 0003 leaves open.
-
-    Strictly most, so a frame that agrees with half of a stack does not join it:
-    a tie is not most, and precision is the constraint that breaks ties here.
-    """
-    agreed = sum(1 for member in holding if label.match(points, member, frame) >= strictness)
-    return agreed * 2 > len(holding)
-
-
-def _neighbour(
-    holding: Sequence[str], frame: str, points: Points, strictness: int
-) -> bool:
-    """Single linkage along the run: a frame joins if it agrees with the one before.
-
-    The weakest rule there is, and the one ADR 0003 rejected by argument. It is
-    replayed rather than assumed wrong, because "a chain of frames each like its
-    predecessor" is what a slow pan is, and whether that happens in this library
-    is a question for the labels.
-    """
-    return label.match(points, holding[-1], frame) >= strictness
-
-
-# `complete` is `harness.label`'s own, so the rule the report calls complete
-# linkage is the rule the harness drew the sets with rather than a second copy.
-LINKAGE = {
-    "complete": label.complete,
-    "majority": _majority,
-    "neighbour": _neighbour,
-}
+# All three rules are `harness.label`'s own, so the rule this report calls a name
+# is the rule the harness draws with under that name rather than a second copy of
+# it. Round two is drawn against `neighbour` in particular -- see `Question.chain`
+# -- and a report that scored a different chain from the one the sampler sought
+# would price the wrong thing.
+LINKAGE = label.LINKAGE
 
 
 # --- reading a label ----------------------------------------------------------
@@ -145,6 +132,10 @@ class Case:
     apart: frozenset[str]
     beyond_in: frozenset[str]
     beyond_out: frozenset[str]
+    # Which of ADR 0003's rounds asked. The report never pools them: the earliest
+    # round is the evidence a setting is chosen from and every later one is a check
+    # on that choice, and a check that voted would be checking itself.
+    round: int = 1
 
     @property
     def confident(self) -> bool:
@@ -171,6 +162,7 @@ def case(answer: dict, run: Sequence[str]) -> Case:
         apart=frozenset(apart & inside),
         beyond_in=frozenset(belong - inside),
         beyond_out=frozenset(apart - inside),
+        round=answer["round"],
     )
 
 
@@ -208,6 +200,26 @@ def confident(cases: Iterable[Case]) -> list[Case]:
 
 def grey(cases: Iterable[Case]) -> list[Case]:
     return [subject for subject in cases if not subject.confident]
+
+
+def rounds(cases: Iterable[Case]) -> dict[int, list[Case]]:
+    """The labels by the round that asked for them, earliest first.
+
+    **The split is the whole of ADR 0003's second round.** The earliest round is
+    the evidence: its labels are what the sweep is scored over and what `choose`
+    picks a setting from. Every later round is a *check* on that pick, and a check
+    that was pooled into the evidence would be voting for the thing it is
+    checking -- the setting would be recommended partly by the labels drawn to
+    test it, and an agreement between the two would be arithmetic rather than a
+    finding.
+
+    Earliest and not "round 1", so a labels file holding only a later round still
+    has evidence to be read from and says which round it is.
+    """
+    split: dict[int, list[Case]] = {}
+    for subject in cases:
+        split.setdefault(subject.round, []).append(subject)
+    return dict(sorted(split.items()))
 
 
 # --- scoring a setting --------------------------------------------------------
@@ -624,6 +636,105 @@ def evidence(read: Sequence[Case], points: Points) -> list[str]:
     ]
 
 
+def made_of(subjects: Sequence[Case], points: Points) -> list[str]:
+    """What one round's labels are made of, before any setting is scored on them.
+
+    Per round and never pooled, for `rounds`' reason: the ceilings a round carries
+    are facts about the sets *it* was dealt, and a round drawn to break a chaining
+    rule is made of different sets from the round that chose the setting. Averaging
+    the two would describe neither.
+    """
+    return [
+        f"scope     {sum(len(pairs(subject)) for subject in subjects)} labelled pairs"
+        f" over {len({subject.run for subject in subjects})} runs, each one inside the"
+        " frames the reader was shown",
+        *evidence(subjects, points),
+        *fence(subjects),
+    ]
+
+
+def chained(scored: dict[Setting, Tally], chosen: Setting) -> list[str]:
+    """What a later round says about the rule ADR 0003 declined without measuring it.
+
+    This is the comparison round two exists for. Round one recommended neighbour
+    linkage and the ADR declined it on the evidence's shape rather than on its
+    numbers: the runs where a chain does its work carried no frame the reader
+    pushed out, so a chain that walks a whole run into one stack scored perfectly.
+    Round two's sets are drawn where a chain crosses a boundary the settled rule
+    drew, so here the chain can finally be wrong.
+    """
+    lines = [
+        f"\nthe chain, at strictness {chosen.strictness} -- what these sets were drawn"
+        " to price"
+    ]
+    for linkage in LINKAGE:
+        tally = scored.get(Setting(chosen.strictness, linkage))
+        if tally is None:
+            continue
+        lines.append(
+            f"  {linkage:<10} precision {percent(tally.precision)}   "
+            f"recall {percent(tally.recall)}   "
+            f"{tally.wrongly_together} wrongly stacked of"
+            f" {tally.together + tally.wrongly_together}"
+        )
+    chain, settled = (
+        scored.get(Setting(chosen.strictness, "neighbour")),
+        scored.get(chosen),
+    )
+    if chain is None or settled is None:
+        return lines
+    if beats(chain, settled):
+        lines.append(
+            f"  the chain still beats {chosen.linkage} linkage on both counts, on the"
+            " sets drawn to break it. Round one could not price it and this round"
+            " could: that is a reason to revisit the default rather than a tie."
+        )
+    else:
+        lines.append(
+            f"  the chain does not beat {chosen.linkage} linkage here, which is the"
+            " measurement round one could not make: ADR 0003 declined it by argument"
+            " and these sets were drawn where the argument said it would fail."
+        )
+    return lines
+
+
+def check(number: int, subjects: Sequence[Case], points: Points, chosen: Setting) -> list[str]:
+    """One later round, read as a check on the setting and never as evidence for it.
+
+    The setting is not re-chosen here. What is asked is the narrower question a
+    check can answer: does the setting the earlier round picked still reproduce
+    what the reader says, on sets it did not pick from -- and does the rule ADR
+    0003 declined go wrong on sets drawn to make it.
+
+    **`--linkage` does not narrow this.** Narrowing the running says which rules
+    may be *chosen*, and the rule a reader set aside is exactly the one round two
+    exists to price -- the ADR's own recorded command excludes the chain, and a
+    check that took that as licence not to score it would drop the round's whole
+    point. So every rule in `LINKAGE` is scored here, at the one strictness that
+    was chosen.
+    """
+    sure, band = confident(subjects), grey(subjects)
+    lines = [
+        f"\nround {number}, a check on {chosen.linkage} linkage at strictness"
+        f" {chosen.strictness} -- scored apart and never pooled into the evidence above",
+        f"labels    {len(subjects)} answers -- {len(sure)} confident,"
+        f" {len(band)} not sure",
+        *made_of(subjects, points),
+    ]
+    if not sure:
+        return [*lines, "\n  no confident answer in this round, so nothing to check with"]
+    scored = sweep(sure, points, (chosen.strictness,), tuple(LINKAGE))
+    held = scored[chosen]
+    lines.append(
+        f"\nheld      precision {percent(held.precision)}, recall"
+        f" {percent(held.recall)}, {len(held.wrong)}/{len(sure)} cases wrong"
+    )
+    lines += chained(scored, chosen)
+    lines.append("\nwhere the chosen setting goes wrong on this round's labels")
+    lines += diagnosis({chosen: held})
+    return lines
+
+
 def report(
     read: Sequence[Case],
     points: Points,
@@ -632,19 +743,28 @@ def report(
     floor: float = PRECISION,
     linkages: Sequence[str] = tuple(LINKAGE),
 ) -> Setting | None:
-    sure, band = confident(read), grey(read)
-    print(f"labels    {len(read)} answers -- {len(sure)} confident, {len(band)} not sure")
+    split = rounds(read)
+    print(f"labels    {len(read)} answers over {len(split)} round(s):")
+    for number, subjects in split.items():
+        print(
+            f"          round {number}   {len(subjects)} answers --"
+            f" {len(confident(subjects))} confident,"
+            f" {len(grey(subjects))} not sure"
+        )
     if orphans:
         print(f"orphans   {len(orphans)} answers whose frames are in no run any more:")
         for members in orphans:
             print(f"          {members}")
-    scoped = sum(len(pairs(subject)) for subject in read)
-    print(
-        f"scope     {scoped} labelled pairs over {len({s.run for s in read})} runs, "
-        "each one inside the frames the reader was shown"
-    )
-    print(*evidence(read, points), sep="\n")
-    print(*fence(read), sep="\n")
+    if not split:
+        return None
+
+    # The earliest round is the evidence and every later one is a check on what it
+    # chose. See `rounds` for why that is a split and not a preference.
+    first, *later = split
+    evidently = split[first]
+    sure, band = confident(evidently), grey(evidently)
+    print(f"\nround {first}, the evidence the setting is chosen from")
+    print(*made_of(evidently, points), sep="\n")
 
     scored = sweep(sure, points, strictnesses, linkages)
     print("\nconfident labels")
@@ -661,8 +781,9 @@ def report(
     chosen = choose(scored, floor)
     if chosen is None:
         print(
-            f"\nchosen    nothing: no setting reaches {floor:.0%} precision on these"
-            " labels, so there is no recommendation to make"
+            f"\nchosen    nothing: no setting reaches {floor:.0%} precision on round"
+            f" {first}'s labels, so there is no recommendation to make and nothing for a"
+            " later round to check"
         )
         return None
     best = scored[chosen]
@@ -682,6 +803,9 @@ def report(
 
     print("\nwhere each setting goes wrong, over the confident labels")
     print(*diagnosis(scored), sep="\n")
+
+    for number in later:
+        print(*check(number, split[number], points, chosen), sep="\n")
     return chosen
 
 

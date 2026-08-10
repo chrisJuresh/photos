@@ -46,6 +46,7 @@ def answer(
     included=(),
     verdict="accept",
     camera="Lumix",
+    round=1,
 ) -> dict:
     """One row of `labels.sqlite3`, in the shape `label.answers` hands it over."""
     return {
@@ -55,6 +56,7 @@ def answer(
         "evicted": list(evicted),
         "included": list(included),
         "surrounding": list(surrounding),
+        "round": round,
     }
 
 
@@ -248,6 +250,68 @@ def test_the_grey_band_is_scored_apart_from_the_labels_the_reader_was_sure_of() 
     assert grey.confident is False
     assert [case.name for case in calibrate.confident([sure, grey])] == [sure.name]
     assert [case.name for case in calibrate.grey([sure, grey])] == [grey.name]
+
+
+# --- the two rounds -----------------------------------------------------------
+
+
+def test_a_label_says_which_round_asked_it() -> None:
+    case = calibrate.case(answer([B, C], round=2), (A, B, C))
+
+    assert case.round == 2
+
+
+def test_the_rounds_are_split_earliest_first_and_never_pooled() -> None:
+    """ADR 0003's second round is a check on the setting the first one chose, and a
+    check pooled into the evidence would be voting for the thing it is checking."""
+    first = calibrate.case(answer([B, C], round=1), (A, B, C))
+    second = calibrate.case(answer([A, B], round=2), (A, B, C))
+    third = calibrate.case(answer([A, C], round=2), (A, B, C))
+
+    split = calibrate.rounds([second, first, third])
+
+    assert list(split) == [1, 2]
+    assert [case.name for case in split[1]] == [first.name]
+    assert len(split[2]) == 2
+
+
+def test_a_labels_file_holding_only_a_later_round_still_has_evidence_in_it() -> None:
+    """Earliest and not "round 1": a file that starts at round two says which round
+    it is rather than reporting no evidence at all."""
+    only = calibrate.case(answer([B, C], round=2), (A, B, C))
+
+    assert list(calibrate.rounds([only])) == [2]
+
+
+def test_the_check_prices_the_chain_even_when_the_run_set_it_aside() -> None:
+    """`--linkage` says which rules may be chosen, and ADR 0003's own recorded
+    command excludes the chain. A check that read that as licence not to score it
+    would drop round two's whole point."""
+    case = calibrate.case(answer([B, C], surrounding=[A, D], round=2), (A, B, C, D))
+    points = scores(ab=LOW, ac=LOW, ad=LOW, bc=HIGH, bd=LOW, cd=HIGH)
+
+    said = "\n".join(
+        calibrate.check(2, [case], points, calibrate.Setting(STRICT, "majority"))
+    )
+
+    assert "neighbour" in said
+    assert "does not beat majority linkage here" in said
+
+
+def test_the_chain_is_priced_against_the_rule_the_setting_chose() -> None:
+    """What round two exists for. On these labels the chain reaches a frame the
+    reader pushed out and "matches most members" does not, so it no longer beats it
+    -- which is the measurement round one could not make."""
+    case = calibrate.case(answer([B, C], surrounding=[A, D]), (A, B, C, D))
+    points = scores(ab=LOW, ac=LOW, ad=LOW, bc=HIGH, bd=LOW, cd=HIGH)
+    chosen = calibrate.Setting(STRICT, "majority")
+    scored = calibrate.sweep([case], points, (STRICT,), tuple(calibrate.LINKAGE))
+
+    said = "\n".join(calibrate.chained(scored, chosen))
+
+    assert scored[chosen].wrongly_together == 0
+    assert scored[calibrate.Setting(STRICT, "neighbour")].wrongly_together == 2
+    assert "does not beat majority linkage here" in said
 
 
 # --- choosing --------------------------------------------------------------
