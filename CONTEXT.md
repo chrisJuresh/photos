@@ -111,11 +111,13 @@ says it and should; everywhere the thing itself is meant, it is a fingerprint.
 _Avoid_: signature, descriptor, hash, match
 
 **Linkage**:
-How much has to match before frames are one stack. *Complete* — every pair inside the
-stack — is the default, and it is what makes "two unrelated photographs never share a
-stack" structurally true rather than merely likely. *Neighbour* asks only that each
-frame match the one before it, which is cheaper and lets a stack walk from one subject
-to another in small steps.
+How much has to match before frames are one stack. *Matches most members* — strictly more
+than half of them, so a tie is not most — is the default, settled from the reader's labels
+in `docs/adr/0003`. *Complete* is every pair inside the stack, which makes "two unrelated
+photographs never share a stack" structurally true rather than merely likely, and cannot
+express a burst holding one pair the geometry agrees nothing about. *Neighbour* asks only
+that each frame match the one before it, which is cheaper and lets a stack walk from one
+subject to another in small steps — measured and rejected, not merely feared.
 _Avoid_: clustering, chaining, closure
 
 **Window**:

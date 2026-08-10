@@ -298,6 +298,27 @@ def test_the_check_prices_the_chain_even_when_the_run_set_it_aside() -> None:
     assert "does not beat majority linkage here" in said
 
 
+def test_the_check_names_the_cases_each_rule_gets_wrong_and_not_only_the_chosen_one() -> None:
+    """Counting the chain's mistakes says a chain is worse; naming them says which
+    run it walked out of. Round two is drawn where a chain crosses a boundary, so
+    the case it crosses in is the finding and the count is only its size.
+
+    Here the chosen rule reproduces every label and only the chain is wrong, so a
+    check that named the chosen rule's cases alone would name nothing at all."""
+    case = calibrate.case(answer([B, C], surrounding=[A, D], round=2), (A, B, C, D))
+    points = scores(ab=LOW, ac=LOW, ad=LOW, bc=HIGH, bd=LOW, cd=HIGH)
+
+    said = "\n".join(
+        calibrate.check(2, [case], points, calibrate.Setting(STRICT, "majority"))
+    )
+    chain = said.split(f"neighbour at {STRICT}")[-1]
+
+    assert f"neighbour at {STRICT}" in said
+    assert case.name in chain
+    assert "2 wrongly stacked, strongest at" in chain
+    assert "nothing -- it reproduces every label it was shown" in said
+
+
 def test_the_chain_is_priced_against_the_rule_the_setting_chose() -> None:
     """What round two exists for. On these labels the chain reaches a frame the
     reader pushed out and "matches most members" does not, so it no longer beats it

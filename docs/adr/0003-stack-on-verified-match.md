@@ -148,7 +148,8 @@ after re-running with the first round's answers — checks the work.
 
 **Strictness 20, linkage "matches most members".** Recorded 2026-08-10 from round one of
 the labelling harness — thirty sets, every one answered with certainty, replayed by
-`harness/calibrate.py`. The command that returns this setting is:
+`harness/calibrate.py` — and confirmed the same day by round two, which is the last
+section here. The command that returns this setting is:
 
 ```bash
 python -m harness.calibrate --linkage complete,majority
@@ -230,18 +231,91 @@ a whole run into one stack scores perfectly on them. Complete and majority linka
 precision a property of the stack; a chain does not, and one round of labels that cannot
 see the difference is not enough to make it the default.
 
+Round two was drawn to see it, and did — "What round two settled" below.
+
 ### The fence is not what is losing frames
 
 60 frames past the end of a run were drawn beside a set and left out, and **none was
 called a member**. The 3600s window's value is untouched by this round.
 
-### What round two is for
+### What round two settled
 
-This ADR asks for two rounds and the second is the check. It should deliberately sample
-runs where a chain would cross a scene change — a pan, a walk between subjects — because
-round one holds none, and that is the single question standing between neighbour linkage
-and the default. Round one drew its sets at a provisional strictness of 20 with complete
-linkage; round two draws at 20 with *matches most members*.
+**The default stands: strictness 20 with "matches most members".** Recorded 2026-08-10
+from round two of the labelling harness — thirty more sets, drawn at that setting, every
+one answered with certainty. The command is the same one round one's setting is recorded
+from, now reading a labels file that holds both rounds and scoring the second apart:
+
+```bash
+python -m harness.calibrate --linkage complete,majority
+```
+
+Round two is a check and never evidence. The setting is not re-chosen on its labels: the
+report picks from the earliest round and replays every later one against that pick, so an
+agreement between the two is a finding rather than arithmetic. What follows is that
+replay, and every comparison in it is still scoped to the frames that were on screen when
+the answer was given.
+
+Round two's sets are the population round one had none of: 20 of its 30 carry a **chain**
+to price — frames single linkage would drag across a boundary *matches most members* drew,
+one of them dragging 48. 898 labelled pairs over 19 runs, 715 the reader kept together and
+183 they pushed apart. The reader was not told which sets those were, so the rejections
+below are observed and not prompted.
+
+| linkage | precision | recall | wrongly stacked | cases with a disagreement |
+|---|---|---|---|---|
+| complete | 90.1% | 44.3% | 35 of 352 | 18/30 |
+| **majority** | **96.5%** | **85.6%** | **22 of 634** | **15/30** |
+| neighbour | 88.8% | 93.4% | 84 of 752 | 15/30 |
+
+**"Matches most members" clears the 95% floor on sets it was not chosen from**, at 96.5%,
+and the chain does not: 88.8%, six points under, spent on 7.8 points of recall.
+Precision is a floor and not a ranking, so the chain's better recall does not get to
+speak. The same holds at strictness 25, where round one's all-rules run recommends the
+chain: on round two's labels neighbour scores 92.1% precision there, so **the setting round
+one recommended does not clear its own floor on the sets drawn to test it.** The strictness
+is 20 because round one's evidence put it there — 25 falls under the floor on those labels
+too, at 94.9% — and round two agrees rather than decides: majority at 25 scores 92.5% here.
+
+### Which cases the chain gets wrong, and which the settled rule does
+
+Counting says the chain is worse; naming says where it went. Seven of round two's sets are
+stacked wrongly by neighbour linkage and got **entirely right** by *matches most members* —
+53 of the chain's 84 wrongly stacked pairs. **Every one of the seven is a set the round was
+drawn to find**: the chain column is how many frames single linkage drags across the
+boundary the settled rule drew, and none of these is zero.
+
+| case | chain | pairs the chain wrongly stacked | strongest |
+|---|---|---|---|
+| Panasonic DMC-GX80 77255b0e x9 | 47 | 3 | 70 |
+| Panasonic DMC-GX80 42383d08 x12 | 39 | 24 | 133 |
+| Panasonic DMC-GX80 89721cb9 x12 | 39 | 12 | 40 |
+| samsung SM-G950F fb0e1243 x2 | 8 | 2 | 64 |
+| samsung SM-A528B 965e000c x2 | 6 | 2 | 92 |
+| samsung SM-G950F 63f7e85d x4 | 6 | 8 | 101 |
+| SONY NEX-5N 85d1d298 x2 | 5 | 2 | 222 |
+
+This is the failure ADR 0003 declined the chain by argument for, measured: a chain walks a
+stack from one subject to another in small steps, and a rule that counts every member does
+not. The rest of the chain's errors are the settled rule's errors made larger — SONY NEX-5N
+01d7b54b x6 at 12 pairs against 9, 6bf2663b x8 at 18 against 12 — plus one pair scoring 109
+in Apple iPhone 5 4288780d x2 that all three rules stack and the reader pushed apart. That
+last set carries no chain at all, and every rule makes the same single mistake in it: it is
+the threshold that is wrong there, not the linkage.
+
+The settled rule is not clean, and its 22 wrongly stacked pairs sit in exactly those three
+cases: 01d7b54b (9, strongest at 176), 6bf2663b (12, at 125), 4288780d (1, at 109). Its
+misses are the shape round one already described — pairs the geometry agrees nothing about,
+which no strictness reaches: Panasonic DMC-GX80 464c7018 x25 (25 missed, weakest at 0
+points), samsung SM-A528B 86f3f49e x9 (19 at 0), Apple iPhone 7 Plus 5ab519c7 x6 (13 at 0),
+samsung SM-A528B d4385b8e x8 (8 at 0). `python -m harness.calibrate` prints every rule's
+wrong cases on this round, not only the chosen rule's.
+
+### The fence, checked a second time
+
+57 frames past the end of a run were drawn beside a set and left out, and **one was called
+a member** — Apple iPhone 6 Plus 25139d57 x3. One frame in the 118 shown over both rounds
+is the 3600s window's whole bill, so round one's finding survives: the fence is not what is
+losing frames, and its value is unchanged.
 
 ## What is still deliberately not settled here
 

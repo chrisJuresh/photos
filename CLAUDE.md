@@ -275,7 +275,8 @@ setting **names the labelled cases it gets wrong** rather than only counting the
 setting is chosen from, every later one is replayed against that choice without voting on
 it — pooling them would let the check recommend the thing it is checking — and round two's
 own section prices the chain at the chosen strictness, which is the comparison round one's
-labels could not make. `--precision` moves the floor and `--linkage` narrows which rules are
+labels could not make, naming the cases **every** rule gets wrong there and not only the
+chosen rule's. `--precision` moves the floor and `--linkage` narrows which rules are
 in the running, so a decision to set one aside is a command rather than an argument made
 afterwards. It reads
 the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate and never touches
@@ -288,12 +289,14 @@ that were never checked.
 python -m harness.calibrate
 ```
 
-Its output is `docs/adr/0003-stack-on-verified-match.md`'s "What the labels settled", and
-**the bare run above is not the command that returns what the ADR recorded.** Over all
-three rules it recommends *neighbour* linkage at 25 — the best recall clearing the floor —
-and the ADR declines it, because the runs where a chain does its work carry no frames the
-reader pushed out, so round one's labels cannot price its failure. The recorded default is
-strictness 20 with *matches most members*, and this is the run that returns it:
+Its output is `docs/adr/0003-stack-on-verified-match.md`'s "What the labels settled" and
+"What round two settled", and **the bare run above is not the command that returns what the
+ADR recorded.** Over all three rules it recommends *neighbour* linkage at 25 — the best
+recall clearing the floor on round one — and the ADR declines it, now with round two's
+measurement rather than round one's argument: on the sets drawn where a chain crosses a
+boundary, neighbour scores 88.8% precision at strictness 20 and 92.1% at 25, both under the
+floor. The recorded default is strictness 20 with *matches most members*, confirmed by that
+round at 96.5% precision, and this is the run that returns it:
 
 ```bash
 python -m harness.calibrate --linkage complete,majority

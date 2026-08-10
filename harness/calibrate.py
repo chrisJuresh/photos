@@ -706,6 +706,10 @@ def check(number: int, subjects: Sequence[Case], points: Points, chosen: Setting
     what the reader says, on sets it did not pick from -- and does the rule ADR
     0003 declined go wrong on sets drawn to make it.
 
+    **Every rule names the cases it gets wrong here, not only the chosen one.**
+    A count says a chain is worse; only the case says which run it walked out of,
+    and on sets drawn where a chain crosses a boundary that run *is* the finding.
+
     **`--linkage` does not narrow this.** Narrowing the running says which rules
     may be *chosen*, and the rule a reader set aside is exactly the one round two
     exists to price -- the ADR's own recorded command excludes the chain, and a
@@ -730,8 +734,10 @@ def check(number: int, subjects: Sequence[Case], points: Points, chosen: Setting
         f" {percent(held.recall)}, {len(held.wrong)}/{len(sure)} cases wrong"
     )
     lines += chained(scored, chosen)
-    lines.append("\nwhere the chosen setting goes wrong on this round's labels")
-    lines += diagnosis({chosen: held})
+    lines.append(
+        "\nwhere each rule goes wrong on this round's labels, at the chosen strictness"
+    )
+    lines += diagnosis(scored)
     return lines
 
 
