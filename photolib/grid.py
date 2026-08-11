@@ -37,7 +37,7 @@ small:
   * every page carries `total`, so the client can give the scrollbar its final
     length while it still holds only the first page. It is 230-400 ms whatever
     the filter, because a count has to visit every tile, so it is memoised per
-    filter set -- once per selection the reader makes, never once per page.
+    filter set -- once per view the reader makes, never once per page.
     Nothing in this process can make it stale, because no connection here
     writes; the one thing that can is a rebuild, and a rebuild clears it.
   * thumbnail URLs are content hashes, so `immutable` is honest and the browser
@@ -53,7 +53,7 @@ into one tile, so a page carries covers rather than frames and each one says how
 many it stands for. The two default sorts pay nothing for it beyond the tiles
 they read: a run is contiguous in `photo_sort` order, so a page collapses its
 own as it streams. The other eight cannot, and buy one grouping pass per
-selection instead. Which frame a stack is drawn as is `browse.cover` — the
+view instead. Which frame a stack is drawn as is `browse.cover` — the
 sharpest of the middle-exposure third — resolved from one read over the members
 of the stacks on the page and never materialised, because a filter applies
 before the grouping and can change what a stack holds.
@@ -236,10 +236,10 @@ def parse_kinds(values: list[str]) -> tuple[str, ...]:
     tokens = [token for token in tokens if token]
     if not tokens or any(token not in KINDS for token in tokens):
         raise BadRequest("kind")
-    selected = set(tokens)
-    if "image" in selected:
-        selected.update(DEFAULT_KINDS)
-    return tuple(sorted(selected))
+    kinds = set(tokens)
+    if "image" in kinds:
+        kinds.update(DEFAULT_KINDS)
+    return tuple(sorted(kinds))
 
 
 def parse_limit(values: list[str]) -> int:
@@ -253,7 +253,7 @@ def parse_limit(values: list[str]) -> int:
 
 
 def build_assignment(conn: sqlite3.Connection, query: browse.Query) -> tuple:
-    """Every stack of one selection as `(id, sort key, members)`, in order.
+    """Every stack of one view as `(id, sort key, members)`, in order.
 
     The id and the key are the *first* member's in this ordering: that is where
     the stack sits in it, and it is what a keyset cursor compares against. Which
@@ -418,9 +418,9 @@ def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int)
     it asked for — the alternative is splitting a burst across two pages.
 
     The cut is measured on where a tile sits and not on whether it may stack.
-    A selection holding nothing stackable — `dated=mtime`, say — has no run to
+    A view holding nothing stackable — `dated=mtime`, say — has no run to
     close, and a cut that only fired on stackable tiles would never fire and
-    serve the whole selection as one page.
+    serve the whole view as one page.
     """
     window = query.stack
     groups: list[list] = []  # the page's stacks, each its members' rows in order
@@ -472,7 +472,7 @@ def _assigned(
 
     The eight non-time sorts cannot stream: a stack's members are scattered
     through the ordering, so there is no run to collapse. `stacks` is every
-    stack in this sort's order, first member first, computed once per selection
+    stack in this sort's order, first member first, computed once per view
     — see `GridServer.assignment`. Paging is then a slice, and the cursor is
     found by walking to it rather than by looking it up, so a key that survived
     a round trip through the query string compares the way SQL would.
@@ -533,12 +533,12 @@ def page(
     order to give the scrollbar its final length on the first page instead of
     growing it under the reader on every page. It is carried rather than
     computed here: it costs 230-400 ms and it is the same number for every page
-    of one selection, so it is counted once per selection — see
+    of one view, so it is counted once per view — see
     `GridServer.total`.
 
     With stacking on the envelope echoes `stack`, the window it grouped at, and
     every photo gains `n`, its stack's size. It also carries `stacks`, how many
-    rows the whole selection collapses to: `total` still counts tiles, so the
+    rows the whole view collapses to: `total` still counts tiles, so the
     two together are the count pane's two numbers and the first of them is what
     the sheet reserves its height for. With stacking off none of the three keys
     is there and the page is byte for byte what it was before stacking existed.
@@ -705,16 +705,16 @@ class GridServer(ThreadingHTTPServer):
         return self.facets()["kinds"]
 
     def total(self, query: browse.Query) -> int:
-        """How many tiles one selection holds, counted once per selection.
+        """How many tiles one view holds, counted once per view.
 
         The sheet reserves scrollbar height for the pages it has not asked for
         yet, so it needs the size of the whole answer while it still holds only
         the first page. A count visits every tile whatever the filter is —
-        230-400 ms — and it is the same number for every page of one selection,
+        230-400 ms — and it is the same number for every page of one view,
         so paying it per page would put it in front of every scroll.
 
         Memoised on the `Query` itself: it is frozen and its fields are sorted
-        tuples, so two requests that mean the same selection are the same key
+        tuples, so two requests that mean the same view are the same key
         however the query string was spelled. The stacking window is dropped
         from the key first, because this counts tiles and no window changes how
         many there are. The cap is on the number of distinct keys a session can
@@ -732,16 +732,16 @@ class GridServer(ThreadingHTTPServer):
             return self._totals[key]
 
     def stacks(self, query: browse.Query) -> int:
-        """How many stacks one selection collapses to, counted once per window.
+        """How many stacks one view collapses to, counted once per window.
 
         The count pane says `<stacks> stacks · <photos> photos`, and the first
-        of those is about the whole selection rather than the page on screen —
+        of those is about the whole view rather than the page on screen —
         so it is one more number of the same shape as `total`: ~410 ms measured
-        against the real catalog, the same for every page of one selection, and
+        against the real catalog, the same for every page of one view, and
         therefore counted once in front of the first page rather than per page.
         Same cap and same eviction as the other two memos.
 
-        Keyed on the selection with its sort dropped, because the sort decides
+        Keyed on the view with its sort dropped, because the sort decides
         which member covers a stack and never how many stacks there are.
         """
         key = query.grouping()
@@ -754,16 +754,16 @@ class GridServer(ThreadingHTTPServer):
             return self._stacks[key]
 
     def assignment(self, query: browse.Query) -> tuple:
-        """How one selection stacks, grouped once per selection and window.
+        """How one view stacks, grouped once per view and window.
 
         Asked for only by the eight sorts that cannot collapse runs as they
         page. The pass is ~380 ms — the same order as a `total`, and paid for
-        the same reason: it is the same answer for every page of one selection,
+        the same reason: it is the same answer for every page of one view,
         so paying it per page would put it in front of every scroll. Same cap
         and same eviction as the count memo, on keys that come from a query
         string. One entry is a tuple per stack carrying its members' ids, ~2 MB
         over the real corpus, which is why the cap is on the number of
-        selections and not on bytes.
+        views and not on bytes.
         """
         with self._totals_lock:
             if query not in self._assignments:
@@ -940,27 +940,27 @@ class GridHandler(BaseHTTPRequestHandler):
         params = parse_qs(query, keep_blank_values=True)
         try:
             limit = parse_limit(params.get("limit", []))
-            selection = browse.parse(params, kinds=parse_kinds(params.get("kind", [])))
+            view = browse.parse(params, kinds=parse_kinds(params.get("kind", [])))
             cursor = browse.parse_cursor(
-                selection.ordering, params.get("before", []), params.get("before_id", [])
+                view.ordering, params.get("before", []), params.get("before_id", [])
             )
         except (BadRequest, browse.BadFilter) as exc:
             self._fail(400, exc.field)
             return
         payload = page(
             self.server.connection(),
-            selection,
+            view,
             cursor,
             limit,
-            total=self.server.total(selection),
+            total=self.server.total(view),
             stacks=(
-                self.server.stacks(selection) if selection.stack is not None else None
+                self.server.stacks(view) if view.stack is not None else None
             ),
             # Only the sorts that cannot stream: a default sort collapses its
             # own runs as it pages, so it must never pay for a grouping pass.
             assignment=(
-                self.server.assignment(selection)
-                if selection.stack is not None and not selection.ordering.indexed
+                self.server.assignment(view)
+                if view.stack is not None and not view.ordering.indexed
                 else None
             ),
         )

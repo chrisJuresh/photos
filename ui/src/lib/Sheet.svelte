@@ -14,23 +14,23 @@
     total = null,
     triage = false,
     // The saved rule set's `dir_under` excludes, lowercased. The folder chip is
-    // a view of them and not of its own state, so a folder excluded from
-    // screen 6's table marks the tiles in it too.
+    // drawn from them and not from its own state, so a folder excluded from
+    // screen 6's table reddens the tiles in it too.
     excludedDirs = [],
     // Grid select mode: whether the tickboxes are shown at all, and the cover
-    // ids of the tiles that are marked. Owned by App, exactly as the rule set
+    // ids of the tiles that are selected. Owned by App, exactly as the rule set
     // is — a tile displays them and does not hold them, which is what lets a
-    // recycled tile come back with its mark.
+    // recycled tile come back selected.
     selecting = false,
-    markedKeys = [],
+    selectedKeys = [],
     onActivate = () => {},
     onOverride = async () => null,
     onExcludeFolder = () => {},
     onState = () => {},
     // The marquee, in three moments. `onSweepStart` is handed the tile the drag
     // pressed on — null on empty canvas — because that tile decides whether the
-    // whole drag marks or unmarks; `onSweepMove` every tile the box now covers,
-    // which is a preview and a commit at once; `onSweepEnd` the release.
+    // whole drag selects or deselects; `onSweepMove` every tile the box now
+    // covers, which is a preview and a commit at once; `onSweepEnd` the release.
     onSweepStart = () => {},
     onSweepMove = () => {},
     onSweepEnd = () => {},
@@ -41,10 +41,10 @@
   let instance = null;
   let started = "";
 
-  // Marked-ness is looked up once per bind, so the set is built once per change
-  // rather than scanned per tile — ~150 mounted tiles against a marked set that
+  // Selectedness is looked up once per bind, so the set is built once per change
+  // rather than scanned per tile — ~150 mounted tiles against a selected set that
   // is however long the reader made it.
-  const lookup = $derived(new Set(markedKeys));
+  const lookup = $derived(new Set(selectedKeys));
 
   // The chip cycles through the three states an override can be in. `clear`
   // deletes the row rather than storing a third value, so "the rules decide
@@ -116,11 +116,11 @@
     el.appendChild(box);
   }
 
-  // Read from the marked set rather than from the tile, which is what makes a
-  // mark survive recycling: a tile scrolled out is released and the one that
-  // comes back is bound here, against the set as it stands now.
-  function fillMark(el, item) {
-    el.dataset.marked = lookup.has(item.id) ? "on" : "off";
+  // Read from the selected set rather than from the tile, which is what lets a
+  // tile stay selected through recycling: one scrolled out is released, and the
+  // one that comes back is bound here against the set as it stands now.
+  function fillTick(el, item) {
+    el.dataset.selected = lookup.has(item.id) ? "on" : "off";
   }
 
   onMount(() => {
@@ -128,7 +128,7 @@
       fetchPage: (cursor) => fetchPage(cursor),
       thumbHash: thumbHashToDataURL,
       extend: triage ? extend : extendTick,
-      fill: triage ? fill : fillMark,
+      fill: triage ? fill : fillTick,
       onState: (state) => onState(state),
       sweepStart: (item, at) => onSweepStart(item, at),
       sweepMove: (swept) => onSweepMove(swept),
@@ -205,7 +205,7 @@
   // an arrow press, a close — and neither is state.
   //
   // `walkTo` scrolls the sheet to a tile and mounts it, so the overlay can walk
-  // the selection; `focusTile` puts the keyboard back on whichever tile the walk
+  // the view; `focusTile` puts the keyboard back on whichever tile the walk
   // ended on.
 
   /** @param {number} at */
@@ -225,8 +225,8 @@
     return instance?.itemsBetween(a, b) ?? [];
   }
 
-  // Re-mark the folder chips after a write. `fill` runs when a tile is bound, so
-  // without this the tiles already on screen keep the marks they were mounted
+  // Redraw the folder chips after a write. `fill` runs when a tile is bound, so
+  // without this the tiles already on screen keep the state they were mounted
   // with. Compared as a value rather than by identity because the counts refresh
   // on every keystroke and hands back a new array each time, and re-binding
   // ~150 tiles for an unchanged rule set is pure work.
@@ -238,22 +238,22 @@
     instance.refill();
   });
 
-  // The same for the marked set: a mark applied to a tile already on screen has
-  // to appear on it, rather than waiting for that tile to be scrolled away and
-  // recycled back in.
+  // The same for the selected set: a tile already on screen that has just been
+  // selected has to say so, rather than waiting to be scrolled away and recycled
+  // back in.
   //
   // By identity and not by value, which is the opposite of the rule above and
   // for the reason that rule gives: the folder list is rebuilt on every
-  // keystroke whether or not it changed, and this one is derived from `marks`,
-  // which is only reassigned when a mark actually moves. So identity is already
+  // keystroke whether or not it changed, and this one is derived from `selected`,
+  // which is only reassigned when the set actually changes. So identity is already
   // the exact signal — and a marquee makes the difference matter, because a
   // sweep can leave thousands of keys and joining them into a string to compare
   // is then real work on every frame of a drag.
-  let marksBound = null;
+  let keysBound = null;
   $effect(() => {
-    const keys = markedKeys;
-    if (!instance || keys === marksBound) return;
-    marksBound = keys;
+    const keys = selectedKeys;
+    if (!instance || keys === keysBound) return;
+    keysBound = keys;
     instance.refill();
   });
 </script>

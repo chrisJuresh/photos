@@ -9,7 +9,7 @@
     screen,
     rules = [],
     root = null,
-    selected = null,
+    picked = null,
     onpick,
     checked = new Set(),
     oncheck,
@@ -60,7 +60,7 @@
       {#each rows as row, i (row.key)}
         {@const mark = marks.get(row.key)}
         <tr
-          class:picked={selected === row.key}
+          class:picked={picked === row.key}
           class:clickable={screen.sheet !== false}
           onclick={() => onpick(row)}
         >
@@ -71,7 +71,7 @@
                    An input's `checked` attribute only writes defaultChecked, and
                    once the box has been clicked its dirty flag means the
                    attribute no longer drives what is painted — so the tick never
-                   appeared even though the selection was correct. A class and a
+                   appeared even though the ticked set was correct. A class and a
                    glyph are written unconditionally and cannot desynchronise.
                    stopPropagation keeps the row click — which builds a single
                    candidate — out of the way. -->

@@ -3,7 +3,7 @@
   // Explorer. So revealing a photograph in the grid takes two presses — the
   // tile, then the frame — whether the tile stood for fifty captures or one.
   //
-  // The reader walks the selection from in here rather than closing to move on:
+  // The reader walks the view from in here rather than closing to move on:
   // a puck at each edge and the arrow keys ask to step to the adjacent tile,
   // whatever its stack size. Asking is all they do — `onstep(delta, held)`, the
   // second of which is only true of a key being held down. App owns the walk:
@@ -472,7 +472,7 @@
     opacity: 0;
   }
 
-  /* Unavailable at the ends of the selection: still there, so the reader can see
+  /* Unavailable at the ends of the view: still there, so the reader can see
      which end they are at, and plainly not a thing to press. `disabled` already
      stops the click; this is what says so. */
   .puck:disabled {

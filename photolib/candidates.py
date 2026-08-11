@@ -61,7 +61,7 @@ from pathlib import Path
 import numpy as np
 
 # The two expressions that decide the population, imported rather than restated:
-# "agrees with the grid's existing selection" is a promise best kept by using the
+# "agrees with the population the grid already stacks" is a promise best kept by using the
 # grid's own SQL. They are private to `browse` because until now nothing outside it
 # had a use for them.
 from photolib.browse import _SECONDS as SECONDS

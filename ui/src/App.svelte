@@ -37,7 +37,7 @@
   let rows = $state([]);
   let picked = $state(null);
   let candidate = $state(null);
-  // The checkbox selection, by row key, and the box the last click landed on —
+  // Triage's ticked rows, by row key, and the box the last click landed on —
   // shift-click extends from it. A new Set on every change rather than a
   // mutation: $state does not proxy a Set, so reassignment is what makes the
   // boxes redraw.
@@ -63,8 +63,8 @@
   // The filter vocabulary, fetched once: the server builds it once per process
   // because it cannot change while a read-only process runs.
   let facets = $state(null);
-  // dimension name -> the values ticked in it. A dimension absent from here is
-  // one nobody has touched, which is not the same as one with nothing ticked —
+  // dimension name -> the values it filters on. A dimension absent from here is
+  // one nobody has touched, which is not the same as one narrowed to nothing —
   // and both mean "do not send it", so an untouched filter never reaches the URL.
   let filters = $state({});
   let sort = $state("newest");
@@ -81,18 +81,18 @@
   let opened = $state(null);
   // The sheet component, for the two things the overlay asks of it by index.
   let sheetView = $state(null);
-  // Select mode, and the tiles marked in it as `{key, ids}` in the order they
-  // were marked. Held here rather than in the sheet for the same reason the
-  // overrides are: a tile is recycled and the mark is not, so the mark cannot
-  // live on the tile.
+  // Select mode, and the tiles selected in it as `{key, ids}` in the order they
+  // were selected. Held here rather than in the sheet for the same reason the
+  // overrides are: a tile is recycled and the selection is not, so a tile cannot
+  // be what holds it.
   let selecting = $state(false);
-  let marks = $state([]);
+  let selected = $state([]);
   // The last tile touched, as an index into the sheet's page order, and what a
   // shift-click extends from. An index rather than an id because the range is
   // "everything between these two in the current sort", and the sheet's order
   // is that sort. Null until something has been touched.
-  let markAnchor = $state(null);
-  // The drag in progress, or null: `{from, marking}` — the marked set as it
+  let selectAnchor = $state(null);
+  // The drag in progress, or null: `{from, adding}` — the selected set as it
   // stood when the press landed, and the verdict the tile under the pointer
   // fixed for the whole of it. Both are re-applied on every move, which is what
   // makes the preview live and a tile the box has moved back off revert. One
@@ -104,13 +104,13 @@
   const showTable = $derived(screen.table !== false);
   // Whether the sidebar offers something to choose from — the aggregate table on
   // most screens, the directory tree on screen 8. Screen 7 has neither, and that
-  // is what makes its sheet the remainder rather than a selection, so the sheet
-  // condition is about the picker and not about the table.
+  // is what makes its sheet the remainder rather than what a picker chose, so the
+  // sheet condition is about the picker and not about the table.
   const showPicker = $derived(showTable || screen.tree === true);
   const showSheet = $derived(screen.sheet !== false && (candidate !== null || !showPicker));
   // What the grid asks the server for, and what a filter change comes to. Built
-  // once so the sheet key and the request cannot disagree about the selection:
-  // the key IS the request, so a filter that changes the answer always resets the
+  // once so the sheet key and the request cannot disagree about the view: the
+  // key IS the request, so a filter that changes the answer always resets the
   // sheet and one that does not never does.
   // The window is in it only while stacking is on, so turning it off leaves a
   // query string with no `stack` in it at all rather than one the server has to
@@ -125,21 +125,23 @@
   });
 
   // What the sheet needs to draw the tickboxes, and what the header's pane
-  // reads. Derived rather than tracked alongside `marks`, so there is one place
-  // a mark is recorded and nothing to keep in step with it.
-  const markedKeys = $derived(marks.map((entry) => entry.key));
-  const markedTally = $derived(tally(marks));
+  // reads. Derived rather than tracked alongside `selected`, so there is one
+  // place a tile is selected and nothing to keep in step with it.
+  const selectedKeys = $derived(selected.map((entry) => entry.key));
+  const selectedTally = $derived(tally(selected));
 
-  // A marked set that survived a change to the query would describe a grouping
-  // that no longer exists, and being a snapshot of one specific grouping the
-  // reader judged wrong is its whole value. `gridQuery` is recomputed by exactly
-  // the four things the ticket names — the sort, the filters, the toggle and the
-  // window — so it is the signal rather than a list of them restated here.
+  // Emptied by any change to the query, which is more than CONTEXT.md's
+  // **Selected** asks for: a set that outlived the *window* would describe a
+  // grouping that no longer exists, but the sort and the filters change only the
+  // view, and a set of stacks survives both. This is the stand-in until the knobs
+  // that regroup exist to be watched on their own — narrowing it to them is
+  // theirs to do. `gridQuery` is recomputed by all four, so it is the one signal
+  // here rather than a list of them restated.
   $effect(() => {
     void gridQuery;
     untrack(() => {
-      marks = [];
-      markAnchor = null; // it indexes an order this query no longer has
+      selected = [];
+      selectAnchor = null; // it indexes an order this query no longer has
     });
   });
 
@@ -294,7 +296,7 @@
     });
   });
 
-  function selectFilter(dimension, values) {
+  function setFilter(dimension, values) {
     filters = { ...filters, [dimension]: values };
   }
 
@@ -302,7 +304,7 @@
 
   function pick(row) {
     if (screen.sheet === false) return;
-    // Screen 6's first level is a drill-down as well as a selection: it loads
+    // Screen 6's first level is a drill-down as well as a pick: it loads
     // the second level, and offers the root itself as a rule at the same time.
     if (screen.drill && !root) {
       picked = row.key;
@@ -390,7 +392,7 @@
     await afterRuleWrite();
   }
 
-  // The checkbox selection, as one exclude rule per row at the end of the order.
+  // Triage's ticked rows, as one exclude rule per row at the end of the order.
   // Sequential and not parallel: rules evaluate top-down, first match wins, so
   // the order they land in is part of what they mean, and N concurrent POSTs
   // would decide it by arrival. A failure stops the run rather than pressing on —
@@ -514,23 +516,23 @@
   // substrate for an overlay to draw.
   function activate(item, tile, at, shift = false) {
     if (mode === "grid") {
-      // In select mode a click is the mark and nothing else: no overlay, no
+      // In select mode a click selects and nothing else: no overlay, no
       // reveal. A cover carries its whole stack, which is what makes the export
       // say how the grid had grouped things rather than only which photographs
       // were picked.
       if (selecting) {
         // Shift extends from the last tile touched to this one, in the order
         // the sheet holds them — which is the sort the grid is under — and
-        // applies *this* click's outcome across the range: mark from an
-        // unmarked tile, unmark from a marked one. The same gesture the triage
-        // table's tickboxes have, over tiles instead of rows.
-        if (shift && markAnchor !== null) {
-          const run = sheetView?.itemsBetween(markAnchor, at) ?? [];
-          marks = sweep(marks, run.map(stackOf), !isMarked(item));
+        // applies *this* click's outcome across the range: select from an
+        // unselected tile, deselect from a selected one. The same gesture the
+        // triage table's tickboxes have, over tiles instead of rows.
+        if (shift && selectAnchor !== null) {
+          const run = sheetView?.itemsBetween(selectAnchor, at) ?? [];
+          selected = sweep(selected, run.map(stackOf), !isSelected(item));
         } else {
-          marks = toggle(marks, stackOf(item));
+          selected = toggle(selected, stackOf(item));
         }
-        markAnchor = at;
+        selectAnchor = at;
         return;
       }
       // The photograph's rect and not the tile's: a stacked tile's element is
@@ -542,40 +544,40 @@
     guard(() => api.revealOrigin(item.id));
   }
 
-  const isMarked = (item) => marks.some((entry) => entry.key === item.id);
+  const isSelected = (item) => selected.some((entry) => entry.key === item.id);
 
   // The marquee, in three moments.
   //
   // The tile under the pointer when the press landed decides the whole drag:
-  // from a marked tile it unmarks everything it touches, from an unmarked one —
-  // and from empty canvas, which is the same thing said with no tile — it marks.
-  // Fixed here, once, because a box whose meaning changed under the hand while
-  // it was being extended would be unusable.
+  // from a selected tile it deselects everything it touches, from an unselected
+  // one — and from empty canvas, which is the same thing said with no tile — it
+  // selects. Fixed here, once, because a box whose meaning changed under the hand
+  // while it was being extended would be unusable.
   function sweepStart(item, at) {
-    dragging = { from: marks, marking: item === null || !isMarked(item) };
-    if (at !== null) markAnchor = at;
+    dragging = { from: selected, adding: item === null || !isSelected(item) };
+    if (at !== null) selectAnchor = at;
   }
 
   // Every move is the verdict re-applied to the set as it stood when the drag
-  // began, so the marks preview live and a tile the box has moved back off goes
-  // back to what it was. The drag never touches a mark outside its own box:
+  // began, so the set previews live and a tile the box has moved back off goes
+  // back to what it was. The drag never touches a tile outside its own box:
   // this is an evidence-gathering tool and the reader sweeps several separate
   // runs into one report. Clearing is the button that says Clear.
   function sweepMove(covered) {
-    marks = sweep(dragging.from, covered.map(stackOf), dragging.marking);
+    selected = sweep(dragging.from, covered.map(stackOf), dragging.adding);
   }
 
   function sweepEnd() {
     dragging = null;
   }
 
-  function unmarkAll() {
-    marks = [];
-    markAnchor = null;
+  function deselectAll() {
+    selected = [];
+    selectAnchor = null;
   }
 
   // Whether there is a tile that way. `step` is the whole of it: the sheet's
-  // count and its `exhausted` are what say where the selection really ends, as
+  // count and its `exhausted` are what say where the view really ends, as
   // against where the pages read so far happen to stop.
   const canStepBack = $derived(
     opened !== null && step(opened.at, -1, sheet.count, sheet.exhausted) !== null,
@@ -640,33 +642,33 @@
     guard(() => api.revealPhoto(frame.id));
   }
 
-  // The marked set as the report it exists to produce. Nothing leaves the
+  // The selected set as the report it exists to produce. Nothing leaves the
   // machine: this is the system clipboard, there is no endpoint behind it, and
   // the conditions line is what stops the reader being asked which window they
   // were on.
   function share() {
-    guard(() => navigator.clipboard.writeText(shareText({ stacking, sort, filters }, marks)));
+    guard(() => navigator.clipboard.writeText(shareText({ stacking, sort, filters }, selected)));
   }
 </script>
 
 {#if mode === "grid"}
   <Header
     {facets}
-    selected={filters}
+    {filters}
     {sort}
     {stacking}
     total={sheet.total}
     tiles={sheet.tiles}
     loading={sheet.loading}
     {selecting}
-    marked={markedTally}
-    onselect={selectFilter}
+    {selectedTally}
+    onfilter={setFilter}
     onsort={(next) => (sort = next)}
     onstack={(next) => (stacking = remember(next))}
     onclear={() => (filters = {})}
     onselecting={(next) => (selecting = next)}
     onshare={share}
-    onunmark={unmarkAll}
+    ondeselect={deselectAll}
     ontriage={() => (mode = "triage")}
   />
 {/if}
@@ -712,7 +714,7 @@
           {root}
           {checked}
           rules={counts?.rules ?? []}
-          selected={picked}
+          {picked}
           onpick={pick}
           oncheck={check}
         />
@@ -723,7 +725,7 @@
           root={PHOTOS_ROOT}
           version={treeVersion}
           {excludedDirs}
-          selected={picked}
+          {picked}
           busy={saving}
           onload={(path) => guard(() => api.tree(path))}
           onpick={pick}
@@ -761,7 +763,7 @@
           <button onclick={excludeChecked} disabled={saving || !pending.length}>
             {saving ? "saving…" : `Exclude ${count(pending.length)}`}
           </button>
-          <button onclick={clearChecked} disabled={saving}>Clear selection</button>
+          <button onclick={clearChecked} disabled={saving}>Clear</button>
           <span class="muted">
             {#if !pending.length}
               already excluded — nothing left to write
@@ -806,7 +808,7 @@
         triage={mode === "triage"}
         {excludedDirs}
         selecting={mode === "grid" && selecting}
-        {markedKeys}
+        {selectedKeys}
         onActivate={activate}
         onOverride={override}
         onExcludeFolder={excludeFolder}

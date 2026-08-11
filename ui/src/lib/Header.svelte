@@ -14,9 +14,12 @@
 
   let {
     facets = null,
-    // dimension name -> array of selected values. Owned by App; this component
-    // proposes the next one and never mutates the one it was given.
-    selected = {},
+    // dimension name -> the values it filters on. Owned by App; this component
+    // proposes the next one and never mutates the one it was given. The filters
+    // and the sort together are the view — what is on screen — which is a
+    // different thing from the selected set below, the tiles the reader picked
+    // by hand out of it.
+    filters = {},
     sort = "newest",
     // `{on, window}`, owned and remembered by App exactly as the filters are
     // owned by it: this proposes the next one.
@@ -31,17 +34,19 @@
     loading = false,
     // Select mode, and what it has caught: `{stacks, photos}` from
     // `select.js`'s `tally`. The pair of numbers the count pane gave up when it
-    // became one number — here they are about a set the reader chose, which is
-    // the only place a pair of them is worth reading.
+    // became one number — here they are about a set the reader picked by hand,
+    // which is the only place a pair of them is worth reading. Named for the
+    // tally and not for the set, because the selected set itself never comes
+    // here: the header draws two numbers about it and nothing else.
     selecting = false,
-    marked = { stacks: 0, photos: 0 },
-    onselect = () => {},
+    selectedTally = { stacks: 0, photos: 0 },
+    onfilter = () => {},
     onsort = () => {},
     onstack = () => {},
     onclear = () => {},
     onselecting = () => {},
     onshare = () => {},
-    onunmark = () => {},
+    ondeselect = () => {},
     ontriage = () => {},
   } = $props();
 
@@ -60,18 +65,18 @@
   const sorts = $derived(facets?.sorts ?? []);
   const sortLabel = $derived(sorts.find((entry) => entry.value === sort)?.label ?? sort);
 
-  // How many values are ticked across every dimension. The badge, and the only
-  // thing that says a filter is on while the panel is shut.
+  // How many values the view filters on across every dimension. The badge, and
+  // the only thing that says a filter is on while the panel is shut.
   const active = $derived(
-    Object.values(selected).reduce((sum, values) => sum + values.length, 0),
+    Object.values(filters).reduce((sum, values) => sum + values.length, 0),
   );
 
-  // The ticked values as one flat list, so each can be untick from the bar
-  // without opening the panel. Labels come from the facet list rather than from
-  // the value, because "1to5mb" is not a label and "" is not a camera.
+  // Those values as one flat list, so each can be dropped from the bar without
+  // opening the panel. Labels come from the facet list rather than from the
+  // value, because "1to5mb" is not a label and "" is not a camera.
   const chips = $derived(
     dimensions.flatMap((dimension) =>
-      (selected[dimension.name] ?? []).map((value) => ({
+      (filters[dimension.name] ?? []).map((value) => ({
         dimension: dimension.name,
         value,
         title: dimension.title,
@@ -82,15 +87,15 @@
   );
 
   function toggle(dimension, value) {
-    const current = selected[dimension] ?? [];
+    const current = filters[dimension] ?? [];
     const next = current.includes(value)
       ? current.filter((item) => item !== value)
       : [...current, value];
-    onselect(dimension, next);
+    onfilter(dimension, next);
   }
 
   function isOn(dimension, value) {
-    return (selected[dimension] ?? []).includes(value);
+    return (filters[dimension] ?? []).includes(value);
   }
 
   function flipTheme() {
@@ -99,7 +104,7 @@
 
   // The window under the reader's thumb, while the thumb is on it. A range
   // input fires `input` for every pixel of a drag and `change` once the value
-  // is settled, and each settled value is a new selection: a new page, a new
+  // is settled, and each settled value is a new view: a new page, a new
   // count and a grouping pass behind it. So the label follows the drag from
   // here and the grid is only asked about the value the reader stopped on.
   let dragging = $state(null);
@@ -169,20 +174,20 @@
        and that is the badge on the Stacks pill, which is where the reader
        turned stacking on. -->
   <!-- Both panes hang out of the bar's left edge, in the margin the side setting
-       opens up. The marked one is first so it grows away from the count. -->
+       opens up. The selected one is first so it grows away from the count. -->
   <div class="panes">
-    {#if marked.stacks}
-      <div class="glass marks" use:refract>
+    {#if selectedTally.stacks}
+      <div class="glass selected" use:refract>
         <span class="nums">
-          <strong>{count(marked.stacks)}</strong>
-          <span class="muted">{marked.stacks === 1 ? "stack" : "stacks"}</span>
-          <strong>{count(marked.photos)}</strong>
-          <span class="muted">{marked.photos === 1 ? "photo" : "photos"}</span>
+          <strong>{count(selectedTally.stacks)}</strong>
+          <span class="muted">{selectedTally.stacks === 1 ? "stack" : "stacks"}</span>
+          <strong>{count(selectedTally.photos)}</strong>
+          <span class="muted">{selectedTally.photos === 1 ? "photo" : "photos"}</span>
         </span>
-        <button class="menu small" onclick={() => onshare()} title="Copy the conditions and the marked ids to the clipboard">
+        <button class="menu small" onclick={() => onshare()} title="Copy the conditions and the selected ids to the clipboard">
           Share
         </button>
-        <button class="menu small" onclick={() => onunmark()}>Clear</button>
+        <button class="menu small" onclick={() => ondeselect()}>Clear</button>
       </div>
     {/if}
 
@@ -241,7 +246,7 @@
           class:on={selecting}
           role="switch"
           aria-checked={selecting}
-          title="Mark tiles by clicking them, then copy their ids"
+          title="Select tiles by clicking them, then copy their ids"
           onclick={() => onselecting(!selecting)}
         >
           Select
@@ -434,7 +439,7 @@
      side setting opens up, which is why that setting has a floor — at 650 there
      is 650px of window to the bar's left and the count needs about 120 of them.
 
-     Right to left, so the count keeps its position and the marked pane grows
+     Right to left, so the count keeps its position and the selected pane grows
      away from it: the count is where the reader's eye already is, and a pane
      appearing must not move it.
 
@@ -468,7 +473,7 @@
      that word is written in — then picks the new values up from the rules that
      already read them, and `.glass` above needs no exception. */
   .tally,
-  .marks {
+  .selected {
     --glass-tint: var(--glass-tint-tally);
     --glass-text: var(--glass-text-tally);
   }
@@ -485,7 +490,7 @@
   /* The count's material, because it is the same kind of thing: an answer, on
      its own ground, read off a photograph. What it adds is the two controls the
      count pane has no use for. */
-  .marks {
+  .selected {
     display: flex;
     align-items: center;
     gap: var(--s-2);
@@ -496,18 +501,18 @@
 
   /* Two numbers with their words, which is what makes them readable as a pair
      rather than as one number the reader has to guess the unit of. */
-  .marks .nums {
+  .selected .nums {
     display: flex;
     align-items: baseline;
     gap: 5px;
   }
 
-  .marks strong {
+  .selected strong {
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
 
-  .marks strong + .muted {
+  .selected strong + .muted {
     margin-right: 3px;
   }
 
@@ -542,7 +547,7 @@
      photographs behind it at any scroll position, so it keeps its shadow whole
      through app.css's initial value. */
   .tally,
-  .marks,
+  .selected,
   .bar {
     --glass-lift: 0;
     animation-name: lift;
@@ -567,7 +572,7 @@
      always present is a better failure than one never present. */
   @supports not (animation-timeline: scroll()) {
     .tally,
-    .marks,
+    .selected,
     .bar {
       --glass-lift: 1;
     }

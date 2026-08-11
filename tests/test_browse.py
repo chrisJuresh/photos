@@ -129,7 +129,7 @@ def catalog(tmp_path_factory) -> sqlite3.Connection:
 ALL_KINDS = ("image", "raw_image", "video")
 
 
-def selection(**params) -> browse.Query:
+def view(**params) -> browse.Query:
     """A `browse.Query` from the query-string form the client would send.
 
     `kind` is passed through as-is rather than through `parse_kinds`, so a test
@@ -211,7 +211,7 @@ def counted(conn, query: browse.Query) -> int:
     ids=lambda value: str(value),
 )
 def test_each_filter_selects_exactly(catalog, params, expected):
-    query = selection(**params)
+    query = view(**params)
     assert ids(catalog, query) == expected
     assert counted(catalog, query) == len(expected)
 
@@ -219,9 +219,9 @@ def test_each_filter_selects_exactly(catalog, params, expected):
 def test_a_tile_with_no_origin_row_is_reachable(catalog):
     """Tile 4 has no `origin` row. It must still be in the unfiltered answer, and
     must not be swept in by a `root` filter it has no evidence for."""
-    assert 4 in ids(catalog, selection())
+    assert 4 in ids(catalog, view())
     for root in ("sd card", "backup", "old"):
-        assert 4 not in ids(catalog, selection(root=root))
+        assert 4 not in ids(catalog, view(root=root))
 
 
 def test_kind_image_still_means_still_photography(catalog):
@@ -258,7 +258,7 @@ def test_each_sort_orders_exactly(catalog, name, expected):
     """Every tile, in order, for each ordering. Ties break on `p.id` in the same
     direction as the key, which is what makes the ordering total -- and total is
     what a keyset cursor needs to be able to resume."""
-    assert ids(catalog, selection(sort=name)) == expected
+    assert ids(catalog, view(sort=name)) == expected
 
 
 @pytest.mark.parametrize("name", sorted(browse.SORTS))
@@ -269,7 +269,7 @@ def test_each_sort_pages_to_exhaustion_without_gap_or_repeat(catalog, name):
     every tie, which is where a cursor that cannot distinguish two equal keys
     either repeats a row for ever or skips the rest of the tie.
     """
-    query = selection(sort=name)
+    query = view(sort=name)
     sort = query.ordering
     seen: list[int] = []
     cursor = None
@@ -296,7 +296,7 @@ def test_every_option_counts_the_same_two_ways(catalog):
     """Each option's count, from the facet pass, equals what selecting it yields.
 
     This is the one that has to hold. The counts come from Python reading rows
-    and the selection comes from SQL reading the same rows, so a band edge, a
+    and the view comes from SQL reading the same rows, so a band edge, a
     NULL, or an empty string treated differently by one of them shows up here and
     nowhere else until somebody notices the header lying.
     """
@@ -307,7 +307,7 @@ def test_every_option_counts_the_same_two_ways(catalog):
         if name in ("kind", "month"):
             continue  # neither is a plain count -- both are covered below
         for option in dimension["options"]:
-            query = selection(**{name: option["value"]})
+            query = view(**{name: option["value"]})
             assert option["count"] == counted(catalog, query), (name, option)
             checked += 1
     assert checked >= 40  # every option of thirteen dimensions, not a lucky few
@@ -319,8 +319,8 @@ def test_the_facet_total_is_every_tile(catalog):
     assert facets["kinds"] == {"image": 6, "raw_image": 1, "video": 1}
     # And the per-kind counts are what selecting that kind alone yields, once
     # `image`'s expansion is accounted for.
-    assert counted(catalog, selection(kind=["raw_image"])) == facets["kinds"]["raw_image"]
-    assert counted(catalog, selection(kind=["image", "raw_image"])) == (
+    assert counted(catalog, view(kind=["raw_image"])) == facets["kinds"]["raw_image"]
+    assert counted(catalog, view(kind=["image", "raw_image"])) == (
         facets["kinds"]["image"] + facets["kinds"]["raw_image"]
     )
 
@@ -431,7 +431,7 @@ def test_an_undated_tile_is_not_offered_as_a_year(catalog, tmp_path):
 )
 def test_a_malformed_filter_is_refused_by_name(params, field):
     with pytest.raises(browse.BadFilter) as raised:
-        selection(**params)
+        view(**params)
     assert raised.value.field == field
 
 
@@ -440,13 +440,13 @@ def test_an_unknown_value_of_a_free_vocabulary_selects_nothing(catalog):
     there is no list to check it against and nothing to refuse. It selects
     nothing, which is the truthful answer."""
     for params in ({"camera": "Hasselblad"}, {"lens": "Noctilux"}, {"ext": ".tiff"}):
-        assert ids(catalog, selection(**params)) == []
+        assert ids(catalog, view(**params)) == []
 
 
 def test_no_filter_value_reaches_the_sql_text(catalog):
     """Every value is bound. The enum terms are looked up by key in a dict, so
     the only way a token becomes SQL is by being written into `ENUMS`."""
-    query = selection(camera="Cam'; DROP TABLE photo --", ext="'", root="\\", year="2025")
+    query = view(camera="Cam'; DROP TABLE photo --", ext="'", root="\\", year="2025")
     sql, params = browse.page_sql(query, None)
     assert "DROP" not in sql
     assert "Cam" not in sql
@@ -548,7 +548,7 @@ def stack_count(conn, query: browse.Query) -> int:
 def test_the_window_decides_how_many_stacks_there_are(bursts, window, expected):
     """Wider windows merge. Every tile is in exactly one stack at every window,
     which is the property that makes a stack count a grid length."""
-    query = selection(stack=str(window))
+    query = view(stack=str(window))
     assert stack_count(bursts, query) == expected
     stacks = grouped(bursts, query)
     assert len(stacks) == expected
@@ -560,8 +560,8 @@ def test_the_window_decides_how_many_stacks_there_are(bursts, window, expected):
 def test_a_gap_of_exactly_the_window_stacks(bursts):
     """Tile 107 is four seconds after 106, and four seconds is the default
     window. It joins at 4 and starts its own stack at 3."""
-    at_four = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
-    at_three = {frozenset(stack) for stack in grouped(bursts, selection(stack="3"))}
+    at_four = {frozenset(stack) for stack in grouped(bursts, view(stack="4"))}
+    at_three = {frozenset(stack) for stack in grouped(bursts, view(stack="3"))}
     assert frozenset({101, 103, 106, 107}) in at_four
     assert frozenset({101, 103, 106}) in at_three
     assert frozenset({107}) in at_three
@@ -570,7 +570,7 @@ def test_a_gap_of_exactly_the_window_stacks(bursts):
 def test_a_second_body_shooting_through_a_bracket_does_not_split_it(bursts):
     """Cam B's two frames land inside Cam A's bracket in capture order. A run is
     per camera, so neither sees the other."""
-    stacks = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
+    stacks = {frozenset(stack) for stack in grouped(bursts, view(stack="4"))}
     assert frozenset({101, 103, 106, 107}) in stacks
     assert frozenset({102, 104}) in stacks
 
@@ -582,7 +582,7 @@ def test_a_date_that_is_not_from_exif_never_stacks(bursts):
     105 sits chronologically inside Cam A's bracket, from Cam A, so it is also
     the proof that an unstackable tile does not split the run it is inside.
     """
-    stacks = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
+    stacks = {frozenset(stack) for stack in grouped(bursts, view(stack="4"))}
     for alone in (105, 113, 114):
         assert frozenset({alone}) in stacks
 
@@ -590,33 +590,33 @@ def test_a_date_that_is_not_from_exif_never_stacks(bursts):
 def test_two_frames_from_an_unnamed_camera_stack_with_each_other(bursts):
     """`camera` is NULL for a body that recorded no name. Consecutive captures
     are still consecutive captures, and the gap is what decides them."""
-    stacks = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
+    stacks = {frozenset(stack) for stack in grouped(bursts, view(stack="4"))}
     assert frozenset({110, 111}) in stacks
     assert frozenset({112}) in stacks
 
 
 def test_a_filter_splits_a_stack(bursts):
-    """A stack forms over whatever the selection holds, so removing a member can
+    """A stack forms over whatever the view holds, so removing a member can
     split it in two. Tile 106 is the only `.png`, and without it Cam A's run has
     a five-second hole in the middle of it."""
-    whole = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
+    whole = {frozenset(stack) for stack in grouped(bursts, view(stack="4"))}
     assert frozenset({101, 103, 106, 107}) in whole
 
-    filtered = {frozenset(stack) for stack in grouped(bursts, selection(stack="4", ext=".jpg"))}
+    filtered = {frozenset(stack) for stack in grouped(bursts, view(stack="4", ext=".jpg"))}
     assert frozenset({101, 103}) in filtered
     assert frozenset({107}) in filtered
     # One tile fewer and one stack more, which is what "filters apply before
     # stacking" costs and is the correct answer rather than a defect.
-    assert stack_count(bursts, selection(stack="4", ext=".jpg")) == STACKS_AT[4] + 1
+    assert stack_count(bursts, view(stack="4", ext=".jpg")) == STACKS_AT[4] + 1
 
 
 @pytest.mark.parametrize("name", sorted(browse.SORTS))
 def test_every_sort_groups_the_same_tiles(bursts, name):
     """Grouping is by capture time and camera, so it cannot depend on what the
     page is ordered by. Only which member is drawn first does."""
-    query = selection(stack="4", sort=name)
+    query = view(stack="4", sort=name)
     assert {frozenset(stack) for stack in grouped(bursts, query)} == {
-        frozenset(stack) for stack in grouped(bursts, selection(stack="4"))
+        frozenset(stack) for stack in grouped(bursts, view(stack="4"))
     }
     assert stack_count(bursts, query) == STACKS_AT[4]
 
@@ -625,9 +625,9 @@ def test_the_assignment_lists_a_stacks_members_in_the_pages_order(bursts):
     """`assignment_sql` returns rows in the sort's order, so the first member of
     a stack to appear is its cover: the newest frame on `newest` and the oldest
     on `oldest`."""
-    newest = {stack[0]: stack for stack in grouped(bursts, selection(stack="4"))}
+    newest = {stack[0]: stack for stack in grouped(bursts, view(stack="4"))}
     assert newest[107] == [107, 106, 103, 101]
-    oldest = {stack[0]: stack for stack in grouped(bursts, selection(stack="4", sort="oldest"))}
+    oldest = {stack[0]: stack for stack in grouped(bursts, view(stack="4", sort="oldest"))}
     assert oldest[101] == [101, 103, 106, 107]
 
 
@@ -637,14 +637,14 @@ def test_the_stack_count_is_the_number_of_stacks_without_building_them(
 ):
     """The count pane's first number. It has to agree with the assignment at
     every window: they are the same grouping, summed rather than listed."""
-    sql, params = browse.stack_count_sql(selection(stack=str(window)))
+    sql, params = browse.stack_count_sql(view(stack=str(window)))
     assert bursts.execute(sql, params).fetchone()[0] == expected
-    assert expected == stack_count(bursts, selection(stack=str(window)))
+    assert expected == stack_count(bursts, view(stack=str(window)))
 
 
-def test_a_selection_holding_nothing_has_no_stacks(bursts):
+def test_a_view_holding_nothing_has_no_stacks(bursts):
     """`sum` over no rows is NULL, and a count pane cannot print NULL."""
-    sql, params = browse.stack_count_sql(selection(stack="4", ext=".nothing"))
+    sql, params = browse.stack_count_sql(view(stack="4", ext=".nothing"))
     assert bursts.execute(sql, params).fetchone()[0] == 0
 
 
@@ -652,38 +652,38 @@ def test_a_selection_holding_nothing_has_no_stacks(bursts):
 def test_the_stack_count_does_not_depend_on_the_sort(bursts, name):
     """Which member covers a stack is the sort's business; how many stacks there
     are is not. So the memo drops the sort and one count serves all ten."""
-    sql, params = browse.stack_count_sql(selection(stack="4", sort=name))
+    sql, params = browse.stack_count_sql(view(stack="4", sort=name))
     assert bursts.execute(sql, params).fetchone()[0] == STACKS_AT[4]
-    assert selection(stack="4", sort=name).grouping() == selection(stack="4")
+    assert view(stack="4", sort=name).grouping() == view(stack="4")
 
 
 def test_the_grouping_key_keeps_the_window_and_drops_the_sort(bursts):
     """The mirror of `unstacked`: a tile count drops the window because no
     window changes how many tiles there are, and a stack count drops the sort
     for the same kind of reason."""
-    assert selection(stack="4", sort="largest").grouping() == selection(stack="4")
-    assert selection(stack="4").grouping() != selection(stack="3").grouping()
-    default = selection(stack="4")
+    assert view(stack="4", sort="largest").grouping() == view(stack="4")
+    assert view(stack="4").grouping() != view(stack="3").grouping()
+    default = view(stack="4")
     assert default.grouping() is default
 
 
-def test_the_window_is_part_of_the_selection(bursts):
-    """Two windows are two selections, so a memo keyed on the query cannot serve
+def test_the_window_is_part_of_the_view(bursts):
+    """Two windows are two views, so a memo keyed on the query cannot serve
     one from the other -- and dropping the window makes them one, which is what
     the tile count wants."""
-    assert selection(stack="4") != selection(stack="3")
-    assert selection(stack="4") != selection()
-    assert selection(stack="4").stack == 4
-    assert selection().stack is None
-    assert selection(stack="4").unstacked() == selection()
-    unstacked = selection()
+    assert view(stack="4") != view(stack="3")
+    assert view(stack="4") != view()
+    assert view(stack="4").stack == 4
+    assert view().stack is None
+    assert view(stack="4").unstacked() == view()
+    unstacked = view()
     assert unstacked.unstacked() is unstacked
 
 
-def test_stacking_does_not_change_which_tiles_are_selected(bursts):
+def test_stacking_does_not_change_which_tiles_are_in_view(bursts):
     """The grouping is over the filtered set and never narrows it."""
     for window in (None, "1", "4", "10"):
-        query = selection(stack=window) if window else selection()
+        query = view(stack=window) if window else view()
         assert counted(bursts, query) == len(BURSTS)
         assert sorted(ids(bursts, query)) == [row[0] for row in BURSTS]
 
@@ -691,7 +691,7 @@ def test_stacking_does_not_change_which_tiles_are_selected(bursts):
 @pytest.mark.parametrize("value", ["0", "11", "99", "-1", "4.5", "four", "", " 4", "4,5"])
 def test_a_malformed_window_is_refused_by_name(value):
     with pytest.raises(browse.BadFilter) as raised:
-        selection(stack=value)
+        view(stack=value)
     assert raised.value.field == "stack"
 
 
@@ -705,8 +705,8 @@ def test_the_window_bounds_are_the_ten_the_slider_offers():
 def test_no_window_value_reaches_the_sql_text(bursts):
     """The window is bound like every other value, so the grouping SQL is the
     same text at every window."""
-    four, params_four = browse.assignment_sql(selection(stack="4"))
-    ten, params_ten = browse.assignment_sql(selection(stack="10"))
+    four, params_four = browse.assignment_sql(view(stack="4"))
+    ten, params_ten = browse.assignment_sql(view(stack="10"))
     assert four == ten
     assert params_four[-1] == 4 and params_ten[-1] == 10
 

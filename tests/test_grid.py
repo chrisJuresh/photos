@@ -36,7 +36,7 @@ from photolib.grid import (
 NEWEST = SORTS["newest"]
 
 
-def selection(**params) -> browse.Query:
+def view(**params) -> browse.Query:
     """A `browse.Query` from the query-string form the client would send."""
     values = {key: value if isinstance(value, list) else [value] for key, value in params.items()}
     return browse.parse(values, kinds=parse_kinds(values.get("kind", [])))
@@ -231,7 +231,7 @@ def test_the_undated_sentinel_is_a_valid_cursor():
     assert parse_cursor(NEWEST, [synthetic.UNDATED], ["1"]) == ("-", 1)
 
 
-def test_a_cursor_is_validated_against_the_selected_sort():
+def test_a_cursor_is_validated_against_the_requested_sort():
     """A timestamp cursor handed to `largest` would page through nothing.
 
     SQLite compares text against an integer by storage class, so `('2019-…', 5)
@@ -271,7 +271,7 @@ def plan_for(conn, query, cursor=None) -> str:
 def test_the_page_query_uses_the_photo_sort_index(planner):
     """No index on file.kind, so a planner that drives from `file` scans it all."""
     for cursor in (None, ("2019-07-04T11:22:33", 5)):
-        plan = plan_for(planner, selection(), cursor)
+        plan = plan_for(planner, view(), cursor)
         assert "photo_sort" in plan
         assert "TEMP B-TREE" not in plan
         assert "SCAN file" not in plan
@@ -318,7 +318,7 @@ def test_every_filter_keeps_the_default_sort_on_the_index(planner, params):
     a page rather than sorting the library and taking the first 500 -- which is
     also why no filter here needs an index of its own.
     """
-    plan = plan_for(planner, selection(**params))
+    plan = plan_for(planner, view(**params))
     assert "photo_sort" in plan, plan
     assert "TEMP B-TREE" not in plan, plan
     assert "SCAN file" not in plan, plan
@@ -328,7 +328,7 @@ def test_every_filter_keeps_the_default_sort_on_the_index(planner, params):
 def test_every_sort_pages_without_scanning_file(planner, name):
     """An alternate ordering sorts `photo` -- 230-290 ms, the price of the sort --
     but it must still reach `file` by its primary key and never scan it."""
-    query = selection(sort=name)
+    query = view(sort=name)
     for cursor in (None, parse_cursor(SORTS[name], ["0"] if SORTS[name].cursor != "time" else ["-"], ["5"])):
         plan = plan_for(planner, query, cursor)
         assert "SCAN file" not in plan, plan
@@ -337,13 +337,13 @@ def test_every_sort_pages_without_scanning_file(planner, name):
 
 
 def test_a_filter_set_is_one_key_however_it_is_spelled():
-    """The `total` memo is keyed on the parsed selection, so two spellings of one
-    selection are one count and not two."""
-    assert selection(year="2024,2025") == selection(year=["2025", "2024"])
-    assert selection(kind="image") == selection(kind="image,raw_image")
-    assert selection(camera=["a", "b", "a"]) == selection(camera=["b", "a"])
-    assert selection(year="2024") != selection(year="2025")
-    assert selection(sort="largest") != selection(sort="smallest")
+    """The `total` memo is keyed on the parsed view, so two spellings of one
+    view are one count and not two."""
+    assert view(year="2024,2025") == view(year=["2025", "2024"])
+    assert view(kind="image") == view(kind="image,raw_image")
+    assert view(camera=["a", "b", "a"]) == view(camera=["b", "a"])
+    assert view(year="2024") != view(year="2025")
+    assert view(sort="largest") != view(sort="smallest")
 
 
 # -- paging --------------------------------------------------------------
@@ -439,7 +439,7 @@ def test_every_page_carries_the_length_of_the_whole_walk(make_grid):
         cursor = body["next"]
 
 
-def test_the_total_follows_the_kind_selection(grid):
+def test_the_total_follows_the_kind_filter(grid):
     """One memo per kind, summed per request -- not one count of everything.
 
     `raw_image` is 1 photo in 9 here, so a total that ignored `kind` would be
@@ -520,8 +520,8 @@ def test_the_total_follows_the_whole_filter_set(grid):
 
 
 def test_a_total_is_counted_once_per_filter_set(grid):
-    """Memoised on the parsed selection, so paging does not recount, and two
-    spellings of one selection do not count twice."""
+    """Memoised on the parsed view, so paging does not recount, and two
+    spellings of one view do not count twice."""
     counted = []
     original = GridServer.total
 
@@ -533,7 +533,7 @@ def test_a_total_is_counted_once_per_filter_set(grid):
     try:
         for url in (
             "/api/photos?limit=5&orient=portrait",
-            "/api/photos?limit=5&orient=portrait",  # same selection, again
+            "/api/photos?limit=5&orient=portrait",  # same view, again
             "/api/photos?limit=5&orient=portrait&kind=image,raw_image",  # the default kind
             "/api/photos?limit=5&orient=square",  # a different one
         ):
@@ -541,7 +541,7 @@ def test_a_total_is_counted_once_per_filter_set(grid):
     finally:
         GridServer.total = original
     assert len(counted) == 4  # asked four times...
-    assert len(set(counted)) == 2  # ...for two distinct selections
+    assert len(set(counted)) == 2  # ...for two distinct views
     assert len(grid.server._totals) == 2  # ...and counted twice
 
 
@@ -625,7 +625,7 @@ def expected_covers(rows) -> dict[str, int]:
 
 
 def walk_stacked(port: int, query: str, limit: int = 500):
-    """Page a stacked selection to exhaustion. Returns [(cover id, size)]."""
+    """Page a stacked view to exhaustion. Returns [(cover id, size)]."""
     covers: list[tuple[int, int]] = []
     cursor = None
     for _ in range(200):
@@ -733,7 +733,7 @@ def test_stacking_off_carries_no_frames(stacked):
     assert all("m" not in photo for photo in body["photos"])
 
 
-def test_paging_a_stacked_selection_returns_each_stack_exactly_once(stacked):
+def test_paging_a_stacked_view_returns_each_stack_exactly_once(stacked):
     """Every page size, including ones that land a boundary inside a burst.
 
     A stack straddling a boundary is what breaks a naive collapse: half of it
@@ -770,7 +770,7 @@ def test_a_stack_straddling_a_page_boundary_comes_back_whole(stacked):
 def test_a_page_of_tiles_that_cannot_stack_still_ends(stacked):
     """`dated=mtime` selects only tiles the window excludes, so there is never an
     open run to close. A page that looked for its cut among stackable tiles
-    alone would never find one and would serve the whole selection at once."""
+    alone would never find one and would serve the whole view at once."""
     guessed = [row[0] for row in stacked.rows if row[4] == "mtime"]
     assert len(guessed) == 2
 
@@ -872,7 +872,7 @@ def test_a_frame_whose_quality_pass_failed_is_not_drawn_over_one_that_can_be_ran
 
 
 def test_filtering_out_a_cover_promotes_the_frame_the_rule_names_next(stacked):
-    """A stack forms over the current selection, so the cover has to be resolved
+    """A stack forms over the current view, so the cover has to be resolved
     against the members that survived the filter. Burst 1's bracket is drawn as
     its middle exposure (2), which is also the only square frame in it: removing
     the squares leaves 1 and 3, still one stack at a four-second window, and the
@@ -938,7 +938,7 @@ def test_a_guessed_date_is_never_stacked(stacked):
 
 
 def test_a_filter_applies_before_stacking(stacked):
-    """A stack forms over whatever the selection holds. Portrait keeps one frame
+    """A stack forms over whatever the view holds. Portrait keeps one frame
     in three, so the bracket it splits is three stacks of one where it was one
     of three -- which is correct, not a defect."""
     body = get_json(stacked.port, "/api/photos?limit=1000&stack=4&orient=portrait")
@@ -948,7 +948,7 @@ def test_a_filter_applies_before_stacking(stacked):
 
 def test_a_stacked_page_carries_both_of_the_count_panes_numbers(stacked):
     """`<stacks> stacks · <photos> photos`. The first is about the whole
-    selection and not the page in front of it, so a first page of one cover
+    view and not the page in front of it, so a first page of one cover
     still says how many there are in all -- and it is what the sheet reserves
     its height for, because the rows it will hold are covers."""
     first = get_json(stacked.port, "/api/photos?limit=1&stack=4")
@@ -962,7 +962,7 @@ def test_a_stacked_page_carries_both_of_the_count_panes_numbers(stacked):
     assert filtered["total"] == sum(photo["n"] for photo in filtered["photos"])
 
 
-def test_the_stack_count_is_counted_once_per_selection_and_window(stacked):
+def test_the_stack_count_is_counted_once_per_view_and_window(stacked):
     """~380 ms and the same answer for every page, so it is banked like a total.
     Two windows are two counts; two sorts are one, because the sort decides
     which member covers a stack and never how many stacks there are."""
@@ -1021,7 +1021,7 @@ def test_the_default_sort_still_pages_on_the_index_with_stacking_on(planner):
     for params in ({"stack": "4"}, {"stack": "4", "orient": "portrait"},
                    {"stack": "10", "sort": "oldest"}):
         for cursor in (None, ("2019-07-04T11:22:33", 5)):
-            plan = plan_for(planner, selection(**params), cursor)
+            plan = plan_for(planner, view(**params), cursor)
             assert "photo_sort" in plan, plan
             assert "TEMP B-TREE" not in plan, plan
             assert "SCAN file" not in plan, plan
@@ -1053,10 +1053,10 @@ def test_a_default_sort_never_runs_the_grouping_pass(stacked):
     assert stacked.server._assignments == {}
 
 
-def test_an_assignment_is_computed_once_per_selection(stacked):
+def test_an_assignment_is_computed_once_per_view(stacked):
     """~380 ms over the real corpus and the same answer for every page of one
-    selection, so paging must not recompute it -- and two windows are two
-    selections, because the window is what it groups by."""
+    view, so paging must not recompute it -- and two windows are two
+    views, because the window is what it groups by."""
     built = []
     original = grid_module.build_assignment
 

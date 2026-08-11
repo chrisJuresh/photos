@@ -3449,17 +3449,17 @@ function mo() {
 function ti(e) {
   return document.documentElement.dataset.theme = e, localStorage.setItem(Za, e), e;
 }
-var wo = /* @__PURE__ */ I('<div class="glass marks svelte-zne36e"><span class="nums svelte-zne36e"><strong class="svelte-zne36e"> </strong> <span class="muted svelte-zne36e"> </span> <strong class="svelte-zne36e"> </strong> <span class="muted svelte-zne36e"> </span></span> <button class="menu small svelte-zne36e" title="Copy the conditions and the marked ids to the clipboard">Share</button> <button class="menu small svelte-zne36e">Clear</button></div>'), yo = /* @__PURE__ */ I('<span class="spin svelte-zne36e" aria-label="loading"></span>'), ea = /* @__PURE__ */ I('<span class="badge svelte-zne36e"> </span>'), xo = /* @__PURE__ */ I('<button class="fchip svelte-zne36e"><span class="muted svelte-zne36e"> </span> <span class="x svelte-zne36e">×</span></button>'), ko = /* @__PURE__ */ I('<div class="chips svelte-zne36e"><!> <button class="clear svelte-zne36e">Clear all</button></div>'), So = /* @__PURE__ */ I("<button> </button>"), Eo = /* @__PURE__ */ I('<div class="glass sheet sorts svelte-zne36e"></div>'), To = /* @__PURE__ */ I(`<div class="glass sheet stacks svelte-zne36e"><section><h2 class="svelte-zne36e">Stacking</h2> <div class="options svelte-zne36e"><button role="switch"> </button></div> <p class="note svelte-zne36e">A run of consecutive frames from one camera is drawn as one tile.</p></section> <section><h2 id="stack-window" class="svelte-zne36e">Window</h2> <div class="slider svelte-zne36e"><input type="range" step="1" aria-labelledby="stack-window" class="svelte-zne36e"/> <span class="secs svelte-zne36e"> </span></div> <p class="note svelte-zne36e">Frames further apart than this start a new stack. Four is where the
-            number of distinct sets in this library peaks.</p></section></div>`), Mo = /* @__PURE__ */ I('<p class="muted svelte-zne36e">loading…</p>'), Ao = /* @__PURE__ */ I('<span class="help svelte-zne36e">?</span>'), Ro = /* @__PURE__ */ I('<span class="n svelte-zne36e"> </span>'), Po = /* @__PURE__ */ I("<button> <!></button>"), Co = /* @__PURE__ */ I('<span class="muted svelte-zne36e">nothing here</span>'), No = /* @__PURE__ */ I('<section class="svelte-zne36e"><h2 class="svelte-zne36e"> <!></h2> <div class="options svelte-zne36e"><!> <!></div></section>'), Oo = /* @__PURE__ */ I('<div class="glass sheet filters svelte-zne36e"><!></div>'), Io = /* @__PURE__ */ I('<div class="topbar svelte-zne36e"><div class="panes svelte-zne36e"><!> <div class="glass tally svelte-zne36e"><strong class="svelte-zne36e"> </strong> <span class="muted svelte-zne36e"> </span> <!></div></div> <div class="stack svelte-zne36e"><div class="glass bar svelte-zne36e" role="toolbar" aria-label="Grid controls" tabindex="-1"><div class="controls svelte-zne36e"><button> <span class="caret svelte-zne36e">▾</span></button> <button>Filters<!><span class="caret svelte-zne36e">▾</span></button> <button>Stacks<!><span class="caret svelte-zne36e">▾</span></button> <button role="switch" title="Mark tiles by clicking them, then copy their ids">Select</button> <!></div> <button class="menu theme svelte-zne36e"> </button> <button class="menu svelte-zne36e" title="Leave the grid and go to triage">Triage</button></div> <!> <!> <!></div></div>');
+var wo = /* @__PURE__ */ I('<div class="glass selected svelte-zne36e"><span class="nums svelte-zne36e"><strong class="svelte-zne36e"> </strong> <span class="muted svelte-zne36e"> </span> <strong class="svelte-zne36e"> </strong> <span class="muted svelte-zne36e"> </span></span> <button class="menu small svelte-zne36e" title="Copy the conditions and the selected ids to the clipboard">Share</button> <button class="menu small svelte-zne36e">Clear</button></div>'), yo = /* @__PURE__ */ I('<span class="spin svelte-zne36e" aria-label="loading"></span>'), ea = /* @__PURE__ */ I('<span class="badge svelte-zne36e"> </span>'), xo = /* @__PURE__ */ I('<button class="fchip svelte-zne36e"><span class="muted svelte-zne36e"> </span> <span class="x svelte-zne36e">×</span></button>'), ko = /* @__PURE__ */ I('<div class="chips svelte-zne36e"><!> <button class="clear svelte-zne36e">Clear all</button></div>'), So = /* @__PURE__ */ I("<button> </button>"), Eo = /* @__PURE__ */ I('<div class="glass sheet sorts svelte-zne36e"></div>'), To = /* @__PURE__ */ I(`<div class="glass sheet stacks svelte-zne36e"><section><h2 class="svelte-zne36e">Stacking</h2> <div class="options svelte-zne36e"><button role="switch"> </button></div> <p class="note svelte-zne36e">A run of consecutive frames from one camera is drawn as one tile.</p></section> <section><h2 id="stack-window" class="svelte-zne36e">Window</h2> <div class="slider svelte-zne36e"><input type="range" step="1" aria-labelledby="stack-window" class="svelte-zne36e"/> <span class="secs svelte-zne36e"> </span></div> <p class="note svelte-zne36e">Frames further apart than this start a new stack. Four is where the
+            number of distinct sets in this library peaks.</p></section></div>`), Mo = /* @__PURE__ */ I('<p class="muted svelte-zne36e">loading…</p>'), Ao = /* @__PURE__ */ I('<span class="help svelte-zne36e">?</span>'), Ro = /* @__PURE__ */ I('<span class="n svelte-zne36e"> </span>'), Po = /* @__PURE__ */ I("<button> <!></button>"), Co = /* @__PURE__ */ I('<span class="muted svelte-zne36e">nothing here</span>'), No = /* @__PURE__ */ I('<section class="svelte-zne36e"><h2 class="svelte-zne36e"> <!></h2> <div class="options svelte-zne36e"><!> <!></div></section>'), Oo = /* @__PURE__ */ I('<div class="glass sheet filters svelte-zne36e"><!></div>'), Io = /* @__PURE__ */ I('<div class="topbar svelte-zne36e"><div class="panes svelte-zne36e"><!> <div class="glass tally svelte-zne36e"><strong class="svelte-zne36e"> </strong> <span class="muted svelte-zne36e"> </span> <!></div></div> <div class="stack svelte-zne36e"><div class="glass bar svelte-zne36e" role="toolbar" aria-label="Grid controls" tabindex="-1"><div class="controls svelte-zne36e"><button> <span class="caret svelte-zne36e">▾</span></button> <button>Filters<!><span class="caret svelte-zne36e">▾</span></button> <button>Stacks<!><span class="caret svelte-zne36e">▾</span></button> <button role="switch" title="Select tiles by clicking them, then copy their ids">Select</button> <!></div> <button class="menu theme svelte-zne36e"> </button> <button class="menu svelte-zne36e" title="Leave the grid and go to triage">Triage</button></div> <!> <!> <!></div></div>');
 function zo(e, t) {
   pt(t, !0);
-  let n = $(t, "facets", 3, null), s = $(t, "selected", 19, () => ({})), a = $(t, "sort", 3, "newest"), i = $(t, "stacking", 19, () => ({ on: !1, window: 4 })), l = $(t, "total", 3, null), c = $(t, "tiles", 3, null), o = $(t, "loading", 3, !1), u = $(t, "selecting", 3, !1), g = $(t, "marked", 19, () => ({ stacks: 0, photos: 0 })), m = $(t, "onselect", 3, () => {
+  let n = $(t, "facets", 3, null), s = $(t, "filters", 19, () => ({})), a = $(t, "sort", 3, "newest"), i = $(t, "stacking", 19, () => ({ on: !1, window: 4 })), l = $(t, "total", 3, null), c = $(t, "tiles", 3, null), o = $(t, "loading", 3, !1), u = $(t, "selecting", 3, !1), g = $(t, "selectedTally", 19, () => ({ stacks: 0, photos: 0 })), m = $(t, "onfilter", 3, () => {
   }), _ = $(t, "onsort", 3, () => {
   }), h = $(t, "onstack", 3, () => {
   }), b = $(t, "onclear", 3, () => {
   }), w = $(t, "onselecting", 3, () => {
   }), d = $(t, "onshare", 3, () => {
-  }), v = $(t, "onunmark", 3, () => {
+  }), v = $(t, "ondeselect", 3, () => {
   }), y = $(t, "ontriage", 3, () => {
   }), P = /* @__PURE__ */ X(
     ""
@@ -3517,7 +3517,10 @@ function zo(e, t) {
         (on, rr) => {
           R(Re, on), R(He, g().stacks === 1 ? "stack" : "stacks"), R($t, rr), R(ln, g().photos === 1 ? "photo" : "photos");
         },
-        [() => Oe(g().stacks), () => Oe(g().photos)]
+        [
+          () => Oe(g().stacks),
+          () => Oe(g().photos)
+        ]
       ), Z("click", At, () => d()()), Z("click", dt, () => v()()), C(L, le);
     };
     te(M, (L) => {
@@ -4557,7 +4560,7 @@ function Tc(e) {
 var Mc = /* @__PURE__ */ I('<main id="canvas"><div id="sentinel"></div></main>');
 function Ac(e, t) {
   pt(t, !0);
-  let n = $(t, "key", 3, ""), s = $(t, "total", 3, null), a = $(t, "triage", 3, !1), i = $(t, "excludedDirs", 19, () => []), l = $(t, "selecting", 3, !1), c = $(t, "markedKeys", 19, () => []), o = $(t, "onActivate", 3, () => {
+  let n = $(t, "key", 3, ""), s = $(t, "total", 3, null), a = $(t, "triage", 3, !1), i = $(t, "excludedDirs", 19, () => []), l = $(t, "selecting", 3, !1), c = $(t, "selectedKeys", 19, () => []), o = $(t, "onActivate", 3, () => {
   }), u = $(t, "onOverride", 3, async () => null), g = $(t, "onExcludeFolder", 3, () => {
   }), m = $(t, "onState", 3, () => {
   }), _ = $(t, "onSweepStart", 3, () => {
@@ -4593,7 +4596,7 @@ function Ac(e, t) {
     F.className = "tick", A.appendChild(F);
   }
   function U(A, F) {
-    A.dataset.marked = r(P).has(F.id) ? "on" : "off";
+    A.dataset.selected = r(P).has(F.id) ? "on" : "off";
   }
   nr(() => (v = Ec(r(w), r(d), {
     fetchPage: (A) => t.fetchPage(A),
@@ -4650,7 +4653,7 @@ function Ac(e, t) {
 var Rc = /* @__PURE__ */ I('<th class="box svelte-1v3p82v"><span class="hide svelte-1v3p82v">select</span></th>'), Pc = /* @__PURE__ */ I('<th class="num svelte-1v3p82v"> </th>'), Cc = /* @__PURE__ */ I('<td class="box svelte-1v3p82v"><button type="button" role="checkbox" title="Select for a bulk exclude. Shift-click to extend from the last box you clicked."> </button></td>'), Nc = /* @__PURE__ */ I('<span class="scope svelte-1v3p82v" title="From the survey-time rollup over the whole inventory. It does not move as you edit — re-costing it live is 1.9-3.2 s.">whole inventory</span>'), Oc = /* @__PURE__ */ I('<td class="num svelte-1v3p82v"> </td>'), Ic = /* @__PURE__ */ I('<tr><!><td class="key svelte-1v3p82v"><span> </span> <!></td><td class="num svelte-1v3p82v"> </td><td class="num svelte-1v3p82v"> </td><!></tr>'), zc = /* @__PURE__ */ I('<table class="agg svelte-1v3p82v"><thead><tr><!><th class="svelte-1v3p82v"> </th><th class="num svelte-1v3p82v">paths</th><th class="num svelte-1v3p82v">bytes</th><!></tr></thead><tbody></tbody></table>');
 function Fc(e, t) {
   pt(t, !0);
-  let n = $(t, "rows", 19, () => []), s = $(t, "rules", 19, () => []), a = $(t, "root", 3, null), i = $(t, "selected", 3, null), l = $(t, "checked", 19, () => /* @__PURE__ */ new Set());
+  let n = $(t, "rows", 19, () => []), s = $(t, "rules", 19, () => []), a = $(t, "root", 3, null), i = $(t, "picked", 3, null), l = $(t, "checked", 19, () => /* @__PURE__ */ new Set());
   const c = /* @__PURE__ */ se(() => t.screen.rule !== !1);
   function o(w) {
     return t.screen.label ? t.screen.label(w) : w.key;
@@ -4760,7 +4763,7 @@ Ht(["click"]);
 var Lc = /* @__PURE__ */ I('<button class="twisty svelte-pucy57"> </button>'), Dc = /* @__PURE__ */ I('<span class="twisty leaf svelte-pucy57">·</span>'), jc = /* @__PURE__ */ I('<span class="name root svelte-pucy57"> </span>'), Hc = /* @__PURE__ */ I('<button class="name svelte-pucy57"> </button>'), Bc = /* @__PURE__ */ I('<div class="note err svelte-pucy57">could not load — click the arrow to retry</div>'), qc = /* @__PURE__ */ I('<div class="note svelte-pucy57"> </div>'), Uc = /* @__PURE__ */ I('<div class="note err svelte-pucy57">showing the largest 200 subfolders — there are more</div>'), Wc = /* @__PURE__ */ I('<div><span class="indent svelte-pucy57"></span> <!> <!> <span class="num svelte-pucy57"> </span> <span class="num size svelte-pucy57"> </span> <button class="drop svelte-pucy57">✕</button></div> <!> <!>', 1), Yc = /* @__PURE__ */ I('<div class="tree svelte-pucy57"></div>');
 function Gc(e, t) {
   pt(t, !0);
-  let n = $(t, "version", 3, 0), s = $(t, "excludedDirs", 19, () => []), a = $(t, "selected", 3, null), i = $(t, "busy", 3, !1), l = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Map())), c = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Set())), o = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Set())), u = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Set()));
+  let n = $(t, "version", 3, 0), s = $(t, "excludedDirs", 19, () => []), a = $(t, "picked", 3, null), i = $(t, "busy", 3, !1), l = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Map())), c = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Set())), o = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Set())), u = /* @__PURE__ */ X(Ie(/* @__PURE__ */ new Set()));
   async function g(d) {
     x(o, new Set(r(o)).add(d), !0);
     const v = await t.onload(d), y = new Map(r(l)), P = new Set(r(u));
@@ -5169,7 +5172,7 @@ function is(e, t, n, s) {
   const a = e + t;
   return a < 0 || a >= n && s ? null : a;
 }
-var nu = /* @__PURE__ */ I('<button><span class="n svelte-1n46o8q"> </span> </button>'), ru = /* @__PURE__ */ I('<button>← all roots</button> <span class="muted svelte-1n46o8q"> </span>', 1), su = /* @__PURE__ */ I('<button title="Costs 1.9-3.2 s: the top 50 segments span 1,953,553 of the 2,894,845 rows in the segment index."> </button>'), au = /* @__PURE__ */ I('<div class="muted pad svelte-1n46o8q">loading…</div>'), iu = /* @__PURE__ */ I('<div class="tablehead svelte-1n46o8q"><!></div> <!> <!>', 1), lu = /* @__PURE__ */ I('<aside class="side"><div class="modes svelte-1n46o8q"><button>← grid</button></div> <nav class="svelte-1n46o8q"></nav> <!> <!> <!> <!></aside>'), ou = /* @__PURE__ */ I('<p class="blurb"> </p>'), cu = /* @__PURE__ */ I('<div class="bulkbar svelte-1n46o8q"><strong> </strong> <button> </button> <button>Clear selection</button> <span class="muted svelte-1n46o8q"><!></span></div>'), uu = /* @__PURE__ */ I('<div class="sheetbar muted svelte-1n46o8q"> <span class="hint svelte-1n46o8q">click a tile to reveal it · click the corner chip to override</span></div>'), du = /* @__PURE__ */ I('<p class="muted svelte-1n46o8q">No contact sheet here — you cannot look at a .d.ts. This screen is the table.</p>'), fu = /* @__PURE__ */ I('<h1> </h1> <p class="blurb"> </p> <!> <!> <!> <!> <!> <!>', 1), hu = /* @__PURE__ */ I("<div> </div>"), vu = /* @__PURE__ */ I('<!> <!> <div><!> <div class="main"><!> <!></div></div> <!> <!>', 1);
+var nu = /* @__PURE__ */ I('<button><span class="n svelte-1n46o8q"> </span> </button>'), ru = /* @__PURE__ */ I('<button>← all roots</button> <span class="muted svelte-1n46o8q"> </span>', 1), su = /* @__PURE__ */ I('<button title="Costs 1.9-3.2 s: the top 50 segments span 1,953,553 of the 2,894,845 rows in the segment index."> </button>'), au = /* @__PURE__ */ I('<div class="muted pad svelte-1n46o8q">loading…</div>'), iu = /* @__PURE__ */ I('<div class="tablehead svelte-1n46o8q"><!></div> <!> <!>', 1), lu = /* @__PURE__ */ I('<aside class="side"><div class="modes svelte-1n46o8q"><button>← grid</button></div> <nav class="svelte-1n46o8q"></nav> <!> <!> <!> <!></aside>'), ou = /* @__PURE__ */ I('<p class="blurb"> </p>'), cu = /* @__PURE__ */ I('<div class="bulkbar svelte-1n46o8q"><strong> </strong> <button> </button> <button>Clear</button> <span class="muted svelte-1n46o8q"><!></span></div>'), uu = /* @__PURE__ */ I('<div class="sheetbar muted svelte-1n46o8q"> <span class="hint svelte-1n46o8q">click a tile to reveal it · click the corner chip to override</span></div>'), du = /* @__PURE__ */ I('<p class="muted svelte-1n46o8q">No contact sheet here — you cannot look at a .d.ts. This screen is the table.</p>'), fu = /* @__PURE__ */ I('<h1> </h1> <p class="blurb"> </p> <!> <!> <!> <!> <!> <!>', 1), hu = /* @__PURE__ */ I("<div> </div>"), vu = /* @__PURE__ */ I('<!> <!> <div><!> <div class="main"><!> <!></div></div> <!> <!>', 1);
 function pu(e, t) {
   pt(t, !0);
   const n = location.pathname === "/tune";
@@ -5387,11 +5390,11 @@ function pu(e, t) {
   function Ut(E, ee) {
     oe = {
       from: r(N),
-      marking: E === null || !Vt(E)
+      adding: E === null || !Vt(E)
     }, ee !== null && x(V, ee, !0);
   }
   function Et(E) {
-    x(N, sa(oe.from, E.map(as), oe.marking), !0);
+    x(N, sa(oe.from, E.map(as), oe.adding), !0);
   }
   function Tt() {
     oe = null;
@@ -5448,7 +5451,7 @@ function pu(e, t) {
         get facets() {
           return r(B);
         },
-        get selected() {
+        get filters() {
           return r(G);
         },
         get sort() {
@@ -5469,16 +5472,16 @@ function pu(e, t) {
         get selecting() {
           return r(K);
         },
-        get marked() {
+        get selectedTally() {
           return r(O);
         },
-        onselect: Te,
+        onfilter: Te,
         onsort: (ee) => x(J, ee, !0),
         onstack: (ee) => x(ne, bo(ee), !0),
         onclear: () => x(G, {}, !0),
         onselecting: (ee) => x(K, ee, !0),
         onshare: ke,
-        onunmark: Ze,
+        ondeselect: Ze,
         ontriage: () => x(s, "triage")
       });
     };
@@ -5556,7 +5559,7 @@ function pu(e, t) {
               get rules() {
                 return r(et);
               },
-              get selected() {
+              get picked() {
                 return r(c);
               },
               onpick: Ae,
@@ -5582,7 +5585,7 @@ function pu(e, t) {
             get excludedDirs() {
               return r(T);
             },
-            get selected() {
+            get picked() {
               return r(c);
             },
             get busy() {
@@ -5763,7 +5766,7 @@ function pu(e, t) {
             get selecting() {
               return r(je);
             },
-            get markedKeys() {
+            get selectedKeys() {
               return r(F);
             },
             onActivate: st,

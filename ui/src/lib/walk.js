@@ -5,11 +5,11 @@
 // whatever its stack size — the one meaning that holds on a stack of fifty and
 // on a tile that stands alone. That leaves stepping as arithmetic over the two
 // facts the sheet already reports: how many tiles it has read, and whether that
-// is all of them. It lives here, apart from the DOM, so both ends of a selection
+// is all of them. It lives here, apart from the DOM, so both ends of a view
 // can be asserted without a browser.
 
 /**
- * The tile an arrow lands on, or null at the true ends of the selection.
+ * The tile an arrow lands on, or null at the true ends of the view.
  *
  * `at` is the tile the overlay is showing, `delta` -1 or 1, `loaded` how many
  * tiles the sheet has paged in, `exhausted` whether that is the whole answer.

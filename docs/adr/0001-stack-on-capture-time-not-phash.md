@@ -86,8 +86,8 @@ Projected onto tiles it is 2,735 groups, not 10,717.
   hoped for here: the first 500-cover page on `newest` reads 1,805 tiles and ranks
   1,632 of them to pick covers, ~75 ms against an unstacked 10 ms. A 200-cover page
   is 16 ms, and page size is the lever. `docs/grid-queries.md` has the bill.
-- Filters apply *before* stacking, so a stack re-forms over whatever is selected
-  and the cover is resolved per query rather than materialised.
+- Filters apply *before* stacking, so a stack re-forms over whatever the view
+  holds and the cover is resolved per query rather than materialised.
 - The 449 tiles dated from `mtime` or filename are never stacked: a file date is
   a copy date, and a wrong stack is worse than no stack.
 - The grid's `dup` filter is relabelled **Identical frames**, because at the

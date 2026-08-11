@@ -1,4 +1,5 @@
-// Select mode's data: which tiles are marked, and what a report of them says.
+// Select mode's data: which tiles the reader has selected, and what a report of
+// them says.
 //
 // The grid is being reported as grouping wrongly, and this is the instrument for
 // saying which runs. So what leaves here is not a flat list of photograph ids —
@@ -10,7 +11,7 @@
 // drives them through the node adapter rather than through a browser.
 
 /**
- * The mark a tile stands for: the stack's key and every photograph in it.
+ * What one selected tile stands for: the stack's key and every photograph in it.
  *
  * `m` is the page's own answer to what a stack holds, and it is absent on a
  * stack of one and on every tile while stacking is off — the same shape
@@ -23,27 +24,26 @@ export function stackOf(item) {
 }
 
 /**
- * Mark the stack if it is not marked, unmark it if it is. A new array every
- * time: `$state` does not proxy deeply enough for a mutation to repaint the
- * tickboxes, and reassignment is what makes them redraw.
+ * Select the stack if it is not selected, deselect it if it is. A new array
+ * every time: `$state` does not proxy deeply enough for a mutation to repaint
+ * the tickboxes, and reassignment is what makes them redraw.
  *
  * An array and not an object keyed by id, because JS iterates integer-like keys
  * in ascending numeric order — which would quietly reorder a report away from
  * the order the reader clicked in, and the order is part of what they saw.
  */
-export function toggle(marks, stack) {
-  const without = marks.filter((entry) => entry.key !== stack.key);
-  return without.length === marks.length ? [...marks, stack] : without;
+export function toggle(selected, stack) {
+  const without = selected.filter((entry) => entry.key !== stack.key);
+  return without.length === selected.length ? [...selected, stack] : without;
 }
 
 /**
  * One verdict applied to a run of stacks: the marquee's, and shift-click's.
  *
- * `marking` is fixed before the run is known — by the state of the tile the drag
+ * `adding` is fixed before the run is known — by the state of the tile the drag
  * pressed on, or by the state of the tile the shift-click landed on — so this
  * takes it rather than deciding it per stack. A box whose meaning changed under
- * the hand as it grew would be unusable. (Not `mark`: that is a noun in this
- * domain — a marked tile — and this is the direction the run is going.)
+ * the hand as it grew would be unusable.
  *
  * Additive in both directions: it adds or removes what it was handed and leaves
  * everything else exactly where it was. The reader sweeps several separate runs
@@ -54,20 +54,20 @@ export function toggle(marks, stack) {
  * re-applies this to the snapshot it took at the start on every pointer move,
  * which is what makes a tile the box has moved back off revert.
  */
-export function sweep(marks, stacks, marking) {
-  if (!marking) {
+export function sweep(selected, stacks, adding) {
+  if (!adding) {
     const swept = new Set(stacks.map((stack) => stack.key));
-    return marks.filter((entry) => !swept.has(entry.key));
+    return selected.filter((entry) => !swept.has(entry.key));
   }
-  const held = new Set(marks.map((entry) => entry.key));
-  return [...marks, ...stacks.filter((stack) => !held.has(stack.key))];
+  const held = new Set(selected.map((entry) => entry.key));
+  return [...selected, ...stacks.filter((stack) => !held.has(stack.key))];
 }
 
-/** How many stacks are marked, and how many photographs they hold. */
-export function tally(marks) {
+/** How many stacks are selected, and how many photographs they hold. */
+export function tally(selected) {
   return {
-    stacks: marks.length,
-    photos: marks.reduce((sum, entry) => sum + entry.ids.length, 0),
+    stacks: selected.length,
+    photos: selected.reduce((sum, entry) => sum + entry.ids.length, 0),
   };
 }
 
@@ -75,9 +75,9 @@ export function tally(marks) {
  * What was on screen, in one line. `query` is `{stacking, sort, filters}` —
  * the grid's own state, unchanged.
  *
- * Dimensions in name order so two reports of one selection are one string.
- * A dimension with nothing ticked never reaches the grid's query and does not
- * reach this either.
+ * Dimensions in name order so two reports of one view are one string.
+ * A dimension with nothing filtered on never reaches the grid's query and does
+ * not reach this either.
  */
 export function conditions(query) {
   const stack = query.stacking.on ? query.stacking.window + "s" : "off";
@@ -88,8 +88,8 @@ export function conditions(query) {
   return `stack=${stack} sort=${query.sort} filters=${filters.length ? filters.join(",") : "none"}`;
 }
 
-/** The conditions line, then the marked ids grouped as the grid grouped them. */
-export function shareText(query, marks) {
-  const stacks = marks.map((entry) => "[" + entry.ids.join(",") + "]").join(",");
+/** The conditions line, then the selected ids grouped as the grid grouped them. */
+export function shareText(query, selected) {
+  const stacks = selected.map((entry) => "[" + entry.ids.join(",") + "]").join(",");
   return conditions(query) + "\n" + stacks;
 }

@@ -18,7 +18,7 @@ which replaced the 1.07 s per-kind count. The client hardcodes no dimension name
 **adding a filter is a change to `browse.py` alone.**
 
 Facet counts are **unconditional** — what the library holds, not what the current
-selection holds — because cross-filtering them would cost one count per dimension per
+view holds — because cross-filtering them would cost one count per dimension per
 click, and a menu that renumbers itself as you tick through it is worse at the one job
 it has.
 
@@ -26,14 +26,14 @@ it has.
 
 **Every filter leaves the default sort on the `photo_sort` index**, so a filtered page
 is 9–15 ms: 100–152 ms for `root` and `grade`, which carry a subquery, and ~430 ms in
-the worst case, which is a selection narrow enough that the index has to be walked to
+the worst case, which is a view narrow enough that the index has to be walked to
 its end to fill one page. An alternate ordering cannot use the index and pays
 230–290 ms to sort 24,536 rows. That is the honest price of "largest first" against
 this schema and it is charged only when such a sort is chosen.
 
 **`total` is 230–400 ms whatever the filter**, because a count visits every tile. It is
 therefore memoised per filter set on the frozen `Query` object and never recomputed per
-page — see `GridServer.total`. Two requests that mean the same selection are the same
+page — see `GridServer.total`. Two requests that mean the same view are the same
 key however the query string was spelled.
 
 A test asserts the index property for every filter, and another asserts that each facet
@@ -81,14 +81,14 @@ more than the window away from the last one that could stack — so no run strad
 boundary and a page can carry a few covers more than it asked for. That is deliberate:
 the alternative is splitting a burst across two pages.
 
-**How many stacks the whole selection holds is one more number of `total`'s shape**, and
-the badge on the Stacks pill is what asks for it — the selection's stacks, not the page
+**How many stacks the whole view holds is one more number of `total`'s shape**, and
+the badge on the Stacks pill is what asks for it — the view's stacks, not the page
 in front of the reader. The count pane beside it reads `<photos> photos` in both modes,
 so the only number that moves when stacking is toggled is the badge's. `starts` is 1
 exactly where a stack begins, so summing it counts them without building one — 410–420 ms
 unfiltered against this catalog on a warm `total` memo, which is the assignment pass's
 ~380 ms plus the sum.
-Memoised per selection under the same cap and eviction as the other two. It is the only
+Memoised per view under the same cap and eviction as the other two. It is the only
 grouping pass a default sort pays for, once, in front of the first page rather than per
 page, and a reader who has not turned stacking on never pays it. The memo key **drops the
 sort**, since the sort decides which member covers a stack and never how many there are,
@@ -97,7 +97,7 @@ grouping groups by.
 
 **The eight other sorts cannot stream**, because a stack's members are scattered through
 the ordering. They compute the whole assignment in one ~380 ms pass and memoise it per
-selection under the same cap and eviction as `total` — see `GridServer.assignment`.
+view under the same cap and eviction as `total` — see `GridServer.assignment`.
 Paging is then a slice and a page is 9 ms. The window is part of the memo key, since it
 is what the grouping groups by; it is dropped from `total`'s key, because no window
 changes how many tiles there are.

@@ -629,14 +629,14 @@ code,
   display: block;
 }
 
-/* Ticked: the accent, and a check drawn as two borders rather than a glyph, so
-   it is the same mark at any tile size and costs no font. */
-#canvas.selecting .tile[data-marked="on"] .tick {
+/* Selected: the accent, and a check drawn as two borders rather than a glyph, so
+   it is the same shape at any tile size and costs no font. */
+#canvas.selecting .tile[data-selected="on"] .tick {
   background: var(--accent);
   border-color: var(--accent);
 }
 
-#canvas.selecting .tile[data-marked="on"] .tick::after {
+#canvas.selecting .tile[data-selected="on"] .tick::after {
   content: "";
   position: absolute;
   left: 5px;
@@ -649,8 +649,8 @@ code,
 }
 
 /* The tile itself says so too. A tickbox 18px across is not legible across a
-   sheet of two hundred tiles, and the marked set is the thing being read. */
-#canvas.selecting .tile[data-marked="on"] {
+   sheet of two hundred tiles, and the selected set is the thing being read. */
+#canvas.selecting .tile[data-selected="on"] {
   outline: 3px solid var(--accent);
   outline-offset: -3px;
 }
