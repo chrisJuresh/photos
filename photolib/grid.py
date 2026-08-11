@@ -48,15 +48,14 @@ small:
     so a one-column cursor cannot page through the library at all. An alternate
     ordering pages on `(its own key, id)` the same way -- see `photolib.browse`.
 
-`stack=<seconds>` collapses each run of consecutive captures from one camera
-into one tile, so a page carries covers rather than frames and each one says how
-many it stands for. The two default sorts pay nothing for it beyond the tiles
-they read: a run is contiguous in `photo_sort` order, so a page collapses its
-own as it streams. The other eight cannot, and buy one grouping pass per
-selection instead. Which frame a stack is drawn as is `browse.cover` — the
-sharpest of the middle-exposure third — resolved from one read over the members
-of the stacks on the page and never materialised, because a filter applies
-before the grouping and can change what a stack holds.
+`stack=on` draws the frames verified to be the same photograph as one tile, so a
+page carries covers rather than frames and each one says how many it stands for.
+The grouping is `photolib.membership`'s, stored, so a page is a slice of one read
+of it — the same path for all ten sorts, and a filter can only shrink a stack.
+Which frame a stack is drawn as is `browse.cover` — the sharpest of the
+middle-exposure third — resolved from one read over the members of the stacks on
+the page and never materialised, because that is a question about the members the
+view left rather than about the stack.
 
 What can be filtered and sorted by lives in `photolib.browse`, so the vocabulary
 can be read, measured and tested without a server. This module keeps the query
@@ -91,14 +90,6 @@ DEFAULT_KINDS = ("image", "raw_image")
 
 DEFAULT_LIMIT = 500
 MAX_LIMIT = 1000
-
-# How many tiles a stacked page asks for per cover it wants. 24,534 tiles
-# collapse to 10,948 at a four-second window — 2.24 each — but the recent end of
-# the library is the bracketed end and runs nearer 3.6, so a first page wants
-# more headroom than the average. `_rows` steps rather than fetches, so asking
-# for more than the page needs costs nothing and asking for too little costs a
-# second round trip.
-TILES_PER_COVER = 6
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 # `bundle.js` and `bundle.css` are built from `ui/src` by `npm run build` and
@@ -142,6 +133,15 @@ LIMIT_VALUE = re.compile(r"^[0-9]{1,5}$")
 # integer against a small tuple, so this is not a memory bound -- it is a bound
 # on a dict whose keys come from the query string.
 MAX_TOTALS = 512
+
+# How many it may bank an *assignment* for, which is a memory bound and therefore a
+# different number: one entry is every selected tile's id in a tuple per stack, ~2 MB
+# over the real corpus. Every stacked selection banks one — the two default sorts
+# collapsed their own runs before and banked none — so 512 of them would be a
+# gigabyte held on keys that come from a query string. 32 is ~64 MB, and a reader
+# rarely has more than a handful of selections in flight; the only cost of evicting
+# the wrong one is one re-read.
+MAX_ASSIGNMENTS = 32
 
 MAX_REVEAL_BODY = 1024
 # A rule body carries a predicate value -- a directory path or an `in` list --
@@ -261,12 +261,12 @@ def build_assignment(conn: sqlite3.Connection, query: browse.Query) -> tuple:
     it depends on readings this pass does not carry, so it is asked only of the
     stacks a page actually holds.
 
-    One pass, ~380 ms; the caller memoises it. Only the eight sorts that cannot
-    stream ever ask for it — see `GridServer.assignment`.
+    One read of the stored membership per selection; the caller memoises it, and
+    both numbers the count pane shows come out of it — see `GridServer.assignment`.
     """
     sql, params = browse.assignment_sql(query)
     stacks: list[list] = []
-    seen: dict[int, int] = {}  # stack -> the index of its first member
+    seen: dict[str, int] = {}  # stack name -> the index of its first member
     for photo_id, key, stack in conn.execute(sql, params):
         index = seen.get(stack)
         if index is None:
@@ -351,8 +351,8 @@ def _frames(rows, members: tuple | list) -> dict:
     A stack of one is its own only frame, and the cover already carries an id, a
     hash and dimensions — which is the whole of a frame — so the client builds
     that list rather than being sent it. The key is absent rather than a
-    one-element list saying what the row beside it already says. That is 6,297
-    of the 10,929 rows a four-second window leaves.
+    one-element list saying what the row beside it already says. That is 5,200
+    of the 9,338 rows the stored assignment leaves.
     """
     if len(members) < 2:
         return {}
@@ -373,109 +373,22 @@ def _plain_page(conn: sqlite3.Connection, query: browse.Query, cursor, limit: in
     rows = rows[:limit]
     following = None
     if has_more and rows:
-        following = {"before": rows[-1][5], "before_id": rows[-1][0]}
+        following = {"before": rows[-1][browse.KEY], "before_id": rows[-1][0]}
     return [_photo(row) for row in rows], following
-
-
-def _rows(conn: sqlite3.Connection, query: browse.Query, cursor, chunk: int):
-    """Tiles in the page's order, refetching from the keyset cursor as needed.
-
-    A stacked page cannot know up front how many tiles it takes to fill: that is
-    the ratio it exists to change. So it reads in chunks off the same cursor the
-    client would have used, which keeps every read a `photo_sort` page.
-
-    Stepped rather than fetched, because `photo_sort` supplies the order and the
-    plan carries no temp b-tree — so a row the page never reaches is a row
-    SQLite never visits, and an over-generous chunk costs nothing. Fetching the
-    chunk instead read 3,000 tiles to serve a 1,805-tile page.
-    """
-    while True:
-        sql, params = browse.page_sql(query, cursor)
-        seen, row = 0, None
-        for row in conn.execute(sql, [*params, chunk]):
-            seen += 1
-            yield row
-        if seen < chunk:
-            return
-        cursor = (row[5], row[0])
-
-
-def _streamed(conn: sqlite3.Connection, query: browse.Query, cursor, limit: int):
-    """One page of covers, collapsing runs as the tiles arrive.
-
-    The two default sorts read in capture order, so a run's members arrive in
-    one pass and a stack takes the place of the first of them — the newest frame
-    on `newest`, the oldest on `oldest`. Which member is *drawn* there is
-    `_covers`, asked once the page is whole. Each camera keeps its own open run,
-    so a second body shooting at the same moment interleaves without splitting
-    anything.
-
-    A page ends at a *clean cut*: the first tile more than the window away from
-    the last one that could stack. Every earlier tile is further away still, so
-    no run can straddle the boundary and every stack is returned whole, on one
-    page, exactly once. Reaching `limit` is what starts looking for that cut
-    rather than what ends the page, so a page can carry a few covers more than
-    it asked for — the alternative is splitting a burst across two pages.
-
-    The cut is measured on where a tile sits and not on whether it may stack.
-    A selection holding nothing stackable — `dated=mtime`, say — has no run to
-    close, and a cut that only fired on stackable tiles would never fire and
-    serve the whole selection as one page.
-    """
-    window = query.stack
-    groups: list[list] = []  # the page's stacks, each its members' rows in order
-    runs: dict = {}  # camera -> [seconds of its last tile, index of its stack]
-    frontier = None  # the last tile that could stack, in seconds
-    last = None  # the last tile this page consumed, which is what `next` names
-    has_more = False
-
-    for row in _rows(conn, query, cursor, limit * TILES_PER_COVER):
-        camera = row[browse.CAMERA]
-        seconds, stackable = row[browse.SECONDS], row[browse.STACKABLE]
-        if len(groups) >= limit and (
-            frontier is None or seconds is None or abs(seconds - frontier) > window
-        ):
-            has_more = True
-            break
-        run = runs.get(camera) if stackable else None
-        if run is not None and abs(seconds - run[0]) <= window:
-            run[0] = seconds
-            groups[run[1]].append(row)
-        else:
-            groups.append([row])
-            if stackable:
-                runs[camera] = [seconds, len(groups) - 1]
-        if stackable:
-            frontier = seconds
-        last = row
-
-    # Every member's row is already in hand, so naming the cover costs the
-    # quality read and no second look at the tiles.
-    rows = {row[0]: row for group in groups for row in group}
-    members = [[row[0] for row in group] for group in groups]
-    covers = _covers(conn, members)
-    photos = [
-        {**_photo(rows[cover]), "n": len(group), **_frames(rows, group)}
-        for cover, group in zip(covers, members)
-    ]
-
-    following = None
-    if has_more and last is not None:
-        following = {"before": last[browse.KEY], "before_id": last[0]}
-    return photos, following
 
 
 def _assigned(
     conn: sqlite3.Connection, query: browse.Query, cursor, limit: int, stacks
 ):
-    """One page of covers, sliced out of an assignment computed in one pass.
+    """One page of covers, sliced out of an assignment read in one pass.
 
-    The eight non-time sorts cannot stream: a stack's members are scattered
-    through the ordering, so there is no run to collapse. `stacks` is every
-    stack in this sort's order, first member first, computed once per selection
-    — see `GridServer.assignment`. Paging is then a slice, and the cursor is
-    found by walking to it rather than by looking it up, so a key that survived
-    a round trip through the query string compares the way SQL would.
+    Every sort takes this path: a stack's members can sit anywhere in an ordering,
+    so there is no run to collapse as a page streams. `stacks` is every stack in
+    this sort's order, first member first, read once per selection — see
+    `GridServer.assignment`. Paging is then a slice, which is what returns a stack
+    whole on one page, and the cursor is found by walking to it rather than by
+    looking it up, so a key that survived a round trip through the query string
+    compares the way SQL would.
 
     The cursor is the first member's `(key, id)` and not the cover's, because it
     is the ordering it has to compare against: the drawn frame is chosen from
@@ -524,7 +437,6 @@ def page(
     limit: int,
     *,
     total: int | None = None,
-    stacks: int | None = None,
     assignment: tuple | None = None,
 ) -> dict:
     """One page, stacked or not, with an honest end-of-stream marker.
@@ -536,24 +448,26 @@ def page(
     of one selection, so it is counted once per selection — see
     `GridServer.total`.
 
-    With stacking on the envelope echoes `stack`, the window it grouped at, and
-    every photo gains `n`, its stack's size. It also carries `stacks`, how many
-    rows the whole selection collapses to: `total` still counts tiles, so the
-    two together are the count pane's two numbers and the first of them is what
-    the sheet reserves its height for. With stacking off none of the three keys
-    is there and the page is byte for byte what it was before stacking existed.
+    With stacking on the envelope echoes `stack`, and every photo gains `n`, its
+    stack's size. It also carries `stacks`, how many rows the whole selection
+    collapses to: `total` still counts tiles, so the two together are the count
+    pane's two numbers and the first of them is what the sheet reserves its height
+    for. It is the length of the assignment rather than a count of its own, because
+    the assignment is the answer to that question and reading it twice is how two
+    numbers about one selection come to disagree — so `assignment` is required when
+    `query.stack` is set, and passing None there raises rather than serving a page
+    that says nothing about how many stacks it is one of. With stacking off neither
+    key is there and the page is byte for byte what it was before stacking existed.
 
     A photo whose `n` is more than one also carries `m`, the frames it collapsed
     — `id`, `sha`, `width`, `height` each, in this page's own order — which is
     what the overlay draws when the stack is opened. They ride with the cover
     rather than being fetched per click because this page is where the grouping
-    is authoritative: a filter applies before stacking and the assignment memo
-    evicts, so asking again later could answer about a different set of frames.
+    is authoritative: a filter shrinks a stack and the assignment memo evicts, so
+    asking again later could answer about a different set of frames.
     """
-    if query.stack is None:
+    if not query.stack:
         photos, following = _plain_page(conn, query, cursor, limit)
-    elif query.ordering.indexed:
-        photos, following = _streamed(conn, query, cursor, limit)
     else:
         photos, following = _assigned(conn, query, cursor, limit, assignment)
     envelope = {
@@ -564,9 +478,9 @@ def page(
         "limit": limit,
         "total": total,
     }
-    if query.stack is not None:
-        envelope["stack"] = query.stack
-        envelope["stacks"] = stacks
+    if query.stack:
+        envelope["stack"] = True
+        envelope["stacks"] = len(assignment)
     return envelope
 
 
@@ -655,7 +569,6 @@ class GridServer(ThreadingHTTPServer):
         self._local = threading.local()
         self._facets: dict | None = None
         self._totals: dict[browse.Query, int] = {}
-        self._stacks: dict[browse.Query, int] = {}
         self._assignments: dict[browse.Query, tuple] = {}
         self._totals_lock = threading.Lock()
         super().__init__(address, handler)
@@ -715,9 +628,11 @@ class GridServer(ThreadingHTTPServer):
 
         Memoised on the `Query` itself: it is frozen and its fields are sorted
         tuples, so two requests that mean the same selection are the same key
-        however the query string was spelled. The stacking window is dropped
-        from the key first, because this counts tiles and no window changes how
-        many there are. The cap is on the number of distinct keys a session can
+        however the query string was spelled. The stacking mode is dropped from
+        the key first, because this counts tiles and grouping tiles changes how
+        many rows a page holds rather than how many tiles there are.
+
+        The cap is on the number of distinct keys a session can
         bank, because those keys come from a query string; when it is reached
         the oldest is dropped, and the only cost of being wrong about which is
         one recount.
@@ -731,43 +646,24 @@ class GridServer(ThreadingHTTPServer):
                 self._totals[key] = self.connection().execute(sql, params).fetchone()[0]
             return self._totals[key]
 
-    def stacks(self, query: browse.Query) -> int:
-        """How many stacks one selection collapses to, counted once per window.
-
-        The count pane says `<stacks> stacks · <photos> photos`, and the first
-        of those is about the whole selection rather than the page on screen —
-        so it is one more number of the same shape as `total`: ~410 ms measured
-        against the real catalog, the same for every page of one selection, and
-        therefore counted once in front of the first page rather than per page.
-        Same cap and same eviction as the other two memos.
-
-        Keyed on the selection with its sort dropped, because the sort decides
-        which member covers a stack and never how many stacks there are.
-        """
-        key = query.grouping()
-        with self._totals_lock:
-            if key not in self._stacks:
-                sql, params = browse.stack_count_sql(key)
-                if len(self._stacks) >= MAX_TOTALS:
-                    del self._stacks[next(iter(self._stacks))]
-                self._stacks[key] = self.connection().execute(sql, params).fetchone()[0]
-            return self._stacks[key]
-
     def assignment(self, query: browse.Query) -> tuple:
-        """How one selection stacks, grouped once per selection and window.
+        """How one selection stacks, read once per selection and sort.
 
-        Asked for only by the eight sorts that cannot collapse runs as they
-        page. The pass is ~380 ms — the same order as a `total`, and paid for
-        the same reason: it is the same answer for every page of one selection,
-        so paying it per page would put it in front of every scroll. Same cap
-        and same eviction as the count memo, on keys that come from a query
-        string. One entry is a tuple per stack carrying its members' ids, ~2 MB
-        over the real corpus, which is why the cap is on the number of
-        selections and not on bytes.
+        Every stacked page is a slice of this, and the count pane's stack figure
+        is its length — so a selection pays one pass and gets both, where the
+        window grouping paid one to count and another to assign. It is the same
+        answer for every page of one selection, so paying it per page would put it
+        in front of every scroll. Same eviction as the count memo and a cap of its
+        own: an entry here is ~2 MB where a total is one integer, and every stacked
+        selection banks one — see `MAX_ASSIGNMENTS`.
+
+        The sort is part of the key, unlike `total`'s: the assignment is in the
+        reader's own order, because that is where each stack sits and what a cursor
+        compares against.
         """
         with self._totals_lock:
             if query not in self._assignments:
-                if len(self._assignments) >= MAX_TOTALS:
+                if len(self._assignments) >= MAX_ASSIGNMENTS:
                     del self._assignments[next(iter(self._assignments))]
                 self._assignments[query] = build_assignment(self.connection(), query)
             return self._assignments[query]
@@ -775,11 +671,11 @@ class GridServer(ThreadingHTTPServer):
     def invalidate(self) -> None:
         """Drop everything memoised from the tile set. Called by a finished rebuild.
 
-        The three memos above are each justified by the same sentence — the
-        answer cannot change while a read-only process runs — and a rebuild is
-        the one event that makes that sentence false. It changes `photo` from
-        outside this process, so the counts, the facet vocabulary and the stack
-        assignments all describe a tile set that no longer exists.
+        The memos above are each justified by the same sentence — the answer
+        cannot change while a read-only process runs — and a rebuild is the one
+        event that makes that sentence false. It changes `photo` from outside this
+        process, so the counts, the facet vocabulary and the stack assignments all
+        describe a tile set that no longer exists.
 
         Clearing is enough; nothing here has to reconnect. A connection opened
         `mode=ro` sees whatever was committed before its next read transaction
@@ -790,7 +686,6 @@ class GridServer(ThreadingHTTPServer):
         with self._totals_lock:
             self._facets = None
             self._totals.clear()
-            self._stacks.clear()
             self._assignments.clear()
 
     def state_writer(self) -> sqlite3.Connection:
@@ -953,15 +848,10 @@ class GridHandler(BaseHTTPRequestHandler):
             cursor,
             limit,
             total=self.server.total(selection),
-            stacks=(
-                self.server.stacks(selection) if selection.stack is not None else None
-            ),
-            # Only the sorts that cannot stream: a default sort collapses its
-            # own runs as it pages, so it must never pay for a grouping pass.
+            # Only when stacking is on: a reader who has not turned it on never
+            # pays for the pass, and an unstacked page is a keyset read as before.
             assignment=(
-                self.server.assignment(selection)
-                if selection.stack is not None and not selection.ordering.indexed
-                else None
+                self.server.assignment(selection) if selection.stack else None
             ),
         )
         self._json(200, payload)

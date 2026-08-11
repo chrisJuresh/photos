@@ -8,11 +8,12 @@ admits and screened them, `photolib.matches` gave every survivor a Match, and
 which stack it is in, at the setting that decided it.
 
 **Membership is stored rather than derived per query because it is a property of
-the photographs and not of the view.** Today `photolib.browse` cuts runs at query
-time over whatever the filters select, so narrowing the view splits a stack in
-two. Once membership is written a filter can only remove frames from a stack,
-which is ADR 0003's load-bearing consequence and what the next ticket delivers.
-Nothing on screen changes in this pass: the grid goes on drawing what it draws.
+the photographs and not of the view.** `photolib.browse` joins this table at
+`browse.STACK_SETTING` -- the five key columns below, spelled out there because a
+website should not import OpenCV to learn them, and asserted equal in
+`tests/test_membership.py` -- so a filter can only remove frames from a stack,
+which is ADR 0003's load-bearing consequence. Until this pass has run there is
+nothing to join, and the grid draws every tile as its own stack.
 
 **The walk is the one the labels were replayed against.** `link` and the three
 rules under `LINKAGE` live here and `harness.label` imports them, which is the
@@ -169,10 +170,10 @@ def link(
     anyway: `harness.label` passes what its sets are cut with and `harness.calibrate`
     passes each of `LINKAGE` in turn.
 
-    The walk is forward and greedy whichever rule is in force, which is what
-    `photolib.browse` does with the window: a frame the walk consumed early can
-    agree with every member of the stack it was placed before, and that split is a
-    coin toss the labelling harness scored as one.
+    The walk is forward and greedy whichever rule is in force, as the window grouping
+    `photolib.browse` used to do was: a frame the walk consumed early can agree with
+    every member of the stack it was placed before, and that split is a coin toss the
+    labelling harness scored as one.
     """
     stacks: list[list[str]] = []
     holding: list[str] = []

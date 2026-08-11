@@ -257,10 +257,12 @@ def test_the_earlier_capture_is_the_early_side_of_the_pair(corpus: Corpus) -> No
 EVERY_KIND = ("image", "raw_image", "video")
 
 
-def test_the_runs_are_the_ones_the_grid_already_forms(corpus: Corpus) -> None:
-    """The load-bearing agreement. `browse.stack_count_sql` counts stacks over this
-    same population -- runs of the stackable tiles, plus one apiece for the tiles it
-    excludes from stacking -- so the two numbers must match at any window.
+def test_the_population_is_the_one_the_grid_draws_over(corpus: Corpus) -> None:
+    """The load-bearing agreement, from the fence's side. Every tile the grid can
+    draw is either in this population -- so `photolib.membership` places it and the
+    grid reads the row -- or is a tile the filesystem dated, which reaches the grid
+    as a stack of one on the strength of having no row at all. Nothing may be in
+    neither, because a tile in neither would be a tile with no stack.
 
     Every kind is passed, because a kind is the one filter of the grid's that this
     population does not apply: see the test below for why that is deliberate.
@@ -271,18 +273,19 @@ def test_the_runs_are_the_ones_the_grid_already_forms(corpus: Corpus) -> None:
     corpus.add("7", 4, camera="NEX-5N")
     corpus.add("8", 5, camera=None)
     frames = corpus.frames()
-    tiles = corpus.conn.execute("SELECT count(*) FROM photo").fetchone()[0]
+    dated = {sha256 for _, _, _, sha256 in frames}
 
-    for window in (1, 2, 3, 4, 10):
-        query = browse.parse({"stack": [str(window)]}, kinds=EVERY_KIND)
-        sql, params = browse.stack_count_sql(query)
-        grid = corpus.conn.execute(sql, params).fetchone()[0]
+    every = browse.parse({}, kinds=EVERY_KIND)
+    sql, params = browse.page_sql(every, None)
+    drawn = {row[1] for row in corpus.conn.execute(sql, [*params, 100])}
 
-        grouped = list(runs(frames, window))
-        alone = len(frames) - sum(len(run) for run in grouped)
-        unstackable = tiles - len(frames)
-
-        assert len(grouped) + alone + unstackable == grid, window
+    assert dated <= drawn
+    # The one tile the fence leaves out is the one `capture_time` dated from the
+    # filesystem, and the grid still draws it.
+    assert len(drawn - dated) == 1
+    # Every tile of the population sits in exactly one run, a frame that shot
+    # alone included, which is what makes one row per tile possible.
+    assert sorted(sha for run in runs(frames, 4, alone=True) for sha in run) == sorted(dated)
 
 
 def test_the_fence_ignores_the_reader_s_filters(corpus: Corpus) -> None:
@@ -296,11 +299,11 @@ def test_the_fence_ignores_the_reader_s_filters(corpus: Corpus) -> None:
     corpus.add("2", 2)
     corpus.add("3", 4, kind="video", vector=False)
 
-    hidden = browse.parse({"stack": ["4"]}, kinds=DEFAULT_KINDS)
-    sql, params = browse.stack_count_sql(hidden)
-    on_screen = corpus.conn.execute(sql, params).fetchone()[0]
+    hidden = browse.parse({}, kinds=DEFAULT_KINDS)
+    sql, params = browse.page_sql(hidden, None)
+    on_screen = corpus.conn.execute(sql, [*params, 100]).fetchall()
 
-    assert on_screen == 1  # two stills, one stack; the video is not in the view
+    assert len(on_screen) == 2  # the two stills; the video is not in the view
     assert [len(run) for run in runs(corpus.frames(), 4)] == [3]
 
 

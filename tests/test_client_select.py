@@ -15,8 +15,8 @@ from client_js import call, needs_node
 SELECT = "ui/src/lib/select.js"
 
 
-def query(on=True, window=10, sort="newest", filters=None):
-    return {"stacking": {"on": on, "window": window}, "sort": sort, "filters": filters or {}}
+def query(on=True, sort="newest", filters=None):
+    return {"stacking": {"on": on}, "sort": sort, "filters": filters or {}}
 
 
 def stack(key, ids):
@@ -149,29 +149,24 @@ def test_the_share_string_is_the_conditions_then_the_groups():
     """The example in the ticket, exactly."""
     marks = [stack(1234, [1234, 1235, 1236]), stack(1240, [1240]), stack(1251, [1251, 1252])]
     assert call(SELECT, "shareText", query(), marks) == (
-        "stack=10s sort=newest filters=none\n"
+        "stack=on sort=newest filters=none\n"
         "[1234,1235,1236],[1240],[1251,1252]"
     )
 
 
 @needs_node
 def test_the_conditions_say_when_stacking_is_off():
-    """A run that failed to merge at 4s is a different finding from one that
-    failed at 10s, and a run reported with stacking off is not a finding about
-    grouping at all — so the line has to distinguish all three."""
-    assert call(SELECT, "conditions", query(on=False, window=10)) == (
+    """A set of runs reported with stacking off is not a finding about grouping at
+    all, so the line has to say which mode was on screen. There is no window to
+    report any more: the grouping is stored, so `on` names it completely."""
+    assert call(SELECT, "conditions", query(on=False)) == (
         "stack=off sort=newest filters=none"
     )
 
 
 @needs_node
-def test_the_window_is_only_reported_while_stacking_is_on():
-    assert call(SELECT, "conditions", query(window=4)) == "stack=4s sort=newest filters=none"
-
-
-@needs_node
 def test_the_sort_is_whatever_the_query_carries():
-    assert call(SELECT, "conditions", query(sort="oldest")).startswith("stack=10s sort=oldest")
+    assert call(SELECT, "conditions", query(sort="oldest")).startswith("stack=on sort=oldest")
 
 
 @needs_node
@@ -184,4 +179,4 @@ def test_the_active_filters_are_named_with_their_values():
         "conditions",
         query(filters={"camera": ["ILCE-7M3", "X100V"], "kind": ["raw_image"], "year": []}),
     )
-    assert line == "stack=10s sort=newest filters=camera:ILCE-7M3|X100V,kind:raw_image"
+    assert line == "stack=on sort=newest filters=camera:ILCE-7M3|X100V,kind:raw_image"

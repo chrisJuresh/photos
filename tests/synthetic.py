@@ -21,7 +21,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from photolib import migrate
+from photolib import browse, migrate
 from photolib.config import substrate_path, thumb_path
 
 # A 2x2 lossless WebP. Small enough to write thousands of, real enough that the
@@ -108,8 +108,8 @@ def corpus(
 
 # One burst: a three-frame bracket, a second body shooting through it, and a
 # lone frame half a minute later. That is the shape the real corpus's 3/6/9/12
-# spine is made of, and the second body is what proves a run is per camera
-# rather than per moment.
+# spine is made of, and the second body is what proves a stack belongs to one
+# camera rather than to one moment.
 #
 # The two readings are what the cover rule ranks on, and both sets are chosen so
 # that a wrong rule draws a visibly different tile. Cam A is a real bracket --
@@ -130,9 +130,11 @@ BURST_PLAN = (
 )
 
 # Every seventh burst also carries a frame `capture_time` dated from mtime --
-# same body, chronologically inside the bracket. It is never stacked, and it
-# must not split the bracket around it. It is also the sharpest frame in the
-# burst, so a cover rule that read past a stack's own members would draw it.
+# same body, chronologically inside the bracket. `photolib.membership` places no
+# such frame, because a copy date is not when the photograph was taken, so it
+# reaches the grid as a stack of one and must not split the bracket around it. It
+# is also the sharpest frame in the burst, so a cover rule that read past a
+# stack's own members would draw it.
 GUESSED = ("Cam A", 1, "mtime", "guessed", 0.65, 0.99)
 
 # The 16 bins `archive/pipeline/features.py` cuts the 0-1 luma into.
@@ -167,8 +169,8 @@ def quality(luminance: float, sharpness: float) -> str:
     return json.dumps({"luminance_histogram": histogram, "sharpness": sharpness})
 
 
-# Bursts are an hour apart, so no window the slider offers can merge two of
-# them and the expected grouping is a property of the plan alone.
+# Bursts are an hour apart, which is the fence's own ceiling, so no two of them
+# are in one run and the expected grouping is a property of the plan alone.
 BURST_SPACING = 3600
 BURST_START = "2025-05-01T12:00:00"
 
@@ -177,10 +179,16 @@ def bursts(catalog_db: Path, state_db: Path, *, groups: int = 12) -> list[tuple]
     """A migrated pair holding `groups` bursts, and the grouping they must yield.
 
     Returns (photo_id, sha, camera, sort_key, taken_src, stack, size, luminance,
-    sharpness) per row, where `stack` names the set the row belongs to at any
-    window the slider offers and the last two are what the cover rule ranks on
-    -- both None for the frames whose quality pass failed. A test computes what
-    it expects from that rather than from the endpoint it is testing.
+    sharpness) per row, where `stack` names the set the row belongs to and the last
+    two are what the cover rule ranks on -- both None for the frames whose quality
+    pass failed. A test computes what it expects from that rather than from the
+    endpoint it is testing.
+
+    The grouping is *stored*, as it is in the real catalog: each named set becomes
+    `stack_member` rows at `browse.STACK_SETTING`, keyed the way
+    `photolib.membership` writes them, and the mtime-dated frame gets none. So the
+    grid here reads the same table it reads live, and a test that narrows the view
+    is asking the question ticket 41 is about.
 
     File sizes are scattered rather than ascending, so an alternate sort really
     does interleave the members of a stack -- which is the whole reason the
@@ -228,10 +236,46 @@ def bursts(catalog_db: Path, state_db: Path, *, groups: int = 12) -> list[tuple]
                 "INSERT INTO photo (id, rep_sha256, sort_key) VALUES (?, ?, ?)",
                 (photo_id, sha, sort_key),
             )
+        place(conn, rows)
         conn.execute("COMMIT")
     finally:
         conn.close()
     return rows
+
+
+def place(conn: sqlite3.Connection, rows) -> None:
+    """Store the grouping `rows` names, the way `photolib.membership` stores it.
+
+    A frame the plan dated from the filesystem is left out entirely: membership never
+    places one, and the grid draws such a tile as a stack of one on the strength of
+    its absence.
+    """
+    stacks: dict[str, list[tuple]] = {}
+    for _, sha, _, sort_key, taken_src, stack, *_rest in rows:
+        if taken_src.startswith("exif:"):
+            stacks.setdefault(stack, []).append((sort_key, sha))
+    store_membership(
+        conn, [[sha for _, sha in sorted(members)] for members in stacks.values()]
+    )
+
+
+def store_membership(conn: sqlite3.Connection, stacks) -> None:
+    """Write `stack_member` rows for each stack, earliest member first.
+
+    The one place a test corpus says what the grid reads: the setting is
+    `browse.STACK_SETTING`, which `photolib.membership` is asserted to agree with, and
+    a stack is named by its earliest member's sha256 — read off the sequence rather
+    than invented, exactly as the pass reads it off the run.
+    """
+    conn.executemany(
+        "INSERT INTO stack_member (method, version, strictness, linkage, ceiling, "
+        "sha256, stack) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            (*browse.STACK_SETTING.values(), sha, members[0])
+            for members in stacks
+            for sha in members
+        ],
+    )
 
 
 def expected_order(rows) -> list[int]:

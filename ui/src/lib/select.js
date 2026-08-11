@@ -80,7 +80,7 @@ export function tally(marks) {
  * reach this either.
  */
 export function conditions(query) {
-  const stack = query.stacking.on ? query.stacking.window + "s" : "off";
+  const stack = query.stacking.on ? "on" : "off";
   const filters = Object.entries(query.filters)
     .filter(([, values]) => values.length > 0)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

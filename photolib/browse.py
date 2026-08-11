@@ -23,18 +23,22 @@ An alternate sort cannot use the index and pays ~230-290 ms per page to sort
 it is charged only when such a sort is chosen.
 
 Stacking is the third dimension of cost and the only one that changes how many
-rows a page holds: a run of consecutive captures from one camera within `stack`
-seconds is drawn as one tile. It is a grouping over the *filtered* set, so a
-filter that removes a member splits its stack in two, and nothing is stored --
-see `docs/adr/0001-stack-on-capture-time-not-phash.md` for why this is capture
-time and not the perceptual hash. `assignment_sql` is the whole grouping in one
-pass, ~380 ms, and only the eight sorts that cannot stream ever run it. The two
-default sorts never do: their runs are contiguous in `photo_sort` order, so
-`page_sql` carries the three extra columns a reader needs to collapse them as it
-streams, and a stacked page stays a keyset page. Which member a stack is *drawn*
-as is `cover`, and it is a different question from where the stack sits in the
-ordering: it is the sharpest frame of the middle-exposure third, computed in
-Python over readings that only the page's own members are ever read for.
+rows a page holds: the frames verified to be the same photograph are drawn as one
+tile. **The grouping is read and never computed** -- `photolib.membership` wrote
+one row per tile saying which stack it is in, so `stack` is a mode and not a
+measurement and `assignment_sql` is a join rather than a walk over the clock. That
+is what makes a stack a property of the photographs: a filter can only remove
+frames from a stack, where the run this used to cut would break in two.
+`docs/adr/0003-stack-on-verified-match.md` is the decision and
+`docs/adr/0001-stack-on-capture-time-not-phash.md` the measurements it stands on.
+
+One pass per selection, in the ordering the reader is looking at, and the caller
+memoises it; a page is then a slice of it, which is what keeps a whole stack on one
+page for every sort rather than only for the two that used to stream. Which member
+a stack is *drawn* as is `cover`, and it is a different question from where the
+stack sits in the ordering: it is the sharpest frame of the middle-exposure third,
+computed in Python over readings that only the page's own members are ever read
+for.
 
 The vocabulary itself is served from `facets`, one pass over the tile set at
 startup, so the header can only ever offer a value that exists and can show what
@@ -75,11 +79,30 @@ NULL_NUMBER = -1e9
 MAX_VALUES = 64
 MAX_VALUE_CHARS = 200
 
-# The stacking window, in whole seconds. Bounds on the request: a slider with
-# ten stops cannot send 0 or 47. Which of the ten it opens on is the header's to
-# decide and nothing here reads it, so the default is not written down yet.
-MIN_WINDOW = 1
-MAX_WINDOW = 10
+# The only thing a request says about stacking: draw it, or do not. There is no
+# window to send any more -- membership is stored, and the gap that fenced it is a
+# build-time commitment recorded in `STACK_SETTING` below rather than a knob.
+STACK_ON = "on"
+
+# The assignment the grid reads: the setting `photolib.membership` wrote
+# `stack_member` under. A change of any of the five adds a population to that table
+# rather than overwriting one, so a reader has to name which one it means or it
+# could compare an assignment made at one setting against an assignment made at
+# another.
+#
+# Column names rather than five bare values, because the join below is generated
+# from this mapping: the SQL's order and the parameters' order are then one thing
+# and cannot come to disagree. Spelled out here rather than imported from
+# `photolib.membership`, which reaches `photolib.matches` for two of these values
+# and so would put OpenCV between a clean checkout and the website;
+# `tests/test_membership.py` asserts the two agree.
+STACK_SETTING: dict[str, str | int] = {
+    "method": "sift_ratio_homography",
+    "version": "1",
+    "strictness": 20,
+    "linkage": "majority",
+    "ceiling": 3600,
+}
 
 
 class BadFilter(ValueError):
@@ -105,8 +128,8 @@ class Sort:
     injection defence -- it is bound, not interpolated.
 
     `indexed` records that this ordering is `photo_sort`'s own, which is the
-    difference between a 9 ms page and a 230 ms one. It is asserted in the tests
-    rather than trusted.
+    difference between a 9 ms page and a 230 ms one. Nothing branches on it: it is
+    a claim about the query plan, and the tests are what hold the plan to it.
     """
 
     key: str
@@ -260,25 +283,22 @@ COLUMNS: dict[str, str] = {"ext": "f.ext", "camera": "f.camera", "lens": "f.lens
 NULLABLE = frozenset({"camera", "lens"})
 
 _YEAR = re.compile(r"^[0-9]{4}$")
-_WINDOW = re.compile(r"^[0-9]{1,2}$")
 
 
-def parse_stack(values: list[str]) -> int | None:
-    """The stacking window in seconds, or None when stacking is off.
+def parse_stack(values: list[str]) -> bool:
+    """Whether the grid draws stacks.
 
-    Refused rather than clamped, and by name rather than by value: a window
-    outside 1-10 was not sent by the slider, so it is a malformed request in the
-    same sense as an unknown `orient` token.
+    One token and no number, because the grouping is stored: what used to be a
+    window is now the fence the Match rows were computed behind. Any other value is
+    refused by name rather than read as "on", in the same sense as an unknown
+    `orient` token -- a client that still sends seconds is a client that thinks it
+    is choosing the grouping.
     """
     if not values:
-        return None
-    raw = values[-1]
-    if not _WINDOW.match(raw):
+        return False
+    if values[-1] != STACK_ON:
         raise BadFilter("stack")
-    window = int(raw)
-    if not MIN_WINDOW <= window <= MAX_WINDOW:
-        raise BadFilter("stack")
-    return window
+    return True
 
 
 @dataclass(frozen=True)
@@ -292,7 +312,7 @@ class Query:
     months: tuple[int, ...]
     roots: tuple[str, ...]
     sort: str
-    stack: int | None = None
+    stack: bool = False
 
     @property
     def ordering(self) -> Sort:
@@ -301,22 +321,11 @@ class Query:
     def unstacked(self) -> Query:
         """The same selection with stacking off.
 
-        `total` counts tiles and a window cannot change how many there are, so
-        the two windows of one selection share one count rather than paying
-        230-400 ms each time the slider moves.
+        `total` counts tiles and the grouping cannot change how many there are, so
+        both modes of one selection share one count rather than paying 230-400 ms
+        each time the toggle moves.
         """
-        return self if self.stack is None else replace(self, stack=None)
-
-    def grouping(self) -> Query:
-        """The same selection reduced to what decides how it stacks.
-
-        Runs are formed per camera in capture order, so the sort the reader is
-        looking at changes which cover a stack shows and never how many stacks
-        there are. Dropping the sort is what lets the count survive a change of
-        ordering instead of paying ~410 ms again for the number already on
-        screen.
-        """
-        return self if self.sort == DEFAULT_SORT else replace(self, sort=DEFAULT_SORT)
+        return self if not self.stack else replace(self, stack=False)
 
 
 def _tokens(field: str, values: list[str], *, split: bool) -> tuple[str, ...]:
@@ -432,68 +441,29 @@ def where(query: Query) -> tuple[list[str], list]:
     return terms, params
 
 
-# Where a tile sits in time, and whether it may stack at all. `capture_time`
-# writes whole seconds, so `unixepoch` is exact where the spec's
-# `julianday(...) * 86400.0` carries ~2e-5 s of float noise: it reads a gap of
-# exactly four seconds as 4.0000185, which is over a window of 4 and would drop
-# the commonest bracket interval there is. A tile fails the stackable test two
-# ways -- a date `capture_time` guessed from mtime or from a filename, because a
-# copy date is not when the photograph was taken, and the '-' sentinel an
-# undated photo sorts on, which `unixepoch` returns NULL for.
-_SECONDS = "unixepoch(p.sort_key)"
-_STACKABLE = f"substr(f.taken_src, 1, 5) = 'exif:' AND {_SECONDS} IS NOT NULL"
+# Where the caller finds the sort key of a `page_sql` row, which is what a keyset
+# cursor is built from. By position, so a column added in the middle would break
+# the paging silently.
+KEY = 5
 
-# Where the caller finds each column of a `page_sql` row. The first six are the
-# page itself; stacking appends three more, and reading them by position is how
-# a column added in the middle would break the collapse silently.
-KEY, CAMERA, SECONDS, STACKABLE = 5, 6, 7, 8
-
-# Every selected tile with a 1 where a new stack starts. Runs are per camera in
-# capture order, and the tiles the window excludes sit in a partition of their
-# own -- so an mtime-dated frame chronologically inside a burst is its own stack
-# and cannot split the burst around it. `IS` rather than `=` on the camera
-# because two frames from a body that recorded no name are still consecutive
-# captures from one camera as far as this grouping can tell.
-_ASSIGNMENT = """WITH selected AS (
-  SELECT p.id AS id, {key} AS k, p.sort_key AS sk, f.camera AS cam,
-         CASE WHEN {stackable} THEN 1 ELSE 0 END AS ok,
-         {seconds} AS secs
-  FROM photo AS p
-  JOIN file AS f ON f.sha256 = p.rep_sha256
-  WHERE {terms}
-),
-marked AS (
-  SELECT id, k, ok, cam, sk,
-         CASE WHEN ok = 1 AND cam IS lag(cam) OVER w
-                        AND secs - lag(secs) OVER w <= ?
-              THEN 0 ELSE 1 END AS starts
-  FROM selected
-  WINDOW w AS (PARTITION BY ok ORDER BY cam, sk, id)
-)"""
-
-
-def _assignment(query: Query) -> tuple[str, list]:
-    """The `marked` CTE and its parameters. The window binds last."""
-    terms, params = where(query)
-    sql = _ASSIGNMENT.format(
-        key=query.ordering.key,
-        stackable=_STACKABLE,
-        seconds=_SECONDS,
-        terms=" AND ".join(f"({term})" for term in terms),
-    )
-    return sql, [*params, query.stack]
+# Which stack each selected tile is in, at `STACK_SETTING`, generated from that
+# mapping so the five placeholders are in its own order. A LEFT JOIN because a tile
+# the filesystem dated carries no row -- a copy date is not when the photograph was
+# taken, so it can be nobody's neighbour -- and such a tile is a stack of one named
+# by itself. Its own sha256 cannot collide with a stack's name: a stack is named by
+# a member's sha256, and this tile is in no stack at all.
+_MEMBERSHIP = "LEFT JOIN stack_member AS sm ON sm.sha256 = f.sha256 AND " + " AND ".join(
+    f"sm.{column} = ?" for column in STACK_SETTING
+)
+_STACK = "coalesce(sm.stack, f.sha256)"
 
 
 def page_sql(query: Query, cursor) -> tuple[str, list]:
     """The page query and its parameters, minus the LIMIT value.
 
-    With stacking on the page carries three more columns per row: the camera,
-    where the tile sits in time, and whether it may stack at all. Position and
-    stackability are separate because they answer different questions — a tile
-    an mtime date excluded from stacking still has a place in the ordering, and
-    the caller needs that place to know when it has read past the end of every
-    open run. They are what lets a stacked page on a default sort stay a keyset
-    page on `photo_sort` instead of a ~380 ms grouping pass.
+    Unstacked only, and the same six columns in both modes: a stacked page is a
+    slice of `assignment_sql`'s own pass and never a keyset read of its own, so
+    there is nothing left for this to carry on a grouping's behalf.
     """
     sort = query.ordering
     terms, params = where(query)
@@ -503,10 +473,6 @@ def page_sql(query: Query, cursor) -> tuple[str, list]:
         terms.append(f"({sort.key}, p.id) {comparison} (?, ?)")
         params += [cursor[0], cursor[1]]
     columns = f"p.id, f.sha256, f.width, f.height, f.thumbhash, {sort.key}"
-    if query.stack is not None:
-        columns += (
-            f", f.camera, {_SECONDS}, CASE WHEN {_STACKABLE} THEN 1 ELSE 0 END"
-        )
     sql = (
         f"SELECT {columns}\n"
         "FROM photo AS p\n"
@@ -528,40 +494,33 @@ def count_sql(query: Query) -> tuple[str, list]:
     )
 
 
-def stack_count_sql(query: Query) -> tuple[str, list]:
-    """How many stacks the whole selection collapses to. ~410 ms; memoise it.
-
-    `starts` is 1 exactly where a new stack begins, so summing it counts them
-    without materialising one. The two default sorts collapse their own runs as
-    they page and so never build an assignment, but the count pane still has to
-    say what stacking did to the whole selection rather than to the page in
-    front of it — this is that number, and the only grouping pass those two
-    sorts pay for.
-    """
-    sql, params = _assignment(query)
-    return f"{sql}\nSELECT coalesce(sum(starts), 0) FROM marked", params
-
-
 def assignment_sql(query: Query) -> tuple[str, list]:
     """Every selected tile as `(id, sort key, stack)`, in the page's own order.
 
-    The eight non-time sorts need this: their stacks' members are not adjacent,
-    so there is no run to collapse while streaming and the whole assignment has
-    to exist before the first page can name its first cover. ~380 ms unfiltered;
-    memoise it per selection. The two default sorts never run it: they collapse
-    their own runs as they page, which is what keeps a stacked page a page.
+    One read of the stored assignment, not a grouping of it: the walk that decided
+    membership ran offline in `photolib.membership`, so this is a join and the only
+    work left is putting the rows in the reader's order. Every sort needs it and
+    every sort gets the same stacks -- a stack's members can sit anywhere in an
+    ordering, so a page is a slice of this rather than a keyset read, which is what
+    returns a stack whole on one page whatever the sort.
+
+    Memoise it per selection: it visits every selected tile, and it is the same
+    answer for every page of one selection.
+
+    The setting binds before the filter's own values, because the join is written
+    before the WHERE.
     """
-    sql, params = _assignment(query)
-    direction = _direction(query.ordering)
+    terms, params = where(query)
+    sort = query.ordering
+    direction = _direction(sort)
     return (
-        f"{sql},\n"
-        "assigned AS (\n"
-        "  SELECT id, k, sum(starts) OVER (ORDER BY ok, cam, sk, id\n"
-        "                                  ROWS UNBOUNDED PRECEDING) AS stack\n"
-        "  FROM marked\n"
-        ")\n"
-        f"SELECT id, k, stack FROM assigned ORDER BY k {direction}, id {direction}",
-        params,
+        f"SELECT p.id, {sort.key}, {_STACK}\n"
+        "FROM photo AS p\n"
+        "JOIN file AS f ON f.sha256 = p.rep_sha256\n"
+        f"{_MEMBERSHIP}\n"
+        f"WHERE {' AND '.join(f'({term})' for term in terms)}\n"
+        f"ORDER BY {sort.key} {direction}, p.id {direction}",
+        [*STACK_SETTING.values(), *params],
     )
 
 

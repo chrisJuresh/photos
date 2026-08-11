@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+import synthetic
 
 from photolib import browse, db, migrate
 
@@ -459,11 +460,12 @@ def test_no_filter_value_reaches_the_sql_text(catalog):
 
 # -- stacking ------------------------------------------------------------
 
-# A second hand-written corpus, because stacking is about the gaps between
-# capture times and the eight tiles above have none worth speaking of. Fourteen
-# frames over 400 seconds of one afternoon: a three-frame bracket with a second
-# body shooting through it, two more frames at gaps chosen to sit either side of
-# the window, and every way a tile can fail to be stackable at all.
+# A second hand-written corpus, because stacking is about which frames are the
+# same photograph and the eight tiles above are eight different ones. Sixteen
+# frames over 400 seconds of one afternoon, with the grouping `photolib.membership`
+# would have written for them stored beside them: a four-frame bracket with a
+# second body shooting through it, two frames a second apart that are *not* one
+# stack, and every way a tile can reach the grid with no membership at all.
 #
 # `BURST_BASE` is the moment they all hang off. Tile 114 has no capture time,
 # so it sorts on the '-' sentinel and its offset is None.
@@ -476,29 +478,47 @@ BURSTS = [
     (102, "Cam B", 0, EXIF, ".jpg"),
     (103, "Cam A", 1, EXIF, ".jpg"),
     (104, "Cam B", 2, EXIF, ".jpg"),
-    # An mtime date inside the bracket. It is never stacked, and -- the part
-    # that is easy to get wrong -- it does not split the bracket around it.
+    # An mtime date inside the bracket. Membership places no such frame, and --
+    # the part that is easy to get wrong -- it does not split the bracket.
     (105, "Cam A", 1, "mtime", ".jpg"),
-    # The one tile with a different extension, so a filter can remove it and
-    # split Cam A's run in two. See `test_a_filter_splits_a_stack`.
+    # The one tile with a different extension, so a filter can remove it from
+    # the bracket. See `test_a_filter_shrinks_a_stack_and_never_splits_it`.
     (106, "Cam A", 2, EXIF, ".png"),
-    (107, "Cam A", 6, EXIF, ".jpg"),  # exactly 4s after 106
-    (108, "Cam A", 11, EXIF, ".jpg"),  # 5s after 107
+    (107, "Cam A", 6, EXIF, ".jpg"),
+    (108, "Cam A", 11, EXIF, ".jpg"),
     (109, "Cam C", 100, EXIF, ".jpg"),
-    # No camera recorded. Two consecutive captures from a body that wrote no
-    # name are still two consecutive captures, so these stack with each other.
+    # No camera recorded, and two frames the walk kept together anyway.
     (110, None, 200, EXIF, ".jpg"),
     (111, None, 201, EXIF, ".jpg"),
     (112, None, 300, EXIF, ".jpg"),
     (113, "Cam A", 400, None, ".jpg"),  # no date source at all
     (114, "Cam A", None, EXIF, ".jpg"),  # EXIF said so, and there is no time
+    # One second apart, one camera, and two stacks: the camera turned to face
+    # something else between the presses. No window can express this, which is
+    # the whole of why the grouping is read rather than computed.
+    (115, "Cam D", 300, EXIF, ".jpg"),
+    (116, "Cam D", 301, EXIF, ".jpg"),
 ]
 
-# How many stacks the whole corpus holds at each window. The step from 3 to 4 is
-# tile 107, which sits exactly four seconds after 106: a gap of exactly the
-# window stacks, and an implementation that measured it in julianday days would
-# put it at 4.0000185 and drop it.
-STACKS_AT = {1: 11, 2: 10, 3: 10, 4: 9, 5: 8, 10: 8}
+# The stacks `photolib.membership` placed these frames in, which the fixture
+# stores and the grid reads. 105, 113 and 114 are deliberately absent: a tile the
+# filesystem dated gets no row, and reaches the grid as a stack of one on the
+# strength of that absence.
+PLACED = {
+    "bracket": (101, 103, 106, 107),
+    "second body": (102, 104),
+    "after the bracket": (108,),
+    "far away": (109,),
+    "unnamed": (110, 111),
+    "unnamed later": (112,),
+    "turned away": (115,),
+    "what it turned to": (116,),
+}
+UNPLACED = (105, 113, 114)
+
+# What the count pane's first number has to be: one per stored stack, plus one
+# apiece for the tiles no assignment holds.
+STACKS = len(PLACED) + len(UNPLACED)
 
 
 @pytest.fixture(scope="module")
@@ -523,6 +543,11 @@ def bursts(tmp_path_factory) -> sqlite3.Connection:
         conn.execute("INSERT INTO photo (id, rep_sha256, sort_key) VALUES (?, ?, ?)",
                      (photo_id, sha, taken_at or "-"))
         conn.execute("INSERT INTO photo_member (sha256, photo_id) VALUES (?, ?)", (sha, photo_id))
+    # The assignment, written the way `photolib.membership` writes it — the members
+    # are in capture order above, so the first of each is the stack's name.
+    synthetic.store_membership(
+        conn, [[sha_for(member) for member in members] for members in PLACED.values()]
+    )
     conn.execute("COMMIT")
     conn.close()
 
@@ -534,181 +559,184 @@ def bursts(tmp_path_factory) -> sqlite3.Connection:
 def grouped(conn, query: browse.Query) -> list[list[int]]:
     """The stacks, as lists of ids, each in the query's own order."""
     sql, params = browse.assignment_sql(query)
-    stacks: dict[int, list[int]] = {}
+    stacks: dict[str, list[int]] = {}
     for photo_id, _key, stack in conn.execute(sql, params):
         stacks.setdefault(stack, []).append(photo_id)
     return list(stacks.values())
 
 
-def stack_count(conn, query: browse.Query) -> int:
-    return len(grouped(conn, query))
+def stack_sets(conn, query: browse.Query) -> set[frozenset[int]]:
+    return {frozenset(stack) for stack in grouped(conn, query)}
 
 
-@pytest.mark.parametrize("window, expected", sorted(STACKS_AT.items()))
-def test_the_window_decides_how_many_stacks_there_are(bursts, window, expected):
-    """Wider windows merge. Every tile is in exactly one stack at every window,
-    which is the property that makes a stack count a grid length."""
-    query = selection(stack=str(window))
-    assert stack_count(bursts, query) == expected
-    stacks = grouped(bursts, query)
-    assert len(stacks) == expected
+def test_a_stack_is_the_frames_membership_placed_together(bursts):
+    """The grouping on screen is the stored one, frame for frame. Every tile is in
+    exactly one stack, which is the property that makes a stack count a grid
+    length, and a tile no assignment holds is a stack of one."""
+    stacks = grouped(bursts, selection(stack="on"))
+    assert len(stacks) == STACKS
+    assert stack_sets(bursts, selection(stack="on")) == {
+        frozenset(members) for members in PLACED.values()
+    } | {frozenset({alone}) for alone in UNPLACED}
     assert sorted(photo_id for stack in stacks for photo_id in stack) == [
         row[0] for row in BURSTS
     ]
 
 
-def test_a_gap_of_exactly_the_window_stacks(bursts):
-    """Tile 107 is four seconds after 106, and four seconds is the default
-    window. It joins at 4 and starts its own stack at 3."""
-    at_four = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
-    at_three = {frozenset(stack) for stack in grouped(bursts, selection(stack="3"))}
-    assert frozenset({101, 103, 106, 107}) in at_four
-    assert frozenset({101, 103, 106}) in at_three
-    assert frozenset({107}) in at_three
-
-
-def test_a_second_body_shooting_through_a_bracket_does_not_split_it(bursts):
-    """Cam B's two frames land inside Cam A's bracket in capture order. A run is
-    per camera, so neither sees the other."""
-    stacks = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
+def test_a_second_body_shooting_through_a_bracket_is_its_own_stack(bursts):
+    """Cam B's two frames land inside Cam A's bracket in capture order, and the
+    two stacks stay two. Interleaved in the ordering is not interleaved in the
+    grouping: a stack is a set of frames and never a stretch of the page."""
+    stacks = stack_sets(bursts, selection(stack="on"))
     assert frozenset({101, 103, 106, 107}) in stacks
     assert frozenset({102, 104}) in stacks
 
 
-def test_a_date_that_is_not_from_exif_never_stacks(bursts):
-    """Three ways to fail the test, one stack of one each: an mtime date (105),
-    no date source at all (113), and a source that says EXIF over no time (114).
+def test_the_clock_no_longer_decides_what_is_one_stack(bursts):
+    """115 and 116 are one second and one camera apart and are two stacks, where
+    every window the slider used to offer made them one. This is the complaint
+    ADR 0003 exists for: unrelated frames arriving in one stack, at gaps under
+    any window a reader would set."""
+    stacks = stack_sets(bursts, selection(stack="on"))
+    assert frozenset({115}) in stacks
+    assert frozenset({116}) in stacks
 
-    105 sits chronologically inside Cam A's bracket, from Cam A, so it is also
-    the proof that an unstackable tile does not split the run it is inside.
+
+def test_a_tile_the_filesystem_dated_is_a_stack_of_one(bursts):
+    """Three ways to carry no membership, one stack of one each: an mtime date
+    (105), no date source at all (113), and a source that says EXIF over no time
+    (114). A copy date is not when the photograph was taken, so such a tile can be
+    nobody's neighbour.
+
+    105 sits chronologically inside Cam A's bracket, from Cam A, so it is also the
+    proof that an unplaced tile does not split the stack it sits inside.
     """
-    stacks = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
-    for alone in (105, 113, 114):
+    stacks = stack_sets(bursts, selection(stack="on"))
+    for alone in UNPLACED:
         assert frozenset({alone}) in stacks
+    assert frozenset({101, 103, 106, 107}) in stacks
 
 
-def test_two_frames_from_an_unnamed_camera_stack_with_each_other(bursts):
-    """`camera` is NULL for a body that recorded no name. Consecutive captures
-    are still consecutive captures, and the gap is what decides them."""
-    stacks = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
+def test_two_frames_from_an_unnamed_camera_can_share_a_stack(bursts):
+    """`camera` is NULL for a body that recorded no name, and the walk read the
+    two of them as the same photograph. Nothing about the grouping needs the
+    camera to have a name, because nothing here groups by camera."""
+    stacks = stack_sets(bursts, selection(stack="on"))
     assert frozenset({110, 111}) in stacks
     assert frozenset({112}) in stacks
 
 
-def test_a_filter_splits_a_stack(bursts):
-    """A stack forms over whatever the selection holds, so removing a member can
-    split it in two. Tile 106 is the only `.png`, and without it Cam A's run has
-    a five-second hole in the middle of it."""
-    whole = {frozenset(stack) for stack in grouped(bursts, selection(stack="4"))}
+def test_a_filter_shrinks_a_stack_and_never_splits_it(bursts):
+    """The ticket's load-bearing consequence. Tile 106 is the only `.png` and sits
+    in the middle of the bracket; without it the bracket is three frames and still
+    one stack, where a run cut at query time broke in two around the hole.
+
+    So a narrowed view holds no more stacks than the whole one, and every stack in
+    it is a subset of a stack of the whole -- which is what "shrinks and never
+    splits" means, asserted over the filters rather than only for the one that
+    demonstrates it.
+    """
+    whole = stack_sets(bursts, selection(stack="on"))
     assert frozenset({101, 103, 106, 107}) in whole
 
-    filtered = {frozenset(stack) for stack in grouped(bursts, selection(stack="4", ext=".jpg"))}
-    assert frozenset({101, 103}) in filtered
-    assert frozenset({107}) in filtered
-    # One tile fewer and one stack more, which is what "filters apply before
-    # stacking" costs and is the correct answer rather than a defect.
-    assert stack_count(bursts, selection(stack="4", ext=".jpg")) == STACKS_AT[4] + 1
+    filtered = stack_sets(bursts, selection(stack="on", ext=".jpg"))
+    assert frozenset({101, 103, 107}) in filtered
+    # The bracket is still one stack, so removing a member removed a tile and no
+    # stack: one fewer frame on screen, the same number of stacks.
+    assert len(filtered) == STACKS
+
+    for narrowing in ({"ext": ".jpg"}, {"camera": "Cam A"}, {"orient": "landscape"},
+                      {"ext": [".jpg", ".png"]}, {"dated": "exif"}):
+        for stack in stack_sets(bursts, selection(stack="on", **narrowing)):
+            assert any(stack <= every for every in whole), narrowing
 
 
 @pytest.mark.parametrize("name", sorted(browse.SORTS))
 def test_every_sort_groups_the_same_tiles(bursts, name):
-    """Grouping is by capture time and camera, so it cannot depend on what the
-    page is ordered by. Only which member is drawn first does."""
-    query = selection(stack="4", sort=name)
-    assert {frozenset(stack) for stack in grouped(bursts, query)} == {
-        frozenset(stack) for stack in grouped(bursts, selection(stack="4"))
-    }
-    assert stack_count(bursts, query) == STACKS_AT[4]
+    """Membership is a property of the photographs, so it cannot depend on what
+    the page is ordered by. Only which member is drawn first does."""
+    query = selection(stack="on", sort=name)
+    assert stack_sets(bursts, query) == stack_sets(bursts, selection(stack="on"))
+    assert len(grouped(bursts, query)) == STACKS
 
 
 def test_the_assignment_lists_a_stacks_members_in_the_pages_order(bursts):
     """`assignment_sql` returns rows in the sort's order, so the first member of
-    a stack to appear is its cover: the newest frame on `newest` and the oldest
-    on `oldest`."""
-    newest = {stack[0]: stack for stack in grouped(bursts, selection(stack="4"))}
+    a stack to appear is where the stack sits: the newest frame on `newest` and
+    the oldest on `oldest`."""
+    newest = {stack[0]: stack for stack in grouped(bursts, selection(stack="on"))}
     assert newest[107] == [107, 106, 103, 101]
-    oldest = {stack[0]: stack for stack in grouped(bursts, selection(stack="4", sort="oldest"))}
+    oldest = {
+        stack[0]: stack for stack in grouped(bursts, selection(stack="on", sort="oldest"))
+    }
     assert oldest[101] == [101, 103, 106, 107]
 
 
-@pytest.mark.parametrize("window, expected", sorted(STACKS_AT.items()))
-def test_the_stack_count_is_the_number_of_stacks_without_building_them(
-    bursts, window, expected
-):
-    """The count pane's first number. It has to agree with the assignment at
-    every window: they are the same grouping, summed rather than listed."""
-    sql, params = browse.stack_count_sql(selection(stack=str(window)))
-    assert bursts.execute(sql, params).fetchone()[0] == expected
-    assert expected == stack_count(bursts, selection(stack=str(window)))
-
-
 def test_a_selection_holding_nothing_has_no_stacks(bursts):
-    """`sum` over no rows is NULL, and a count pane cannot print NULL."""
-    sql, params = browse.stack_count_sql(selection(stack="4", ext=".nothing"))
-    assert bursts.execute(sql, params).fetchone()[0] == 0
+    """The count pane's first number is the assignment's length, and a count pane
+    cannot print NULL."""
+    assert grouped(bursts, selection(stack="on", ext=".nothing")) == []
 
 
-@pytest.mark.parametrize("name", sorted(browse.SORTS))
-def test_the_stack_count_does_not_depend_on_the_sort(bursts, name):
-    """Which member covers a stack is the sort's business; how many stacks there
-    are is not. So the memo drops the sort and one count serves all ten."""
-    sql, params = browse.stack_count_sql(selection(stack="4", sort=name))
-    assert bursts.execute(sql, params).fetchone()[0] == STACKS_AT[4]
-    assert selection(stack="4", sort=name).grouping() == selection(stack="4")
+def test_only_the_assignment_the_grid_names_is_read(bursts, monkeypatch):
+    """The strictness, the linkage and the window are part of the key, so a second
+    population in the table is a second population and never a merge. Asked at a
+    setting nothing was written under, every tile comes back as its own stack --
+    the fixture's rows are still there and are not this setting's.
+    """
+    monkeypatch.setattr(
+        browse,
+        "STACK_SETTING",
+        {**browse.STACK_SETTING, "strictness": 25, "linkage": "neighbour", "ceiling": 900},
+    )
+    stacks = grouped(bursts, selection(stack="on"))
+    assert len(stacks) == len(BURSTS)
+    assert all(len(stack) == 1 for stack in stacks)
 
 
-def test_the_grouping_key_keeps_the_window_and_drops_the_sort(bursts):
-    """The mirror of `unstacked`: a tile count drops the window because no
-    window changes how many tiles there are, and a stack count drops the sort
-    for the same kind of reason."""
-    assert selection(stack="4", sort="largest").grouping() == selection(stack="4")
-    assert selection(stack="4").grouping() != selection(stack="3").grouping()
-    default = selection(stack="4")
-    assert default.grouping() is default
-
-
-def test_the_window_is_part_of_the_selection(bursts):
-    """Two windows are two selections, so a memo keyed on the query cannot serve
-    one from the other -- and dropping the window makes them one, which is what
-    the tile count wants."""
-    assert selection(stack="4") != selection(stack="3")
-    assert selection(stack="4") != selection()
-    assert selection(stack="4").stack == 4
-    assert selection().stack is None
-    assert selection(stack="4").unstacked() == selection()
+def test_stacking_is_a_mode_and_not_a_measurement(bursts):
+    """There is no window to send: two requests either stack or do not, so a memo
+    keyed on the query has two keys and not eleven -- and dropping the mode makes
+    them one, which is what the tile count wants."""
+    assert selection(stack="on") != selection()
+    assert selection(stack="on").stack is True
+    assert selection().stack is False
+    assert selection(stack="on").unstacked() == selection()
     unstacked = selection()
     assert unstacked.unstacked() is unstacked
 
 
 def test_stacking_does_not_change_which_tiles_are_selected(bursts):
     """The grouping is over the filtered set and never narrows it."""
-    for window in (None, "1", "4", "10"):
-        query = selection(stack=window) if window else selection()
+    for query in (selection(), selection(stack="on")):
         assert counted(bursts, query) == len(BURSTS)
         assert sorted(ids(bursts, query)) == [row[0] for row in BURSTS]
 
 
-@pytest.mark.parametrize("value", ["0", "11", "99", "-1", "4.5", "four", "", " 4", "4,5"])
-def test_a_malformed_window_is_refused_by_name(value):
+@pytest.mark.parametrize(
+    "value", ["4", "0", "11", "-1", "4.5", "four", "", " on", "On", "true", "1", "yes"]
+)
+def test_a_malformed_stack_value_is_refused_by_name(value):
+    """`on` and nothing else. A client still sending seconds is a client that
+    thinks it is choosing the grouping, so it is told rather than humoured."""
     with pytest.raises(browse.BadFilter) as raised:
         selection(stack=value)
     assert raised.value.field == "stack"
 
 
-def test_the_window_bounds_are_the_ten_the_slider_offers():
-    """A window outside these was not sent by a slider with ten stops, so it is
-    a malformed request rather than a value that selects nothing."""
-    assert (browse.MIN_WINDOW, browse.MAX_WINDOW) == (1, 10)
-    assert [browse.parse_stack([str(n)]) for n in range(1, 11)] == list(range(1, 11))
-
-
-def test_no_window_value_reaches_the_sql_text(bursts):
-    """The window is bound like every other value, so the grouping SQL is the
-    same text at every window."""
-    four, params_four = browse.assignment_sql(selection(stack="4"))
-    ten, params_ten = browse.assignment_sql(selection(stack="10"))
-    assert four == ten
-    assert params_four[-1] == 4 and params_ten[-1] == 10
+def test_no_part_of_the_setting_reaches_the_sql_text(bursts):
+    """The five values that name the assignment are bound like every other value, so
+    the grouping SQL is one string and the setting is five parameters in front of the
+    filter's own -- in the order the join names the columns in, which is why the join
+    is generated from the same mapping."""
+    sql, params = browse.assignment_sql(selection(stack="on", ext=".jpg"))
+    assert "stack_member" in sql
+    assert sql.count("?") == len(params)
+    for column, value in browse.STACK_SETTING.items():
+        assert f"sm.{column} = ?" in sql
+        assert str(value) not in sql.split("WHERE")[0]
+    assert params[:len(browse.STACK_SETTING)] == list(browse.STACK_SETTING.values())
+    assert params[-1] == ".jpg"
 
 
 # -- the cover -----------------------------------------------------------

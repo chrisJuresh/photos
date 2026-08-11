@@ -68,11 +68,11 @@
   // and both mean "do not send it", so an untouched filter never reaches the URL.
   let filters = $state({});
   let sort = $state("newest");
-  // Whether a run of consecutive captures is drawn as one tile, and how many
-  // seconds of gap still counts as one run. Restored from localStorage rather
-  // than defaulted, so the grid opens the way it was left — the only part of
-  // the header's state that is remembered, and the reason it is remembered is
-  // that it is a preference about the grid rather than a search in it.
+  // Whether the frames verified to be the same photograph are drawn as one tile.
+  // Restored from localStorage rather than defaulted, so the grid opens the way it
+  // was left — the only part of the header's state that is remembered, and the
+  // reason it is remembered is that it is a preference about the grid rather than
+  // a search in it.
   let stacking = $state(restore());
   // The open tile — its frames, the rect they came out of, and where it sits in
   // the sheet's page order — or null. Held here rather than in the sheet because
@@ -112,13 +112,13 @@
   // once so the sheet key and the request cannot disagree about the selection:
   // the key IS the request, so a filter that changes the answer always resets the
   // sheet and one that does not never does.
-  // The window is in it only while stacking is on, so turning it off leaves a
-  // query string with no `stack` in it at all rather than one the server has to
-  // read as "off" — and the sheet key below then says the two are different
-  // answers, which they are.
+  // `stack` is in it only while stacking is on, so turning it off leaves a query
+  // string with no `stack` in it at all rather than one the server has to read as
+  // "off" — and the sheet key below then says the two are different answers, which
+  // they are.
   const gridQuery = $derived({
     sort,
-    ...(stacking.on ? { stack: stacking.window } : {}),
+    ...(stacking.on ? { stack: "on" } : {}),
     ...Object.fromEntries(
       Object.entries(filters).filter(([, values]) => values.length > 0),
     ),
@@ -130,11 +130,11 @@
   const markedKeys = $derived(marks.map((entry) => entry.key));
   const markedTally = $derived(tally(marks));
 
-  // A marked set that survived a change to the query would describe a grouping
-  // that no longer exists, and being a snapshot of one specific grouping the
-  // reader judged wrong is its whole value. `gridQuery` is recomputed by exactly
-  // the four things the ticket names — the sort, the filters, the toggle and the
-  // window — so it is the signal rather than a list of them restated here.
+  // A marked set that survived a change to the query would describe a page that no
+  // longer exists — a mark is keyed on the cover that stands for a stack, and
+  // narrowing the view can change which frame that is. `gridQuery` is recomputed by
+  // the sort, the filters and the toggle, so it is the signal rather than a list of
+  // them restated here.
   $effect(() => {
     void gridQuery;
     untrack(() => {

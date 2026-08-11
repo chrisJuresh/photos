@@ -106,19 +106,22 @@ The grid and the nine triage screens are one client, two modes, served by one pr
 python -m photolib.grid --open
 ```
 
-**A stack is a run of consecutive captures from one camera within the reader's window** —
-what a bracketed set or a burst becomes in the grid, drawn as one tile and fanned out over
-the sheet when it is clicked. It is formed at query time over whatever the filters select
-and never stored, so removing a member splits its stack in two and the cover is resolved
-per query rather than materialised. It is grid-only: `/api/triage/*` is untouched and a
-triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
+**A stack is the same photograph taken more than once** — what a bracketed set or a burst
+becomes in the grid, drawn as one tile and fanned out over the sheet when it is clicked.
+Membership is **read from `stack_member`** and never computed per query: `stack=on` is a
+mode and not a window, so narrowing the filters removes frames from a stack and never
+splits one, while the cover is still resolved per query because which members are present
+is a property of the view. Nothing is drawn stacked until
+`python -m photolib.membership` has run. It is grid-only: `/api/triage/*` is untouched and
+a triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
 not and with stacking off as well: a tile with no siblings is drawn as the one frame it
 stands for, and revealing in Explorer is the second press, on the frame. Triage is the
 exception and still reveals on the first. The overlay draws its frames from the 1536px
 substrate tree on the NVMe, served by `/d/<sha256>.webp` and filled by
-`python -m photolib.substrates` below. `docs/adr/0001-stack-on-capture-time-not-phash.md`
-records why this groups on capture time and not on the perceptual hash that exists for
-apparently this exact purpose, and `docs/grid-queries.md` what each stacked query costs.
+`python -m photolib.substrates` below. `docs/adr/0003-stack-on-verified-match.md` records
+why membership is a verified pairwise match with the clock kept only as a fence, `0001` why
+it is neither the clock alone nor the perceptual hash that exists for apparently this exact
+purpose, and `docs/grid-queries.md` what each stacked query costs.
 
 The client's source is `ui/` — Svelte 5, no Kit. `npm run build` emits
 `photolib/static/bundle.js` and `bundle.css` under fixed unhashed names, and **those two files
@@ -304,12 +307,12 @@ python -m harness.calibrate --linkage complete,majority
 
 To read those Matches as **membership** — one row per tile saying which stack it is in,
 at the setting the labels settled. It is stored rather than derived per query because
-membership is a property of the photographs and not of the view: the grid still cuts runs
-at query time, so narrowing the view splits a stack in two, and once membership is written
-a filter can only remove frames from a stack. **Nothing on screen changes after a pass** —
-the grid goes on drawing what it draws, and ticket 41 is what reads the table. The walk is
+membership is a property of the photographs and not of the view, and **this table is what
+the grid groups on**: `photolib/browse.py` joins it at `browse.STACK_SETTING`, so a filter
+can only remove frames from a stack. Until a pass has run the grid draws every tile as its
+own stack, whatever the toggle says. The walk is
 the one `harness.calibrate` replayed the labels against, imported from here rather than
-copied, so ADR 0003's numbers describe what the grid will draw and not something adjacent
+copied, so ADR 0003's numbers describe what the grid draws and not something adjacent
 to it; `harness/label.py` re-exports it and keeps working. A stack is named by its earliest
 member's sha256 and never by an id, and that is not the **cover**, which is resolved per
 query. **The strictness, the linkage and the window are part of the key**, the relationship

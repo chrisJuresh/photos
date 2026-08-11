@@ -21,7 +21,7 @@ import synthetic
 from photolib import browse, db, migrate
 from photolib import grid as grid_module
 from photolib import rebuild as rebuild_module
-from photolib.browse import SORTS, BadFilter, page_sql, parse_cursor
+from photolib.browse import SORTS, BadFilter, assignment_sql, page_sql, parse_cursor
 from photolib.grid import (
     DEFAULT_KINDS,
     MAX_LIMIT,
@@ -263,9 +263,13 @@ def planner(tmp_path):
     conn.close()
 
 
+def plan_of(conn, sql, params) -> str:
+    return " ".join(str(row) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, params))
+
+
 def plan_for(conn, query, cursor=None) -> str:
     sql, params = page_sql(query, cursor)
-    return " ".join(str(row) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, [*params, 501]))
+    return plan_of(conn, sql, [*params, 501])
 
 
 def test_the_page_query_uses_the_photo_sort_index(planner):
@@ -595,13 +599,13 @@ def test_a_cursor_is_validated_by_the_sort_that_will_bind_it(grid):
 
 @pytest.fixture
 def stacked(make_grid) -> Grid:
-    """Twelve bursts: 74 tiles that collapse to 38 stacks at any window."""
+    """Twelve bursts: 74 tiles the stored membership collapses to 38 stacks."""
     return make_grid(bursts=12)
 
 
 def expected_stacks(rows) -> dict[str, list[int]]:
-    """The grouping the corpus was built to produce, from the plan and not the
-    endpoint. Members are in capture order. See `synthetic.bursts`."""
+    """The grouping the corpus stores, from the plan and not the endpoint.
+    Members are in capture order. See `synthetic.bursts`."""
     stacks: dict[str, list[int]] = {}
     for row in rows:
         stacks.setdefault(row[5], []).append(row[0])
@@ -644,9 +648,9 @@ def test_a_stacked_page_returns_one_tile_per_stack(stacked):
     """The gate: fewer tiles out than in, each standing for the frames it
     collapsed, and every frame accounted for exactly once."""
     groups = expected_stacks(stacked.rows)
-    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4")
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=on")
 
-    assert body["stack"] == 4
+    assert body["stack"] is True
     assert body["total"] == len(stacked.rows) == 74  # tiles, which stacking cannot change
     assert len(body["photos"]) == len(groups) == 38
     assert sum(photo["n"] for photo in body["photos"]) == len(stacked.rows)
@@ -658,7 +662,7 @@ def test_a_stacked_page_returns_one_tile_per_stack(stacked):
 
 def test_every_returned_photo_carries_its_own_stacks_size(stacked):
     groups = expected_stacks(stacked.rows)
-    covers = walk_stacked(stacked.port, "stack=4")
+    covers = walk_stacked(stacked.port, "stack=on")
 
     # A cover stands for its whole set, and a tile in no set is a stack of one.
     assert {photo_id: size for photo_id, size in covers} == {
@@ -673,19 +677,19 @@ def test_a_cover_carries_the_frames_it_collapsed(stacked):
     """The overlay's whole input, and the reason it needs no second endpoint.
 
     The page has already grouped these tiles; asking again for one stack would
-    re-derive a grouping that filters and an evicted memo can move under it, and
+    re-read a grouping that a filter and an evicted memo can move under it, and
     then draw a set the grid never returned. So the members ride with the cover
     that stands for them.
 
     A stack of one carries none. It opens as itself -- the cover is already an
     id, a hash and dimensions, which is a frame, so the client makes the list of
-    one instead of being sent it -- and on the real corpus that is 6,297 of the
-    10,929 rows, every one of which would otherwise repeat the row beside it.
+    one instead of being sent it -- and on the real corpus that is 5,200 of the
+    9,338 rows, every one of which would otherwise repeat the row beside it.
     """
     sha = {row[0]: row[1] for row in stacked.rows}
     groups = expected_stacks(stacked.rows)
     stack_of = {cover: stack for stack, cover in expected_covers(stacked.rows).items()}
-    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4")
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=on")
 
     collapsed = 0
     for photo in body["photos"]:
@@ -711,7 +715,7 @@ def test_a_covers_frames_are_in_the_pages_own_order(stacked, sort):
     """Not capture order: the order this sort would have drawn them in, which on
     `newest` is capture order reversed. The overlay lays them out in the order it
     is handed, so a grid sorted largest-first opens a stack largest-first too."""
-    body = get_json(stacked.port, f"/api/photos?limit=1000&stack=4&sort={sort}")
+    body = get_json(stacked.port, f"/api/photos?limit=1000&stack=on&sort={sort}")
     place = {
         photo["id"]: index
         for index, photo in enumerate(
@@ -736,68 +740,69 @@ def test_stacking_off_carries_no_frames(stacked):
 def test_paging_a_stacked_selection_returns_each_stack_exactly_once(stacked):
     """Every page size, including ones that land a boundary inside a burst.
 
-    A stack straddling a boundary is what breaks a naive collapse: half of it
-    comes back on one page and the other half becomes its own cover on the next.
-    Both halves would show up here, as a cover count that grew and sizes that
-    did not add up.
+    A page is a slice of the assignment, so a stack cannot be halved by one —
+    but a cursor that compared the cover's row rather than the stack's own would
+    still skip or repeat one, and both would show up here as a cover count that
+    moved and sizes that did not add up.
     """
-    whole = walk_stacked(stacked.port, "stack=4", limit=1000)
+    whole = walk_stacked(stacked.port, "stack=on", limit=1000)
     assert len(whole) == 38
     for limit in (1, 2, 3, 5, 7, 13, 37):
-        paged = walk_stacked(stacked.port, "stack=4", limit=limit)
+        paged = walk_stacked(stacked.port, "stack=on", limit=limit)
         assert paged == whole, limit
         assert len({photo_id for photo_id, _ in paged}) == len(paged), limit
         assert sum(size for _, size in paged) == len(stacked.rows), limit
 
 
-def test_a_stack_straddling_a_page_boundary_comes_back_whole(stacked):
-    """Proved rather than assumed: the first page of a three-cover request ends
-    inside the first burst, so the boundary really does fall in a run."""
-    first = get_json(stacked.port, "/api/photos?limit=3&stack=4")
+def test_a_page_boundary_falling_inside_a_burst_returns_the_stack_whole(stacked):
+    """Proved rather than assumed: a three-cover page ends where the fourth stack
+    begins, and the third of them is a bracket whose frames the page carries all
+    of. The boundary is between stacks because a page is a slice of stacks."""
+    first = get_json(stacked.port, "/api/photos?limit=3&stack=on")
     assert first["next"] is not None
-    # Three covers asked for, and the page ran on to the end of the run it was
-    # in rather than splitting it -- so the sizes on this page are complete.
+    # Exactly the three asked for, each carrying its whole set: the newest burst's
+    # lone frame, then its bracket, then the second body's pair.
     assert [photo["n"] for photo in first["photos"]] == [1, 3, 2]
     second = get_json(
         stacked.port,
-        f"/api/photos?limit=3&stack=4&before={first['next']['before']}"
+        f"/api/photos?limit=3&stack=on&before={first['next']['before']}"
         f"&before_id={first['next']['before_id']}",
     )
     assert not ({photo["id"] for photo in first["photos"]}
                 & {photo["id"] for photo in second["photos"]})
 
 
-def test_a_page_of_tiles_that_cannot_stack_still_ends(stacked):
-    """`dated=mtime` selects only tiles the window excludes, so there is never an
-    open run to close. A page that looked for its cut among stackable tiles
-    alone would never find one and would serve the whole selection at once."""
+def test_a_page_of_tiles_no_assignment_holds_still_ends(stacked):
+    """`dated=mtime` selects only tiles membership never placed, so the assignment
+    for it is all stacks of one -- and a page of them pages like any other."""
     guessed = [row[0] for row in stacked.rows if row[4] == "mtime"]
     assert len(guessed) == 2
 
-    body = get_json(stacked.port, "/api/photos?limit=1&stack=4&dated=mtime")
+    body = get_json(stacked.port, "/api/photos?limit=1&stack=on&dated=mtime")
     assert len(body["photos"]) == 1
     assert body["next"] is not None
-    assert dict(walk_stacked(stacked.port, "stack=4&dated=mtime", limit=1)) == {
+    assert dict(walk_stacked(stacked.port, "stack=on&dated=mtime", limit=1)) == {
         photo_id: 1 for photo_id in guessed
     }
 
 
 @pytest.mark.parametrize("limit", [1, 2, 5])
-def test_a_page_carries_close_to_the_covers_it_asked_for(stacked, limit):
-    """A page runs past `limit` only to the end of the run it is in, so the
-    overshoot is the size of one burst rather than the size of the library."""
-    body = get_json(stacked.port, f"/api/photos?limit={limit}&stack=10")
-    assert limit <= len(body["photos"]) <= limit + 3
+def test_a_page_carries_the_covers_it_asked_for(stacked, limit):
+    """Exactly `limit`, where the window grouping overshot to the end of the run
+    it was in: the stacks are whole before the page starts, so there is nothing
+    left to run on for."""
+    body = get_json(stacked.port, f"/api/photos?limit={limit}&stack=on")
+    assert len(body["photos"]) == limit
     assert body["limit"] == limit
 
 
 @pytest.mark.parametrize("name", sorted(SORTS))
 def test_every_sort_stacks_the_same_frames_and_draws_the_same_cover(stacked, name):
-    """Grouping is by capture time and camera, so the ordering cannot change it.
-    Neither can it change which member is drawn: the cover comes from the
-    frames' own exposure and sharpness, and an ordering is not one of those."""
+    """Membership is stored, so the ordering cannot change it. Neither can it
+    change which member is drawn: the cover comes from the frames' own exposure
+    and sharpness, and an ordering is not one of those."""
     groups = expected_stacks(stacked.rows)
-    covers = walk_stacked(stacked.port, f"stack=4&sort={name}", limit=7)
+    covers = walk_stacked(stacked.port, f"stack=on&sort={name}", limit=7)
     assert len(covers) == len(groups)
     assert len({photo_id for photo_id, _ in covers}) == len(covers)
     assert sum(size for _, size in covers) == len(stacked.rows)
@@ -805,10 +810,10 @@ def test_every_sort_stacks_the_same_frames_and_draws_the_same_cover(stacked, nam
 
 
 def test_an_alternate_sort_moves_a_stack_without_changing_what_it_draws(stacked):
-    """The eight non-time sorts scatter a stack's members through the ordering,
-    which is why they cannot collapse runs as they page.
+    """An alternate sort scatters a stack's members through the ordering, which is
+    why a page is a slice of the assignment and never a keyset read of tiles.
 
-    What they change is where a stack sits, not what it is drawn as. A stack's
+    What it changes is where a stack sits, not what it is drawn as. A stack's
     place on `largest` is its biggest file, which is rarely the frame the cover
     rule names -- so the page comes back in a different order carrying the same
     tiles, and the cursor is the ordering's row rather than the drawn one.
@@ -820,7 +825,7 @@ def test_an_alternate_sort_moves_a_stack_without_changing_what_it_draws(stacked)
     place = {stack: max((size[member], member) for member in members)
              for stack, members in groups.items()}
 
-    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4&sort=largest")
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=on&sort=largest")
     drawn = [photo["id"] for photo in body["photos"]]
     assert len(drawn) == 38
     assert drawn == [
@@ -830,7 +835,7 @@ def test_an_alternate_sort_moves_a_stack_without_changing_what_it_draws(stacked)
 
     # ...the same tiles `newest` draws, in an order that is not `newest`'s.
     by_time = [photo["id"] for photo in get_json(
-        stacked.port, "/api/photos?limit=1000&stack=4")["photos"]]
+        stacked.port, "/api/photos?limit=1000&stack=on")["photos"]]
     assert set(drawn) == set(by_time) and drawn != by_time
 
 
@@ -839,17 +844,17 @@ def test_a_bracket_is_drawn_as_the_sharpest_frame_of_its_middle_exposure(stacked
     capture order, and the sharpest of them is the brightest. So the frame drawn
     is none of the ones a simpler rule would reach for -- not the first the page
     sees (3 on `newest`, 1 on `oldest`), not the brightest, not the sharpest."""
-    covers = dict(walk_stacked(stacked.port, "stack=4"))
+    covers = dict(walk_stacked(stacked.port, "stack=on"))
     assert covers[2] == 3
     assert 1 not in covers and 3 not in covers
-    assert dict(walk_stacked(stacked.port, "stack=4&sort=oldest"))[2] == 3
+    assert dict(walk_stacked(stacked.port, "stack=on&sort=oldest"))[2] == 3
 
 
 def test_a_pair_that_shares_an_exposure_is_drawn_as_its_sharper_frame(stacked):
     """Cam B's two frames are one exposure, which is the case the rule degrades
     to plain sharpest for. Its sharper frame is the older one, so `newest`
     cannot reach it by reading the run's first member."""
-    covers = dict(walk_stacked(stacked.port, "stack=4"))
+    covers = dict(walk_stacked(stacked.port, "stack=on"))
     assert covers[4] == 2
     assert 5 not in covers
 
@@ -864,7 +869,7 @@ def test_a_frame_whose_quality_pass_failed_is_not_drawn_over_one_that_can_be_ran
     failed = [row for row in stacked.rows if row[7] is None]
     assert [row[5] for row in failed] == ["3:bracket", "8:bracket"]
 
-    covers = dict(walk_stacked(stacked.port, "stack=4"))
+    covers = dict(walk_stacked(stacked.port, "stack=on"))
     for row in failed:
         bracket = expected_stacks(stacked.rows)[row[5]]
         assert row[0] not in covers
@@ -872,15 +877,16 @@ def test_a_frame_whose_quality_pass_failed_is_not_drawn_over_one_that_can_be_ran
 
 
 def test_filtering_out_a_cover_promotes_the_frame_the_rule_names_next(stacked):
-    """A stack forms over the current selection, so the cover has to be resolved
-    against the members that survived the filter. Burst 1's bracket is drawn as
-    its middle exposure (2), which is also the only square frame in it: removing
-    the squares leaves 1 and 3, still one stack at a four-second window, and the
-    rule names 1 -- the darker of the two, and not the sharper.
+    """The cover is resolved against the members the view left, which is the half
+    of the ticket that survives membership being stored: narrowing cannot split a
+    stack and can still change which frame it is drawn as. Burst 1's bracket is
+    drawn as its middle exposure (2), which is also the only square frame in it:
+    removing the squares leaves 1 and 3, still one stack, and the rule names 1 --
+    the darker of the two, and not the sharper.
     """
-    assert dict(walk_stacked(stacked.port, "stack=4"))[2] == 3
+    assert dict(walk_stacked(stacked.port, "stack=on"))[2] == 3
 
-    covers = dict(walk_stacked(stacked.port, "stack=4&orient=landscape,portrait"))
+    covers = dict(walk_stacked(stacked.port, "stack=on&orient=landscape,portrait"))
     assert covers[1] == 2
     assert 2 not in covers and 3 not in covers
 
@@ -901,7 +907,7 @@ def test_a_page_reads_the_quality_of_its_own_members_and_nothing_else(stacked, s
         return original(conn, ids)
 
     monkeypatch.setattr(grid_module, "_scalars", spy)
-    body = get_json(stacked.port, f"/api/photos?limit=3&stack=4&sort={sort}")
+    body = get_json(stacked.port, f"/api/photos?limit=3&stack=on&sort={sort}")
 
     groups = expected_stacks(stacked.rows)
     holds = {photo_id: stack for stack, ids in groups.items() for photo_id in ids}
@@ -914,36 +920,38 @@ def test_a_page_reads_the_quality_of_its_own_members_and_nothing_else(stacked, s
     assert len(read[0]) < len(stacked.rows)
 
 
-def test_a_wider_window_merges_and_a_narrower_one_does_not_split_a_bracket(stacked):
-    """Every window the slider offers holds this corpus's plan: the bursts are an
-    hour apart and their frames a second apart, so 1 and 10 agree."""
-    for window in (1, 4, 10):
-        body = get_json(stacked.port, f"/api/photos?limit=1000&stack={window}")
-        assert len(body["photos"]) == 38, window
-        assert body["stack"] == window
-
-
 def test_a_guessed_date_is_never_stacked(stacked):
     """Two of the twelve bursts carry an mtime-dated frame from the same body,
-    chronologically inside the bracket. Each is its own stack of one, and the
-    bracket around it is still three."""
+    chronologically inside the bracket. Membership placed no such frame, so each is
+    its own stack of one, and the bracket around it is still three."""
     guessed = [row[0] for row in stacked.rows if row[4] == "mtime"]
     brackets = [row[5] for row in stacked.rows if row[5].endswith("bracket")]
     assert len(guessed) == 2 and len(set(brackets)) == 12
 
-    covers = dict(walk_stacked(stacked.port, "stack=10"))
+    covers = dict(walk_stacked(stacked.port, "stack=on"))
     for photo_id in guessed:
         assert covers[photo_id] == 1
     assert sorted(covers.values()) == [1] * 14 + [2] * 12 + [3] * 12
 
 
-def test_a_filter_applies_before_stacking(stacked):
-    """A stack forms over whatever the selection holds. Portrait keeps one frame
-    in three, so the bracket it splits is three stacks of one where it was one
-    of three -- which is correct, not a defect."""
-    body = get_json(stacked.port, "/api/photos?limit=1000&stack=4&orient=portrait")
-    assert 0 < len(body["photos"]) < 38
-    assert body["total"] == sum(photo["n"] for photo in body["photos"])
+def test_a_filter_shrinks_a_stack_and_never_splits_it(stacked):
+    """The ticket's load-bearing consequence, end to end. Portrait keeps one frame
+    of each bracket, so every stack the filter touches comes back smaller and the
+    number of stacks does not grow: each is a subset of what it was, and no page
+    holds a stack the whole selection does not have.
+    """
+    whole = get_json(stacked.port, "/api/photos?limit=1000&stack=on")
+    narrow = get_json(stacked.port, "/api/photos?limit=1000&stack=on&orient=portrait")
+
+    frames = {
+        photo["id"]: {frame["id"] for frame in photo.get("m", [{"id": photo["id"]}])}
+        for photo in whole["photos"]
+    }
+    assert len(narrow["photos"]) <= len(whole["photos"]) == 38
+    assert narrow["total"] == sum(photo["n"] for photo in narrow["photos"])
+    for photo in narrow["photos"]:
+        shrunk = {frame["id"] for frame in photo.get("m", [{"id": photo["id"]}])}
+        assert any(shrunk <= members for members in frames.values()), photo["id"]
 
 
 def test_a_stacked_page_carries_both_of_the_count_panes_numbers(stacked):
@@ -951,49 +959,29 @@ def test_a_stacked_page_carries_both_of_the_count_panes_numbers(stacked):
     selection and not the page in front of it, so a first page of one cover
     still says how many there are in all -- and it is what the sheet reserves
     its height for, because the rows it will hold are covers."""
-    first = get_json(stacked.port, "/api/photos?limit=1&stack=4")
+    first = get_json(stacked.port, "/api/photos?limit=1&stack=on")
     assert first["stacks"] == 38
     assert first["total"] == 74
     assert len(first["photos"]) < first["stacks"]
-    assert len(walk_stacked(stacked.port, "stack=4")) == first["stacks"]
+    assert len(walk_stacked(stacked.port, "stack=on")) == first["stacks"]
 
-    filtered = get_json(stacked.port, "/api/photos?limit=1000&stack=4&orient=portrait")
+    filtered = get_json(stacked.port, "/api/photos?limit=1000&stack=on&orient=portrait")
     assert filtered["stacks"] == len(filtered["photos"])
     assert filtered["total"] == sum(photo["n"] for photo in filtered["photos"])
 
 
-def test_the_stack_count_is_counted_once_per_selection_and_window(stacked):
-    """~380 ms and the same answer for every page, so it is banked like a total.
-    Two windows are two counts; two sorts are one, because the sort decides
-    which member covers a stack and never how many stacks there are."""
-    for url in (
-        "/api/photos?limit=1&stack=4",
-        "/api/photos?limit=1&stack=4",  # the same one, again
-        "/api/photos?limit=1&stack=4&sort=largest",  # a different sort
-        "/api/photos?limit=1&stack=6",  # a different window
-    ):
-        get_json(stacked.port, url)
-    assert sorted(key.stack for key in stacked.server._stacks) == [4, 6]
-    assert all(key.sort == browse.DEFAULT_SORT for key in stacked.server._stacks)
-
-
-def test_a_stack_count_is_banked_under_the_count_memos_cap(stacked):
-    """Same cap and same eviction as the other two memos: the keys come from a
-    query string, so what a session can bank has to be bounded."""
-    from photolib.grid import MAX_TOTALS
-
-    for window in range(browse.MIN_WINDOW, browse.MAX_WINDOW + 1):
-        get_json(stacked.port, f"/api/photos?limit=1&stack={window}")
-    assert len(stacked.server._stacks) == 10 <= MAX_TOTALS
-    assert all(value == 38 for value in stacked.server._stacks.values())
-
-
-def test_an_unstacked_page_is_never_counted_for_stacks(stacked):
-    """The pass costs what a total costs, and a reader who has not turned
-    stacking on must not pay for it."""
-    for url in ("/api/photos?limit=5", "/api/photos?limit=5&sort=largest"):
-        assert "stacks" not in get_json(stacked.port, url)
-    assert stacked.server._stacks == {}
+def test_the_stack_count_is_the_assignment_and_not_a_second_pass(stacked):
+    """One read answers both of the count pane's numbers, where the window
+    grouping counted once and assigned again. So the figure is the assignment's
+    own length: two readings of one selection cannot disagree if there is only
+    one.
+    """
+    for url in ("/api/photos?limit=1&stack=on", "/api/photos?limit=1&stack=on&sort=best"):
+        body = get_json(stacked.port, url)
+        selection = next(
+            key for key in stacked.server._assignments if key.sort == body["sort"]
+        )
+        assert body["stacks"] == len(stacked.server._assignments[selection]) == 38
 
 
 def test_stacking_off_returns_what_it_returned_before_stacking_existed(stacked):
@@ -1003,23 +991,19 @@ def test_stacking_off_returns_what_it_returned_before_stacking_existed(stacked):
     assert len(body["photos"]) == body["total"] == len(stacked.rows)
 
 
-@pytest.mark.parametrize("value", ["0", "11", "-1", "4.5", "four", "", "%3Cscript%3E"])
-def test_a_malformed_window_is_refused_by_name(stacked, value):
+@pytest.mark.parametrize("value", ["4", "0", "11", "-1", "4.5", "four", "", "%3Cscript%3E"])
+def test_a_malformed_stack_value_is_refused_by_name(stacked, value):
     status, _, body = http_request(stacked.port, "GET", f"/api/photos?stack={value}")
     assert status == 400
     assert json.loads(body) == {"error": "stack"}
     assert b"script" not in body
 
 
-def test_the_default_sort_still_pages_on_the_index_with_stacking_on(planner):
-    """The property that keeps a stacked page a page rather than a grouping pass.
-
-    `photo_sort` supplies the order, so the read stops as soon as the covers are
-    collected. Stacking adds two columns to the row and nothing to the WHERE, so
-    the plan must be the plan it was without it.
-    """
-    for params in ({"stack": "4"}, {"stack": "4", "orient": "portrait"},
-                   {"stack": "10", "sort": "oldest"}):
+def test_an_unstacked_page_still_pages_on_the_index(planner):
+    """Stacking no longer touches this query at all — the mode adds no column and
+    no term — so an unstacked page's plan must be the plan it always was, under
+    every filter and from any cursor."""
+    for params in ({}, {"orient": "portrait"}, {"sort": "oldest"}):
         for cursor in (None, ("2019-07-04T11:22:33", 5)):
             plan = plan_for(planner, selection(**params), cursor)
             assert "photo_sort" in plan, plan
@@ -1027,10 +1011,25 @@ def test_the_default_sort_still_pages_on_the_index_with_stacking_on(planner):
             assert "SCAN file" not in plan, plan
 
 
-def test_a_default_sort_never_runs_the_grouping_pass(stacked):
-    """The property the whole streaming design exists for. A default sort
-    collapses its own runs as it pages, so it must not compute -- or bank -- an
-    assignment at any window, on the first page or any other."""
+def test_the_assignment_reads_membership_by_key_and_does_not_sort_the_library(planner):
+    """What the one pass per selection is allowed to cost. The default sort's order
+    is `photo_sort`'s, so the assignment must not build a temp b-tree to produce
+    it, and membership must be a lookup per tile rather than a scan of the table --
+    a plan that scanned `stack_member` would read every setting's rows to answer
+    about one.
+    """
+    for params in ({"stack": "on"}, {"stack": "on", "orient": "portrait"},
+                   {"stack": "on", "sort": "oldest"}):
+        plan = plan_of(planner, *assignment_sql(selection(**params)))
+        assert "photo_sort" in plan, plan
+        assert "TEMP B-TREE" not in plan, plan
+        assert "SCAN stack_member" not in plan, plan
+
+
+def test_every_stacked_page_reads_the_assignment_and_an_unstacked_one_never_does(stacked):
+    """One path for all ten sorts, where the two default ones used to collapse
+    their own runs as they paged. A reader who has not turned stacking on still
+    pays nothing: the memo stays empty."""
     built = []
     original = grid_module.build_assignment
 
@@ -1040,23 +1039,23 @@ def test_a_default_sort_never_runs_the_grouping_pass(stacked):
 
     grid_module.build_assignment = spy
     try:
-        for url in (
-            "/api/photos?limit=5&stack=4",
-            "/api/photos?limit=5&stack=4&sort=oldest",
-            "/api/photos?limit=5&stack=10",
-        ):
-            body = get_json(stacked.port, url)
-            assert body["photos"]
+        for url in ("/api/photos?limit=5", "/api/photos?limit=5&sort=largest"):
+            assert "stacks" not in get_json(stacked.port, url)
+        assert built == []
+        assert stacked.server._assignments == {}
+
+        for url in ("/api/photos?limit=5&stack=on",
+                    "/api/photos?limit=5&stack=on&sort=oldest"):
+            assert get_json(stacked.port, url)["photos"]
     finally:
         grid_module.build_assignment = original
-    assert built == []
-    assert stacked.server._assignments == {}
+    assert [query.sort for query in built] == ["newest", "oldest"]
 
 
-def test_an_assignment_is_computed_once_per_selection(stacked):
-    """~380 ms over the real corpus and the same answer for every page of one
-    selection, so paging must not recompute it -- and two windows are two
-    selections, because the window is what it groups by."""
+def test_an_assignment_is_read_once_per_selection(stacked):
+    """The same answer for every page of one selection, so paging must not read it
+    again -- and two sorts are two selections, because the assignment is in the
+    reader's own order."""
     built = []
     original = grid_module.build_assignment
 
@@ -1067,33 +1066,41 @@ def test_an_assignment_is_computed_once_per_selection(stacked):
     grid_module.build_assignment = spy
     try:
         for url in (
-            "/api/photos?limit=5&stack=4&sort=largest",
-            "/api/photos?limit=5&stack=4&sort=largest",  # the same one, again
-            "/api/photos?limit=5&stack=4&sort=best",  # a different sort
-            "/api/photos?limit=5&stack=6&sort=largest",  # a different window
+            "/api/photos?limit=5&stack=on&sort=largest",
+            "/api/photos?limit=5&stack=on&sort=largest",  # the same one, again
+            "/api/photos?limit=5&stack=on&sort=best",  # a different sort
+            "/api/photos?limit=5&stack=on&sort=largest&orient=portrait",  # a filter
         ):
             get_json(stacked.port, url)
     finally:
         grid_module.build_assignment = original
     assert len(built) == 3
     assert len(stacked.server._assignments) == 3
-    # ...and the window is not part of what a tile count is keyed on, because no
-    # window changes how many tiles there are. Two sorts here, so two counts --
-    # not one per window.
-    assert len(stacked.server._totals) == 2
-    assert all(key.stack is None for key in stacked.server._totals)
+    # ...and the mode is not part of what a tile count is keyed on, because
+    # grouping tiles does not change how many there are: the three selections
+    # above bank three counts, and every key has stacking off.
+    assert len(stacked.server._totals) == 3
+    assert all(key.stack is False for key in stacked.server._totals)
 
 
-def test_an_alternate_sort_banks_its_assignment_under_the_count_memos_cap(stacked):
-    """Same cap, same eviction: the keys come from a query string, so the number
-    of distinct ones a session can bank is bounded and the oldest goes first."""
-    from photolib.grid import MAX_TOTALS
+def test_an_assignment_is_banked_under_a_cap_of_its_own(stacked):
+    """Same eviction as the counts and a smaller cap, because an entry here is every
+    selected tile's id rather than one integer: the keys come from a query string, and
+    every stacked selection banks one where the default sorts used to bank none."""
+    from photolib.grid import MAX_ASSIGNMENTS, MAX_TOTALS
 
-    for window in range(browse.MIN_WINDOW, browse.MAX_WINDOW + 1):
-        get_json(stacked.port, f"/api/photos?limit=1&stack={window}&sort=largest")
-    assert len(stacked.server._assignments) == 10 <= MAX_TOTALS
+    assert MAX_ASSIGNMENTS < MAX_TOTALS
+
+    for name in sorted(SORTS):
+        get_json(stacked.port, f"/api/photos?limit=1&stack=on&sort={name}")
+    assert len(stacked.server._assignments) == len(SORTS) == 10 <= MAX_ASSIGNMENTS
     assert all(entry for entry in stacked.server._assignments.values())
-    assert all(key.sort == "largest" for key in stacked.server._assignments)
+    assert {key.sort for key in stacked.server._assignments} == set(SORTS)
+
+    # Past the cap the oldest goes first, and the only cost is one re-read.
+    for year in range(2000, 2000 + MAX_ASSIGNMENTS):
+        get_json(stacked.port, f"/api/photos?limit=1&stack=on&year={year}")
+    assert len(stacked.server._assignments) == MAX_ASSIGNMENTS
 
 
 @pytest.mark.parametrize(
@@ -1745,7 +1752,6 @@ def test_a_finished_rebuild_drops_the_counts_the_server_had_banked(make_grid):
     wait_for_rebuild(grid)
 
     assert grid.server._totals == {}
-    assert grid.server._stacks == {}
     assert grid.server._assignments == {}
     assert grid.server._facets is None
 

@@ -56,10 +56,12 @@ A tile the reader has picked by hand, in select mode — by clicking it, by shif
 to extend from the last tile touched, or by sweeping a marquee over a run of them. The
 selected set is evidence: it is what the Copy button puts on the clipboard, as the ids
 grouped the way the grid grouped them. Selecting a cover selects its whole stack, and a
-selection is metadata that never becomes a file operation. It survives scrolling, a
-resize, and a change to the filters or the sort — those change the *view*, not the
-grouping. Only the knobs that regroup empty it: the window, the strictness and the
-linkage, because after one of those the stacks it named no longer exist.
+selection is metadata that never becomes a file operation. It survives scrolling and a
+resize, and is emptied by anything that changes the answer — the toggle, the filters and
+the sort. Only the toggle regroups, so in principle a filter could keep it; a mark is
+nonetheless keyed on the *cover* that stood for a stack, and narrowing the view can change
+which frame that is, so carrying one waits on the grid naming a stack rather than pointing
+at its cover.
 _Avoid_: marked, checked, ticked, chosen, tagged, flagged
 
 **View**:
@@ -75,11 +77,6 @@ decided at build time, unrelated to stacking.
 _Avoid_: cover, primary
 
 ### What gets grouped, and by what
-
-> **Stack**, **Match**, **Linkage**, **Window**, **Selected** and **View** below record
-> the model decided in `docs/adr/0003-stack-on-verified-match.md`, which is not built
-> yet. Until it is, the code groups by capture time alone and a filter splits a stack —
-> `docs/grid-queries.md` describes what actually runs.
 
 **Stack**:
 The same photograph, taken more than once — frames verified to show the same picture,
@@ -124,7 +121,10 @@ _Avoid_: clustering, chaining, closure
 The gap in seconds at or below which two consecutive captures *may* belong to one
 stack. Necessary, never sufficient: it fences a stack to one stretch of shooting and
 keeps stacks contiguous in capture order, and the match decides everything inside the
-fence. It stopped being the only number stacking has — see `docs/adr/0003`.
+fence. It stopped being the only number stacking has — see `docs/adr/0003` — and then
+stopped being a number a reader sets: at 3600s it is the fence the stored Matches were
+computed behind, so moving it would ask about pairs nothing ever checked. The grid's one
+stacking control is the on/off pill.
 _Avoid_: threshold, tolerance, distance, sensitivity
 
 **Candidate**:

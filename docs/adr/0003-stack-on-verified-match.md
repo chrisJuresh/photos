@@ -1,6 +1,6 @@
 # Stack on a verified visual match, fenced by time
 
-**Status: accepted 2026-08-09, not yet implemented.** Supersedes the *decision* of
+**Status: accepted 2026-08-09, implemented 2026-08-11.** Supersedes the *decision* of
 [ADR 0001](0001-stack-on-capture-time-not-phash.md) and none of its measurements: pHash
 still cannot group this library, and 0001 remains the place that proves it.
 
@@ -79,6 +79,16 @@ the on/off pill. Their existence is free — an untouched knob is a constant in 
 key and hits the same cache entry — and moving one is a cache miss, which the interface
 warns about.
 
+> **Superseded by what was built.** One knob is reader-facing: the on/off pill. The other
+> three are not free after all, because the grouping is materialised rather than computed
+> per request — a knob off its default would have to be answered from a population of
+> `stack_member` nobody wrote, or by falling back to a live walk over the Match rows, which
+> is a second implementation of the rule and the thing "the walk is one walk" was worth
+> most. The window is additionally the fence the Match rows were computed behind, so it was
+> never a knob that could be turned without another offline pass. Strictness and linkage are
+> `python -m photolib.membership`'s flags, where turning one writes the population it
+> describes.
+
 ## What this makes true that was not
 
 **A stack is stable under filtering, so filtering shrinks a stack and never splits it.**
@@ -93,10 +103,31 @@ Three things fall out:
   walking 1,805 tiles — page cost drops below today's rather than rising. Scores are
   stored per candidate pair as well as the assignment, so strictness stays adjustable
   without re-running the pass; non-default knobs fall back to computing from the scores.
+
+  > **Measured, and half of it held.** A 500-cover page is 23–61 ms across the four
+  > selections measured, where the window grouping's were 19–228 ms: the win is on the
+  > filtered and alternate-sort pages, which no longer read tiles they discard. What did
+  > not drop is the *first* page — the assignment is one ~630 ms read per selection where
+  > the stack count was ~410 ms, so first paint on `newest` went from ~490 ms to ~690 ms.
+  > `docs/grid-queries.md` has the table and the comparison. The fall back to computing
+  > from the scores was not built — see the knobs above.
 - **A hand-picked set survives a filter or sort change**, and is cleared only by the
   knobs that regroup.
+
+  > **Not built.** A mark is keyed on the cover that stood for a stack, and narrowing the
+  > view can change which frame that is, so a set carried across a filter could point at a
+  > tile the page no longer draws. Carrying it waits on the grid naming a stack to the
+  > client rather than pointing at its cover; the marked set is still cleared by any change
+  > to the query.
 - **`rebuild.py` gains a step**: Apply to grid must refresh the assignment after triage
   rewrites `photo`.
+
+  > **Not needed, for a reason worth recording.** A stack is named by a member's sha256 and
+  > keyed on sha256, and `archive.pipeline.group` reassigns ids without changing bytes — so
+  > a rebuild cannot invalidate a row. What it can do is publish a tile whose
+  > representative has no row yet, which the grid draws as a stack of one until the pass is
+  > re-run. Clearing the memos, which Apply to grid already does, is the whole of the
+  > server's part.
 
 The cover rule is unchanged — the sharpest frame of the middle-exposure third — and it
 degrades correctly over a stack holding a dozen brackets, because a larger middle third

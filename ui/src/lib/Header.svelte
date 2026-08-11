@@ -9,7 +9,6 @@
   import { onMount } from "svelte";
   import { count } from "./api.js";
   import { refract } from "./glass.js";
-  import { MAX, MIN } from "./stack.js";
   import { current, set } from "./theme.js";
 
   let {
@@ -18,9 +17,9 @@
     // proposes the next one and never mutates the one it was given.
     selected = {},
     sort = "newest",
-    // `{on, window}`, owned and remembered by App exactly as the filters are
-    // owned by it: this proposes the next one.
-    stacking = { on: false, window: 4 },
+    // `{on}`, owned and remembered by App exactly as the filters are owned by
+    // it: this proposes the next one.
+    stacking = { on: false },
     // The rows the answer holds, and — while stacking is on — the tiles those
     // rows stand for. `tiles` is null when a row is already a tile, which is
     // what lets the pane read photographs in both modes without being told the
@@ -96,30 +95,6 @@
   function flipTheme() {
     theme = set(theme === "dark" ? "light" : "dark");
   }
-
-  // The window under the reader's thumb, while the thumb is on it. A range
-  // input fires `input` for every pixel of a drag and `change` once the value
-  // is settled, and each settled value is a new selection: a new page, a new
-  // count and a grouping pass behind it. So the label follows the drag from
-  // here and the grid is only asked about the value the reader stopped on.
-  let dragging = $state(null);
-  const seconds = $derived(dragging ?? stacking.window);
-
-  function slide(value) {
-    dragging = Number(value);
-  }
-
-  function commit(value) {
-    dragging = null;
-    onstack({ ...stacking, window: Number(value) });
-  }
-
-  // A drag interrupted by Escape gets no `change`, because the input it would
-  // have fired on is gone. Without this the slider would reopen showing a value
-  // the grid was never asked for.
-  $effect(() => {
-    if (panel !== "stacks") dragging = null;
-  });
 
   // Escape closes whatever is open, and a click anywhere that is not the header
   // does the same. Both are on window rather than on a backdrop element: a
@@ -298,10 +273,11 @@
       </div>
     {/if}
 
-    <!-- A panel and not two controls in the bar: the bar stops shrinking at
-         `--bar-min`, and a slider does not fit in what is left at that width.
-         Same material and same behaviour as Sort and Filters, so Escape and a
-         click outside close this one too, from the two handlers above. -->
+    <!-- A panel and not a control in the bar: the bar stops shrinking at
+         `--bar-min`, and the sentence under the switch is what makes the switch
+         mean anything. Same material and same behaviour as Sort and Filters, so
+         Escape and a click outside close this one too, from the two handlers
+         above. -->
     {#if panel === "stacks"}
       <div class="glass sheet stacks" use:refract>
         <section>
@@ -318,29 +294,10 @@
             </button>
           </div>
           <p class="note">
-            A run of consecutive frames from one camera is drawn as one tile.
-          </p>
-        </section>
-
-        <section>
-          <h2 id="stack-window">Window</h2>
-          <div class="slider">
-            <input
-              type="range"
-              min={MIN}
-              max={MAX}
-              step="1"
-              value={seconds}
-              aria-labelledby="stack-window"
-              aria-valuetext="{seconds} seconds"
-              oninput={(event) => slide(event.currentTarget.value)}
-              onchange={(event) => commit(event.currentTarget.value)}
-            />
-            <span class="secs">{seconds}s</span>
-          </div>
-          <p class="note">
-            Frames further apart than this start a new stack. Four is where the
-            number of distinct sets in this library peaks.
+            The same photograph taken more than once is drawn as one tile — a
+            bracket or a burst, checked frame against frame rather than guessed
+            from the clock. Narrowing the filters takes frames out of a stack and
+            never breaks one in two.
           </p>
         </section>
       </div>
@@ -649,9 +606,9 @@
     min-width: 210px;
   }
 
-  /* Narrow rather than spread across the bar like the filters: it holds two
-     controls, and a panel the width of the window for two controls reads as a
-     page rather than as a menu. Hung from the bar's left edge, as the sort menu
+  /* Narrow rather than spread across the bar like the filters: it holds one
+     control, and a panel the width of the window for one control reads as a page
+     rather than as a menu. Hung from the bar's left edge, as the sort menu
      is — the panels line up with each other rather than each with the pill that
      opened it, so opening a second one does not slide the ground sideways. */
   .stacks {
@@ -664,32 +621,9 @@
     max-width: 100%;
   }
 
-  .slider {
-    display: flex;
-    align-items: center;
-    gap: var(--s-3);
-  }
-
-  /* The native control, tinted. A range input styled from scratch is four
-     vendor pseudo-elements and a thumb that has to be redrawn per engine;
-     `accent-color` is the one property that says "this is the accent" and lets
-     the platform draw the rest. */
-  .slider input {
-    flex: 1;
-    min-width: 0;
-    accent-color: var(--accent);
-  }
-
-  .secs {
-    min-width: 3ch;
-    font-size: var(--fs-200);
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-  }
-
   /* A sentence under a control, in the panel's own ink. The hints on the filter
      panel are a `?` because there are fifteen of them and fifteen sentences is
-     a page; there are two here, and a sentence you have to hover for is a
+     a page; there is one here, and a sentence you have to hover for is a
      sentence nobody reads. */
   .note {
     margin: var(--s-2) 0 0;

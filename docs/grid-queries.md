@@ -41,66 +41,76 @@ count equals what selecting it actually yields. Keep both green.
 
 ## Stacking
 
-`stack=<1..10>` collapses each run of consecutive captures from one camera within that
-many seconds into one tile. It is a grouping over the *filtered* set, so a filter that
-removes a member splits its stack in two, and nothing is stored — see
-[ADR 0001](adr/0001-stack-on-capture-time-not-phash.md) for why this is capture time and
-not the perceptual hash. Only EXIF-dated tiles stack; the 449 dated from mtime or from a
-filename are each a stack of one, and an unstackable frame chronologically inside a
-burst does not split the burst around it.
+`stack=on` draws the frames verified to be the same photograph as one tile. **The
+grouping is read, not computed**: `photolib.membership` wrote one row per tile at
+strictness 20 with *matches most members* behind the 3600s fence, and `browse.py` joins
+`stack_member` on those five key columns — [ADR 0003](adr/0003-stack-on-verified-match.md)
+is the decision and [ADR 0001](adr/0001-stack-on-capture-time-not-phash.md) the
+measurements it stands on. There is no window to send: what used to be a slider is the
+fence the Match rows were computed behind, and a walk at any other value would be reading
+pairs nothing ever checked. `browse.STACK_SETTING` names the assignment the grid reads and
+`tests/test_membership.py` asserts it is the one the pass writes; a request at any other
+setting is not expressible, which is deliberate.
 
-Measured over the real 24,534-tile catalog, against [ADR 0001](adr/0001-stack-on-capture-time-not-phash.md)'s
-own table:
+Only tiles membership placed carry a row. A tile the filesystem dated gets none — a copy
+date is not when the photograph was taken — and reaches the grid as a stack of one named
+by its own sha256, which is also what a video is: nothing verifies one. An unplaced frame
+sitting chronologically inside a burst does not split the burst around it.
 
-| window | 1s | 2s | 3s | 4s | 6s | 10s |
-|---|---|---|---|---|---|---|
-| stacks | 15,458 | 13,393 | 11,990 | **10,948** | 9,566 | 8,159 |
-| ADR | 15,435 | 13,371 | 11,969 | **10,929** | 9,550 | 8,145 |
+**The grid draws nothing stacked until the pass has run.** With `stack_member` empty every
+tile is its own stack and the mode is a no-op, which is the honest reading of an assignment
+that does not exist rather than a fall back to the clock. `python -m photolib.membership`
+is the command.
 
-**This code groups 14–23 stacks less than the ADR's prototype did, at every window, and
-why is not known.** The offset is systematic rather than noise, and it shrinks as the
-window widens, so a handful of runs the prototype merged this splits. It is not the
-`unixepoch`-versus-`julianday` change below: float noise *splits* a gap of exactly the
-window, which would push the prototype's count up rather than down. The prototype's
-script was not kept. Anyone re-deriving these should expect this table, not the ADR's.
+Measured over the real catalog with membership in place — the default stills selection,
+24,306 tiles:
 
-**A stacked page costs what its tiles cost, and nothing more.** 500 covers is 1,805
-tiles at the recent end of the library — which is the bracketed end — and 640 at the
-old end, so the same page is 36 ms on `newest` and 16 ms on `oldest` against 10 ms
-unstacked. A full walk is 22 pages and 489 ms, ~22 ms a page. **The first page on
-`newest` therefore misses the 30 ms the spec asked for**, and it misses it by reading
-tiles rather than by collapsing them: under `orient=landscape` a 500-cover page reads
-1,189 tiles and takes 212 ms where the unstacked 500 takes 95 ms. A smaller page under
-stacking is the client's lever, not this module's.
+| | stacks | of more than one | largest | stacks of one |
+|---|---|---|---|---|
+| whole selection | 9,338 | 4,138 | 96 | 5,200 |
+| `orient=landscape` | 2,165 | 756 | 48 | 1,409 |
 
-**The two default sorts never run the grouping pass at all.** A run is contiguous in
-`photo_sort` order, so a page collapses its own as it streams and keyset paging is
-unchanged; `_rows` steps the cursor rather than fetching it, so a tile the page never
-reaches is a tile SQLite never visits. A page ends at a *clean cut* — the first tile
-more than the window away from the last one that could stack — so no run straddles a
-boundary and a page can carry a few covers more than it asked for. That is deliberate:
-the alternative is splitting a burst across two pages.
+**A filter shrinks a stack and never splits it, checked over the whole corpus.** Every
+stack under `orient=landscape`, `ext=.jpg`, `grade=best` and `year=2023` is a subset of a
+stack of the unfiltered selection — 0 splits in all four. That is what stored membership
+buys, and it is why this section no longer has a table of windows in it.
 
-**How many stacks the whole selection holds is one more number of `total`'s shape**, and
-the badge on the Stacks pill is what asks for it — the selection's stacks, not the page
-in front of the reader. The count pane beside it reads `<photos> photos` in both modes,
-so the only number that moves when stacking is toggled is the badge's. `starts` is 1
-exactly where a stack begins, so summing it counts them without building one — 410–420 ms
-unfiltered against this catalog on a warm `total` memo, which is the assignment pass's
-~380 ms plus the sum.
-Memoised per selection under the same cap and eviction as the other two. It is the only
-grouping pass a default sort pays for, once, in front of the first page rather than per
-page, and a reader who has not turned stacking on never pays it. The memo key **drops the
-sort**, since the sort decides which member covers a stack and never how many there are,
-so changing the ordering does not re-count; it keeps the window, which is what the
-grouping groups by.
+**One pass per selection, then a page is a slice.** The assignment visits every selected
+tile and is memoised per selection and sort — see `GridServer.assignment`:
 
-**The eight other sorts cannot stream**, because a stack's members are scattered through
-the ordering. They compute the whole assignment in one ~380 ms pass and memoise it per
-selection under the same cap and eviction as `total` — see `GridServer.assignment`.
-Paging is then a slice and a page is 9 ms. The window is part of the memo key, since it
-is what the grouping groups by; it is dropped from `total`'s key, because no window
-changes how many tiles there are.
+| selection | assignment | 500-cover page | 200-cover page |
+|---|---|---|---|
+| `newest` | 630 ms | 56 ms (1,579 frames) | 19 ms |
+| `oldest` | 660 ms | 23 ms (757 frames) | 7 ms |
+| `largest` | 340 ms | 61 ms (1,757 frames) | 29 ms |
+| `newest`, `orient=landscape` | 470 ms | 43 ms (1,211 frames) | 18 ms |
+
+Against 9 ms for an unstacked page and 227 ms for a `total`. The plan is
+`SCAN p USING INDEX photo_sort` with `SEARCH sm USING PRIMARY KEY` — membership is a
+lookup per tile and never a scan of the table, so a second setting's rows cost nothing —
+and there is no temp b-tree on a default sort, because `photo_sort` already supplies the
+order. A test asserts all three.
+
+**The bill against what it replaced is close to a wash, and its shape changed.** The
+window grouping paid ~410 ms to count the stacks plus 72–77 ms for a first `newest` page,
+and ~22 ms a page after it; this pays ~630 ms once and 56 ms a page. So the first paint on
+`newest` is ~690 ms where it was ~490 ms, every page after it is cheaper, and **the 30 ms
+the spec asked for is met only by a 200-cover page on `oldest`**. The lever is the page
+size, as it was.
+
+**Both of the count pane's numbers come out of that one pass.** `stacks` is the
+assignment's length rather than a count of its own, which is how two readings of one
+selection are kept from disagreeing; `total` still counts tiles, and its memo drops the
+stacking mode because grouping tiles does not change how many there are. The badge on the
+Stacks pill is the first number, the pane beside it reads `<photos> photos` in both modes,
+and a reader who has not turned stacking on pays for no pass at all.
+
+**Every sort takes the same path.** A stack's members can sit anywhere in an ordering, so
+there is no run to collapse as a page streams — the two default sorts used to have one,
+because a time-run was contiguous in `photo_sort` order and a stack is not. Paging is a
+slice of the assignment, which is what returns a stack whole on one page for all ten sorts
+and what makes an overshoot past `limit` unnecessary: a page carries exactly the covers it
+asked for.
 
 The **cover** — the frame a closed stack is drawn as — is **the sharpest frame of the
 middle-exposure third**. Rank the members by mean luminance, take the middle third
@@ -115,8 +125,9 @@ Mean luminance is not stored. It is the centre of mass of the 16-bin
 `luminance_histogram` Phase 2b wrote, computed in Python: Phase 2b's own
 `underexposure` is clamped at mid grey, so every frame brighter than that reads 0 and a
 bracket's top two frames are indistinguishable by it. The cover is **resolved per query
-and never materialised**, because filters apply before the grouping — removing a member
-changes what a stack holds and therefore what it draws.
+and never materialised**, even though membership is not: what a stack holds is a property
+of the photographs, and which of its frames is *present* is a property of the view, so
+narrowing the filters can change the frame a stack draws without changing the stack.
 
 Which member is drawn does *not* depend on the sort, because an ordering is not an
 exposure: `largest` and `newest` draw the same tiles and differ only in where each
@@ -124,27 +135,19 @@ stack sits. The keyset cursor stays the *first* member's `(key, id)`, since that
 ordering's own row; the drawn frame can sit anywhere in it.
 
 **The rule costs one read over the page's own members**, and on a stacked page it is
-the second-largest line in the bill:
+most of the bill: a 500-cover `newest` page ranks 1,299 members and spends 33 ms of its
+56 ms doing it. Both halves of that read are irreducible without a schema change this
+feature does not make — fetching the rows by id, and SQLite parsing `file.quality` once
+per row. Stacks of one are not read for at all, having nothing to choose between, and
+computing the mean in SQL with `json_each` measured slower than shipping the histogram
+and parsing it in Python. The lever is still the page size.
 
-| page (limit 500, window 4s) | tiles read | members ranked | page | of which the cover |
-|---|---|---|---|---|
-| `newest` | 1,805 | 1,632 | 72-77 ms | 37-40 ms |
-| `oldest` | 640 | 240 | 19-21 ms | 6 ms |
-| `newest`, `orient=landscape` | 1,189 | 906 | 223-228 ms | 22 ms |
-| `newest`, limit 200 | 409 | 302 | 16 ms | 8 ms |
-
-So **30 ms holds for a 200-cover page and for `oldest`, and the 500-cover first page on
-`newest` is ~75 ms against the 36 ms it was without the rule.** Both halves of that read
-are irreducible without a schema change this feature does not make: ~13 ms to fetch
-1,632 rows by id and ~12 ms for SQLite to parse `file.quality` once per row. Stacks of
-one are not read for at all, having nothing to choose between, and computing the mean
-in SQL with `json_each` measured slower than shipping the histogram and parsing it in
-Python. The lever is still the page size.
-
-Gaps are measured with `unixepoch`, which is exact for the whole-second timestamps
-`capture_time` writes. The spec's `julianday(...) * 86400.0` carries ~2e-5 s of float
-noise — it reads a four-second gap as 4.0000185, which is over a window of 4 and drops
-the commonest bracket interval there is.
+The fence the assignment was computed behind measures gaps with `unixepoch`, which is
+exact for the whole-second timestamps `capture_time` writes. Its two expressions live in
+`photolib/candidates.py` now — they were `browse.py`'s while the grid cut runs at query
+time, and the fence is the one place left where the clock decides anything. The spec's
+`julianday(...) * 86400.0` carries ~2e-5 s of float noise: it reads a four-second gap as
+4.0000185, which is over a window of 4 and drops the commonest bracket interval there is.
 
 ## Triage screen 8
 

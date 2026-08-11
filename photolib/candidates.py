@@ -13,9 +13,10 @@ Complete linkage is why it is every pair and not merely the adjacent ones: a sta
 is a clique, so a frame owes a verdict against every other member of its run and
 not only against its predecessor.
 
-The population is the one `photolib.browse` cuts runs over -- EXIF-dated tiles, per
-camera, in capture order -- and the expressions that decide it are imported from
-there rather than restated. The reader's own filters are deliberately *not* applied:
+The population is every EXIF-dated tile, per camera, in capture order -- the cut the
+grid's own stacking was once a second reading of, and now the only one there is: the
+grid draws `photolib.membership`'s rows and no longer looks at the clock at all.
+The reader's own filters are deliberately *not* applied:
 kind, camera and year narrow a view, and ADR 0003 makes membership a property of the
 photographs, so a filter shrinks a stack and never changes who is in it. That is why
 a video sits in this population although the grid hides one by default, and why the
@@ -60,16 +61,26 @@ from pathlib import Path
 
 import numpy as np
 
-# The two expressions that decide the population, imported rather than restated:
-# "agrees with the grid's existing selection" is a promise best kept by using the
-# grid's own SQL. They are private to `browse` because until now nothing outside it
-# had a use for them.
-from photolib.browse import _SECONDS as SECONDS
-from photolib.browse import _STACKABLE as STACKABLE
 from photolib.config import Config, load
 from photolib.fingerprints import MODEL, VERSION, from_blob
 
 CEILING = 3600  # seconds. See the module docstring: a commitment, not a preference.
+
+# Where a tile sits in time, and whether the fence can admit it at all. These lived
+# in `photolib.browse` while the grid cut runs at query time and the promise worth
+# keeping was that this population agreed with the grid's own SQL; the grid reads
+# stored membership now, so the fence is the one place left where the clock decides
+# anything and this is where it belongs.
+#
+# `capture_time` writes whole seconds, so `unixepoch` is exact where the spec's
+# `julianday(...) * 86400.0` carries ~2e-5 s of float noise: it reads a gap of
+# exactly four seconds as 4.0000185, which is over a window of 4 and would drop the
+# commonest bracket interval there is. A tile fails the test two ways -- a date
+# `capture_time` guessed from mtime or from a filename, because a copy date is not
+# when the photograph was taken, and the '-' sentinel an undated photo sorts on,
+# which `unixepoch` returns NULL for.
+SECONDS = "unixepoch(p.sort_key)"
+STACKABLE = f"substr(f.taken_src, 1, 5) = 'exif:' AND {SECONDS} IS NOT NULL"
 
 # The cosine at or above which a candidate survives the screen and earns a
 # geometric check.
@@ -107,12 +118,13 @@ class CandidatesRefused(RuntimeError):
 # naming one frame -- so a frame recorded twice at one instant is read once rather
 # than compared with itself.
 #
-# The order is (camera, sort_key, sha256) where `browse.py` has (camera, sort_key,
-# id). Both cut runs in the same places -- two captures sharing a second have a gap
-# of zero however they are ordered, and the gap to the frame outside the tie depends
-# on the timestamps and not on the order within it -- but sha256 is decided by the
-# bytes, so `archive.pipeline.group` reassigning every id cannot flip which of two
-# frames this pass calls the earlier one.
+# The order is (camera, sort_key, sha256) rather than (camera, sort_key, id), which
+# is what the grid's own grouping used while it had one. Both cut runs in the same
+# places -- two captures sharing a second have a gap of zero however they are
+# ordered, and the gap to the frame outside the tie depends on the timestamps and not
+# on the order within it -- but sha256 is decided by the bytes, so
+# `archive.pipeline.group` reassigning every id cannot flip which of two frames this
+# pass calls the earlier one, and it is why a stack is named by a sha256.
 _POPULATION = f"""
 SELECT DISTINCT f.camera, {SECONDS} AS secs, f.kind, p.rep_sha256
 FROM photo AS p
@@ -158,9 +170,8 @@ def runs(
 ) -> Iterator[list[str]]:
     """The population cut into maximal runs, dropping runs of one.
 
-    `None == None` here does the job `cam IS lag(cam)` does in `browse.py`: two
-    frames from a body that recorded no name are still consecutive captures from one
-    camera as far as this grouping can tell.
+    `None == None` here is deliberate: two frames from a body that recorded no name
+    are still consecutive captures from one camera as far as this fence can tell.
 
     A run of one is dropped because it holds no pair, and `alone` keeps it because
     `photolib.membership` needs the other reading of the same cut: every tile gets a
@@ -281,9 +292,9 @@ def worklist(
     """What this pass owes, with the fingerprints it will screen from.
 
     Runs are cut over the whole population rather than over the screenable part of
-    it, which is what keeps the fence the grid's: a video sitting inside a burst
-    neither joins a pair nor breaks the run around it, exactly as an mtime-dated
-    frame does not in `browse.py`.
+    it, which is what keeps a stack contiguous in capture order: a video sitting
+    inside a burst neither joins a pair nor breaks the run around it, and neither
+    does a frame the filesystem dated.
     """
     frames = population(conn)
     stored = vectors(conn, model=model, version=version)

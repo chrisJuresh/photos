@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from harness import label
-from photolib import candidates, fingerprints, matches, membership
+from photolib import browse, candidates, fingerprints, matches, membership
 from photolib.config import Config
 from photolib.membership import (
     MembershipRefused,
@@ -446,6 +446,27 @@ def test_the_recorded_setting_is_the_one_the_labels_settled() -> None:
         "majority",
         candidates.CEILING,
     )
+
+
+def test_the_grid_reads_the_setting_this_pass_writes() -> None:
+    """The other half of that agreement, and the reason it is a test rather than an
+    import: `photolib.browse` names the assignment it reads in five literals of its
+    own, because reaching this module for them would put OpenCV -- `photolib.matches`
+    is where two of the five live -- between a clean checkout and the website. So the
+    two are asserted equal here, where both may be imported.
+
+    The column names are asserted too, and not only the values: the grid's join is
+    generated from that mapping, so its keys are what decides which column each value
+    is compared against.
+    """
+    assert tuple(browse.STACK_SETTING) == (
+        "method",
+        "version",
+        "strictness",
+        "linkage",
+        "ceiling",
+    )
+    assert tuple(browse.STACK_SETTING.values()) == Setting().key
 
 
 def test_a_greedy_walk_can_split_a_stack_the_rule_would_have_held(corpus: Stacks) -> None:
