@@ -325,11 +325,11 @@ pass counts those pairs and names the frames a *survivor* with no Match row touc
 being a hole rather than a design. It reads the catalog on the NVMe and nothing else — no
 substrate, no `G:`, and `state.sqlite3` is not attached. Resumable a run at a time,
 idempotent, and it refuses while a writer holds the catalog.
-Measured: 24,076 EXIF-dated tiles in 1,954 runs placed in 2s — 5s including the plan —
-into 9,108 stacks, 4,138 of them holding more than one frame and the largest 96, collapsing
-19,106 tiles. 3,067,859 of the fence's 3,634,381 pairs carry no Match row and none of them
-survived the screen, so nothing is owed. The table grew the catalog from 2,631 MB to
-2,636 MB.
+Measured: 24,076 EXIF-dated tiles in 1,954 runs placed in 2–3s, 5–9s including the plan,
+into 9,108 stacks — 4,138 of them holding more than one frame, the largest 96, collapsing
+19,106 tiles. Of the fence's 3,634,381 pairs, 566,522 carry a Match and 3,065,689 were
+rejected by the screen; **no survivor is missing a Match row**, so nothing is owed. The
+table grew the catalog from 2,631 MB to 2,636 MB.
 
 ```bash
 python -m photolib.membership

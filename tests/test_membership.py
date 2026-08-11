@@ -305,10 +305,10 @@ def test_a_survivor_with_no_match_row_is_counted_and_named(corpus: Stacks) -> No
     corpus.matched(a, b, HIGH)
     for early, late in ((a, b), (a, c), (b, c)):
         corpus.candidate(early, late)
-    unchecked = corpus.work().unchecked
+    work = corpus.work()
 
-    assert (unchecked.admitted, unchecked.pairs) == (3, 2)
-    assert (unchecked.survivors, unchecked.frames) == (2, sorted([a, b, c]))
+    assert work.pairs == 3
+    assert (work.unchecked.survivors, work.unchecked.frames) == (2, sorted([a, b, c]))
 
 
 def test_a_pair_the_screen_rejected_is_counted_and_not_named(corpus: Stacks) -> None:
@@ -318,7 +318,23 @@ def test_a_pair_the_screen_rejected_is_counted_and_not_named(corpus: Stacks) -> 
     corpus.candidate(a, b, verdict="screened_out")
     unchecked = corpus.work().unchecked
 
-    assert (unchecked.pairs, unchecked.survivors, unchecked.frames) == (1, 0, [])
+    assert (unchecked.screened_out, unchecked.survivors, unchecked.frames) == (1, 0, [])
+
+
+def test_neither_count_is_derived_by_subtracting_one_total_from_another(
+    corpus: Stacks,
+) -> None:
+    """Both are counted where they are recorded, so a narrower fence than the Match
+    rows were computed behind cannot make the report say a negative number."""
+    a, b, c = burst(corpus, "123", apart=30)
+    for early, late in ((a, b), (a, c), (b, c)):
+        corpus.matched(early, late, HIGH)
+    narrow = Setting(strictness=20, linkage="majority", ceiling=29)
+    work = worklist(corpus.conn, narrow)[0]
+
+    # Three Match rows and a fence that admits no pair at all, which is what the
+    # subtraction this replaced would have reported as -3.
+    assert (work.pairs, work.unchecked.screened_out, work.unchecked.survivors) == (0, 0, 0)
 
 
 # --- resume and idempotence ---------------------------------------------------
@@ -457,9 +473,9 @@ def test_place_puts_every_frame_of_a_run_somewhere(corpus: Stacks) -> None:
     """A frame with no row is a tile the grid could not draw, so the walk is total."""
     run = [f"{index}" * 64 for index in range(4)]
 
-    rows = place(run, {run[2]}, {(run[0], run[1]): HIGH}, SETTING)
+    stacks = place(run, {run[2]}, {(run[0], run[1]): HIGH}, SETTING)
 
-    assert sorted(sha256 for sha256, _ in rows) == sorted(run)
+    assert sorted(sha256 for stack in stacks for sha256 in stack) == sorted(run)
 
 
 # --- refusals -----------------------------------------------------------------

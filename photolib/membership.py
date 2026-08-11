@@ -159,14 +159,15 @@ def link(
     run: Sequence[str],
     points: Points,
     strictness: int = STRICTNESS,
-    joins: Joins = complete,
+    joins: Joins = majority,
 ) -> list[list[str]]:
     """One run cut into stacks, by `joins` at `strictness`.
 
-    The rule is `complete` unless a caller says otherwise, because that is the rule
-    ADR 0003 argued from and the one the softenings are read against. Every caller
-    that draws or replays a round passes the round's own rule, and this pass passes
-    the settled one.
+    The defaults are the settled setting and not ADR 0003's opening argument, so a
+    caller that says nothing gets the rule the labels chose rather than the one they
+    overruled. Every caller that draws or replays a round passes the round's own rule
+    anyway: `harness.label` passes what its sets are cut with and `harness.calibrate`
+    passes each of `LINKAGE` in turn.
 
     The walk is forward and greedy whichever rule is in force, which is what
     `photolib.browse` does with the window: a frame the walk consumed early can
@@ -189,8 +190,6 @@ def link(
 
 # --- the assignment ----------------------------------------------------------
 
-Placement = list[tuple[str, str]]  # a run's frames, each with the stack it lands in
-
 _POINTS = "SELECT sha_early, sha_late, points FROM pair_match WHERE method = ? AND version = ?"
 
 _ANY_MATCH = "SELECT 1 FROM pair_match WHERE method = ? AND version = ? LIMIT 1"
@@ -203,6 +202,14 @@ WHERE method = ? AND version = ? AND strictness = ? AND linkage = ? AND ceiling 
 _INSERT = """
 INSERT OR REPLACE INTO stack_member
   (method, version, strictness, linkage, ceiling, sha256, stack) VALUES (?, ?, ?, ?, ?, ?, ?)
+"""
+
+# The two absences, each counted where it is recorded rather than derived by
+# subtracting one total from another: a count that is arithmetic over two
+# populations is a count that can go negative when one of them moves.
+_SCREENED_OUT = """
+SELECT count(*) FROM candidate_pair
+WHERE model = ? AND version = ? AND verdict = 'screened_out'
 """
 
 # The survivors with no Match row: the pairs the screen sent to the geometric stage
@@ -260,8 +267,8 @@ def placed(conn: sqlite3.Connection, setting: Setting) -> set[str]:
 
 def place(
     run: Sequence[str], videos: Container[str], stored: Points, setting: Setting
-) -> Placement:
-    """One run's frames, each with the stack it lands in.
+) -> list[list[str]]:
+    """One run cut into the stacks a setting draws, earliest member first.
 
     The walk is over the photographs of the run and the videos are placed alone,
     which is two of ADR 0003's rules at once: a video is not a candidate, so it
@@ -269,46 +276,41 @@ def place(
     cut over the whole population for exactly that reason, and `browse.py` already
     refuses to let a frame it cannot stack split the burst it sits inside.
     """
-    stacks = link(
+    return link(
         [sha256 for sha256 in run if sha256 not in videos],
         stored,
         setting.strictness,
         setting.joins,
-    )
-    return [(sha256, stack[0]) for stack in stacks for sha256 in stack] + [
-        (sha256, sha256) for sha256 in run if sha256 in videos
-    ]
+    ) + [[sha256] for sha256 in run if sha256 in videos]
 
 
 @dataclass(frozen=True)
 class Unchecked:
     """The candidate pairs carrying no Match row, which are read as no agreement.
 
-    `pairs` is every one of them, which is mostly the screen doing its job -- 84% of
-    this catalog's candidates never earned a geometric check. `survivors` is the part
-    of that which is a hole instead: the screen said look properly and nothing did.
-    Those frames are named for `photolib.candidates.run`'s reason -- the point of
-    saying so is that it cannot go quiet -- and they are the ceiling ADR 0003 prices
-    at 6.0% of the pairs the reader kept together.
+    Two facts and not one, because the two absences are different. `screened_out` is
+    mostly the screen doing its job -- 84% of this catalog's candidates never earned
+    a geometric check, by design. `survivors` is the part that is a hole instead: the
+    screen said look properly and nothing did, which is a substrate that would not
+    decode or a `photolib.matches` pass that has not run. Those frames are named for
+    `photolib.candidates.run`'s reason -- the point of saying so is that it cannot go
+    quiet -- and they are the ceiling ADR 0003 prices at 6.0% of the pairs the reader
+    kept together.
     """
 
-    admitted: int
-    pairs: int
+    screened_out: int
     survivors: int
     frames: list[str]
 
 
-def unchecked(
-    conn: sqlite3.Connection, setting: Setting, admitted: int, matched: int
-) -> Unchecked:
-    """How much of the fence's pair set this walk has no evidence about."""
+def unchecked(conn: sqlite3.Connection, setting: Setting) -> Unchecked:
+    """What the walk has no evidence about, counted where it is recorded."""
+    screen = (fingerprints.MODEL, fingerprints.VERSION)
     absent = conn.execute(
-        _UNCHECKED,
-        (fingerprints.MODEL, fingerprints.VERSION, setting.method, setting.version),
+        _UNCHECKED, (*screen, setting.method, setting.version)
     ).fetchall()
     return Unchecked(
-        admitted=admitted,
-        pairs=admitted - matched,
+        screened_out=conn.execute(_SCREENED_OUT, screen).fetchone()[0],
         survivors=len(absent),
         frames=sorted({sha256 for pair in absent for sha256 in pair}),
     )
@@ -324,6 +326,7 @@ class Work:
     todo: list[list[str]]  # runs still to place, in capture order
     tiles: int  # EXIF-dated tiles, every one of which gets a stack
     runs: int  # the runs the fence cuts them into, a frame that shot alone included
+    pairs: int  # the pairs those runs hold -- ADR 0003's number, at this ceiling
     videos: int  # of those tiles, the ones nothing verifies: each its own stack
     unchecked: Unchecked
 
@@ -339,18 +342,16 @@ def worklist(conn: sqlite3.Connection, setting: Setting) -> tuple[Work, Points, 
     videos = {sha256 for _, _, kind, sha256 in frames if kind == "video"}
     cut = list(candidates.runs(frames, setting.ceiling, alone=True))
     done = placed(conn, setting)
-    stored = points(conn, setting)
     return (
         Work(
             todo=[group for group in cut if any(sha256 not in done for sha256 in group)],
             tiles=len(frames),
             runs=len(cut),
+            pairs=candidates.count(frames, setting.ceiling),
             videos=len(videos),
-            unchecked=unchecked(
-                conn, setting, candidates.count(frames, setting.ceiling), len(stored)
-            ),
+            unchecked=unchecked(conn, setting),
         ),
-        stored,
+        points(conn, setting),
         videos,
     )
 
@@ -378,12 +379,16 @@ def place_all(
     owed = sum(len(group) for group in todo)
 
     for group in todo:
-        rows = place(group, videos, stored, setting)
-        counted: dict[str, int] = {}
-        for _, stack in rows:
-            counted[stack] = counted.get(stack, 0) + 1
-        sizes += counted.values()
-        written += _store(conn, [(*setting.key, sha256, stack) for sha256, stack in rows])
+        stacks = place(group, videos, stored, setting)
+        sizes += (len(stack) for stack in stacks)
+        written += _store(
+            conn,
+            [
+                (*setting.key, sha256, stack[0])
+                for stack in stacks
+                for sha256 in stack
+            ],
+        )
 
         now = time.perf_counter()
         if now - announced >= progress_seconds:
@@ -463,14 +468,13 @@ def run(
         )
         print(f"tiles     {work.tiles:,} EXIF-dated tiles in {work.runs:,} runs")
         print(f"videos    {work.videos:,} of them videos, which nothing verifies")
-        print(f"matches   {len(stored):,} Match rows read")
+        print(f"pairs     {work.pairs:,} the fence admits, {len(stored):,} carrying a Match")
         # Read as no agreement rather than as a match, so that no stack is invented
         # out of a pair nobody looked at. The survivors are the hole and are named.
         print(
-            f"unchecked {work.unchecked.pairs:,} of {work.unchecked.admitted:,} pairs the "
-            "fence admits carry no Match row and are read as no agreement,"
+            f"unchecked {work.unchecked.screened_out:,} pairs the screen rejected and "
+            f"{work.unchecked.survivors:,} survivors with no Match row, read as no agreement:"
         )
-        print(f"          of which {work.unchecked.survivors:,} survived the screen:")
         for sha256 in work.unchecked.frames:
             print(f"          {sha256}")
         if work.unchecked.frames:
