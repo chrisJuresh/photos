@@ -280,6 +280,25 @@ strictness 20 with *matches most members*, and this is the run that returns it:
 python -m harness.calibrate --linkage complete,majority
 ```
 
+To price the **fingerprint screen** — the other thing ADR 0003 left open, and the one the
+labels turned round: at 0.40 the screen costs 5.1% of the pairs the reader kept together,
+and the question is whether to loosen it. This is the measurement and never the pass. It
+splits why each kept pair carries no Match row, because the two causes have different fixes
+— the screen rejected it, or the derivative tree is missing a substrate — and it prices what
+each screen value would ask for, estimated from the rates `photolib.matches` already
+recorded rather than by running anything. Every value is answered from the stored cosine and
+never from `verdict`, which is frozen at 0.40; the refusal guarding that constant is
+borrowed whole rather than weakened. It reads the catalog and `labels.sqlite3`, both on the
+NVMe, opens no substrate, never touches `G:`, and holds both connections read-only, so it
+writes nothing at all. Measured: all 227 of the unreached pairs are the screen's, none is a
+hole in the tree, and buying every one of them back means a screen of 0.087, 1.77M fresh
+pairs, 1h42m and 356 MB. Its output is ADR 0003's "What is still deliberately not settled
+here", which recommends leaving the screen where it is.
+
+```bash
+python -m harness.screen
+```
+
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
 it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
 then drops the facet vocabulary and every `total` the server had memoised — no restart.

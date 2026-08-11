@@ -246,6 +246,50 @@ linkage; round two draws at 20 with *matches most members*.
 ## What is still deliberately not settled here
 
 Whether the embedding screen can be tightened enough to skip geometry on most pairs. The
-labels say the live question is the opposite one: at 0.40 the screen already costs 6.0% of
+labels say the live question is the opposite one: at 0.40 the screen already costs 5.1% of
 the pairs the reader kept together, and that is a floor on recall no strictness can lift.
-Loosening it is the change worth measuring.
+Loosening it was the change worth measuring, and `python -m harness.screen` has now
+measured it — over the 60 answers in the labels file, against the stored cosines, pricing
+each value's pass from the rates the last one recorded rather than by running anything.
+
+| screen | surviving candidates | fresh pairs to match | match time | catalog | kept pairs reached |
+|---|---|---|---|---|---|
+| 0.087 | 2,334,168 | 1,767,646 | 1h42m | +356 MB | 4,427 (100.0%) |
+| 0.20 | 1,414,690 | 848,168 | 49m | +171 MB | 4,382 (99.0%) |
+| 0.30 | 894,016 | 327,494 | 19m | +66 MB | 4,305 (97.2%) |
+| 0.35 | 708,578 | 142,056 | 8m | +29 MB | 4,261 (96.3%) |
+| **0.40** | **566,522** | **0** | — | — | **4,200 (94.9%)** |
+| 0.45 | 454,402 | 0 | — | — | 4,105 (92.7%) |
+| 0.50 | 367,526 | 0 | — | — | 3,956 (89.4%) |
+
+0.087 is not a round number and is not from the sweep: it is the weakest cosine among the
+pairs the reader kept and the screen rejected, so it is the value that buys every one of
+them back. Every row is read from `candidate_pair.screen` and never from the verdict, which
+is frozen at 0.40 — the refusal guarding that constant is borrowed whole and untouched.
+
+**The bill is the screen's alone.** All 227 kept pairs with no Match row were rejected by
+the fingerprint. Not one is a missing substrate, and not one holds a frame the fingerprint
+pass never reached: the derivative tree is complete over every frame the reader was shown.
+The two causes this ticket set out to separate turn out to be one.
+
+**Tightening is settled, and the answer is no.** 0.45 already loses 95 of the reader's kept
+pairs and 0.50 loses 244 — 5.5 points of the labelled population — before any strictness has
+spoken. There is no tightening that skips geometry and keeps the pairs the reader says are
+one photograph, so the question this ADR left open is closed against itself.
+
+**Recommendation: leave the screen at 0.40.** Loosening is affordable — 19 minutes and 66 MB
+at 0.30, under two hours and 356 MB to buy back everything — but the recall it buys is a
+**ceiling and not a delivery**. A recovered pair changes what the grid draws only if its
+Match then clears strictness 20, and these are the weakest fingerprints in the labelled set
+(median 0.287 against 0.965 for pairs a second or less apart). The settled linkage is what
+makes that trade a poor one: under complete linkage a pair with no Match row was fatal to
+its whole stack, which is the argument above for softening; under *matches most members* it
+costs one vote among many. The floor that mattered when this was written is much less
+binding now that the rule above it changed.
+
+What is left unsettled is exactly one number, and it is cheap: **match those 227 pairs and
+see whether their geometry agrees.** That is seconds of work and it turns the ceiling into
+a delivered figure, which is the one thing a measurement over stored rows cannot do — it
+needs a write to the catalog, which is why this ticket did not do it. Revisit the screen if
+that check says the geometry is there; a change would mean re-running the match pass and
+then #40's materialising pass, both resumable and idempotent by design.
