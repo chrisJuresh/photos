@@ -82,8 +82,8 @@ Pair = tuple[str, str]
 REASONS = {
     "matched": "carry a Match row already",
     "screened_out": "were rejected by the screen -- the only ones a looser value buys back",
-    "substrate_missing": "survived the screen and carry no Match: a substrate the pass could"
-    " not read",
+    "substrate_missing": "survived the screen and carry no Match: a substrate the pass"
+    " could not read, or a pass that never reached them",
     "unfingerprinted": "hold a frame with no fingerprint: the same hole one stage earlier",
     "video": "hold a video, which nothing fingerprints and ticket 29 puts out of scope",
     "uncandidated": "are no candidate at all, although both frames are fingerprinted",
@@ -155,6 +155,13 @@ def reach(pair: Pair, found: Seen) -> Reach:
 
     The order matters in one place: a video is never fingerprinted, so it is
     named as a video rather than as a hole in a tree that owes it nothing.
+
+    `substrate_missing` is the one reading rather than a measurement: a survivor
+    with no Match row is a pair `photolib.matches` could not read a substrate
+    for, or one a pass has not reached yet, and the rows cannot tell those apart.
+    Both are the same instruction -- finish the tree, then finish the pass -- and
+    the frames are named so an unfinished pass shows up as a crowd rather than
+    as a quiet misattribution.
     """
     early, late = pair
     cosine = found.cosine(early, late)
@@ -181,18 +188,27 @@ def reached(found: Sequence[Reach], threshold: float) -> int:
 
 
 def kept(cases: Iterable[calibrate.Case]) -> list[Pair]:
-    """Every pair the reader kept together, over every answer they gave.
+    """Every pair the reader kept together, once each.
 
     `calibrate.pairs` decides what a label is evidence about and this takes the
     positive half of it: a pair they kept together is a pair the grid owes a
     Match, and a pair they pushed apart needs none to be drawn correctly.
+
+    **Once each, which `harness.calibrate` deliberately does not do.** Two
+    answers drawn from one run can hold the same pair -- the two rounds partition
+    a run under different linkage rules, so their sets overlap -- and there the
+    repetition is evidence weight, a pair two answers agree about counting twice.
+    Here the unit is the pair itself: whether it carries a Match row is one fact
+    about two frames, and counting it twice would weight the share this report
+    prices by how often the sampler happened to return to a run. Measured over
+    this catalog it is 4,427 answers' worth of pairs against 3,727 pairs.
     """
-    return [
-        (early, late)
-        for subject in cases
-        for early, late, same in calibrate.pairs(subject)
-        if same
-    ]
+    found: dict[Pair, Pair] = {}
+    for subject in cases:
+        for early, late, same in calibrate.pairs(subject):
+            if same:
+                found.setdefault((min(early, late), max(early, late)), (early, late))
+    return list(found.values())
 
 
 # --- what a value costs -------------------------------------------------------
@@ -255,7 +271,10 @@ WHERE method = ? AND version = ? AND sha_early = ? AND sha_late = ?
 
 _FINGERPRINTED = "SELECT sha256 FROM fingerprint WHERE model = ? AND version = ?"
 
-CHUNK = 500  # frames per IN list, well under SQLite's variable limit
+# Frames per IN list. The labels name a couple of thousand frames and an older
+# SQLite caps a statement at 999 variables, so this is what the query needs
+# rather than a precaution.
+CHUNK = 500
 
 
 def _chunks(items: Sequence[str], size: int = CHUNK) -> Iterable[Sequence[str]]:
@@ -295,10 +314,10 @@ def seen(
         marks = ",".join("?" * len(chunk))
         videos.update(
             sha256
-            for sha256, kind in conn.execute(
-                f"SELECT sha256, kind FROM file WHERE sha256 IN ({marks})", tuple(chunk)
+            for (sha256,) in conn.execute(
+                f"SELECT sha256 FROM file WHERE kind = 'video' AND sha256 IN ({marks})",
+                tuple(chunk),
             )
-            if kind == "video"
         )
     return Seen(
         cosines=cosines,
@@ -503,16 +522,14 @@ def labels_read_only(path: Path) -> sqlite3.Connection:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
+    # No arguments, and the sweep is not a knob. Every value in it is priced
+    # against the same stored cosines, and the one value a caller might want to
+    # add -- the screen that buys every rejected pair back -- `measure` works out
+    # and prices on its own. A flag here would only let the report be asked a
+    # narrower question than the one it exists to answer.
+    argparse.ArgumentParser(
         prog="python -m harness.screen", description=__doc__.splitlines()[0]
-    )
-    parser.add_argument(
-        "--screens",
-        help="comma-separated screen values to price (default: %(default)s)",
-        default=",".join(f"{value:g}" for value in SWEEP),
-    )
-    args = parser.parse_args(argv)
-    thresholds = tuple(float(value) for value in args.screens.split(","))
+    ).parse_args(argv)
 
     config = load()
     labels_db = config.catalog_db.parent / label.LABELS
@@ -543,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"answers   {len(answers):,} answers over {len({c.run for c in cases})} runs")
         if orphans:
             print(f"orphans   {len(orphans)} answers whose frames are in no run any more")
-        found, rows = measure(conn, kept(cases), thresholds=thresholds)
+        found, rows = measure(conn, kept(cases))
     finally:
         conn.close()
 

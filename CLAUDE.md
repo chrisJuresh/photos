@@ -281,19 +281,24 @@ python -m harness.calibrate --linkage complete,majority
 ```
 
 To price the **fingerprint screen** — the other thing ADR 0003 left open, and the one the
-labels turned round: at 0.40 the screen costs 5.1% of the pairs the reader kept together,
+labels turned round: at 0.40 the screen costs 5.2% of the pairs the reader kept together,
 and the question is whether to loosen it. This is the measurement and never the pass. It
 splits why each kept pair carries no Match row, because the two causes have different fixes
 — the screen rejected it, or the derivative tree is missing a substrate — and it prices what
 each screen value would ask for, estimated from the rates `photolib.matches` already
 recorded rather than by running anything. Every value is answered from the stored cosine and
 never from `verdict`, which is frozen at 0.40; the refusal guarding that constant is
-borrowed whole rather than weakened. It reads the catalog and `labels.sqlite3`, both on the
-NVMe, opens no substrate, never touches `G:`, and holds both connections read-only, so it
-writes nothing at all. Measured: all 227 of the unreached pairs are the screen's, none is a
-hole in the tree, and buying every one of them back means a screen of 0.087, 1.77M fresh
-pairs, 1h42m and 356 MB. Its output is ADR 0003's "What is still deliberately not settled
-here", which recommends leaving the screen where it is.
+borrowed whole rather than weakened. **A pair is counted once**, where `harness.calibrate`
+counts it once per answer: the rounds partition a run differently and their sets overlap, so
+60 answers' worth of kept pairs is 4,427 mentions of 3,727 pairs. It reads the catalog and
+`labels.sqlite3`, both on the NVMe, opens no substrate, never touches `G:`, and holds both
+connections read-only, so it writes nothing at all; the numbers are counts rather than
+timings, but it shares the NVMe with the catalog and the substrates, so take it when nothing
+else is measuring against that drive. There are no arguments and the sweep is not a knob.
+Measured: all 192 of the unreached pairs are the screen's, none is a hole in the tree, and
+buying every one of them back means a screen of 0.087, 1.77M fresh pairs, 1h42m and 356 MB.
+Its output is ADR 0003's "What is still deliberately not settled here", which recommends
+leaving the screen where it is.
 
 ```bash
 python -m harness.screen

@@ -25,16 +25,22 @@ import sqlite3
 import numpy as np
 import pytest
 
-from harness import screen
+from harness import calibrate, screen
 from photolib import candidates
 from photolib.fingerprints import DIM, MODEL, VERSION, to_blob
 from photolib.matches import METHOD
 from photolib.matches import VERSION as MATCH_VERSION
 
-A, B, C, D = ((seed * 64)[:64] for seed in "abcd")
+
+def sha_of(seed: str) -> str:
+    """A 64-hex string that reads as a hash without being one."""
+    return (seed * 64)[:64]
 
 
-def seen(
+A, B, C, D = (sha_of(seed) for seed in "abcd")
+
+
+def holding(
     *,
     cosines: dict | None = None,
     matched: tuple = (),
@@ -54,13 +60,13 @@ def seen(
 
 
 def test_a_kept_pair_with_a_match_row_is_already_reached() -> None:
-    found = screen.reach((A, B), seen(cosines={(A, B): 0.9}, matched=[(A, B)]))
+    found = screen.reach((A, B), holding(cosines={(A, B): 0.9}, matched=[(A, B)]))
 
     assert (found.cause, found.reached_at(screen.SCREEN)) == ("matched", True)
 
 
 def test_a_kept_pair_the_screen_rejected_is_the_screens_own_cost() -> None:
-    found = screen.reach((A, B), seen(cosines={(A, B): 0.31}))
+    found = screen.reach((A, B), holding(cosines={(A, B): 0.31}))
 
     assert (found.cause, found.cosine) == ("screened_out", 0.31)
 
@@ -69,13 +75,13 @@ def test_a_survivor_with_no_match_row_is_a_missing_substrate() -> None:
     """`photolib.matches` skips a pair whose substrate it cannot read, and leaves
     no row rather than a zero. So a survivor with no Match is a hole in the tree
     and not a disagreement."""
-    found = screen.reach((A, B), seen(cosines={(A, B): 0.88}))
+    found = screen.reach((A, B), holding(cosines={(A, B): 0.88}))
 
     assert found.cause == "substrate_missing"
 
 
 def test_a_frame_with_no_fingerprint_is_the_same_hole_one_stage_earlier() -> None:
-    found = screen.reach((A, B), seen(fingerprinted=(A,)))
+    found = screen.reach((A, B), holding(fingerprinted=(A,)))
 
     assert found.cause == "unfingerprinted"
 
@@ -83,13 +89,13 @@ def test_a_frame_with_no_fingerprint_is_the_same_hole_one_stage_earlier() -> Non
 def test_a_kept_pair_holding_a_video_is_not_a_hole_at_all() -> None:
     """Nothing fingerprints a video and ticket 29 puts one out of scope, so a pair
     holding one is missing nothing the derivative tree owes it."""
-    found = screen.reach((A, B), seen(fingerprinted=(A,), videos=(B,)))
+    found = screen.reach((A, B), holding(fingerprinted=(A,), videos=(B,)))
 
     assert found.cause == "video"
 
 
 def test_a_pair_of_fingerprinted_frames_that_is_no_candidate_is_named_as_neither() -> None:
-    found = screen.reach((A, B), seen())
+    found = screen.reach((A, B), holding())
 
     assert found.cause == "uncandidated"
 
@@ -97,7 +103,7 @@ def test_a_pair_of_fingerprinted_frames_that_is_no_candidate_is_named_as_neither
 def test_a_pair_is_found_whichever_way_round_the_labels_name_it() -> None:
     """The labels order a pair by the run and the enumeration by (camera,
     sort_key, sha256), so the lookup asks both ways rather than assuming."""
-    found = screen.reach((B, A), seen(cosines={(A, B): 0.31}))
+    found = screen.reach((B, A), holding(cosines={(A, B): 0.31}))
 
     assert (found.cause, found.cosine) == ("screened_out", 0.31)
 
@@ -106,7 +112,7 @@ def test_a_pair_is_found_whichever_way_round_the_labels_name_it() -> None:
 
 
 def test_loosening_the_screen_reaches_exactly_the_rejected_pairs_above_it() -> None:
-    rejected = screen.reach((A, B), seen(cosines={(A, B): 0.31}))
+    rejected = screen.reach((A, B), holding(cosines={(A, B): 0.31}))
 
     assert [rejected.reached_at(value) for value in (0.40, 0.35, 0.31, 0.30)] == [
         False,
@@ -120,7 +126,7 @@ def test_tightening_past_a_matched_pairs_screen_loses_it() -> None:
     """A value is read as what it decides and not as what happens to be stored
     under it: at 0.50 this pair would never have been checked, whatever rows a
     pass at 0.40 left behind."""
-    matched = screen.reach((A, B), seen(cosines={(A, B): 0.45}, matched=[(A, B)]))
+    matched = screen.reach((A, B), holding(cosines={(A, B): 0.45}, matched=[(A, B)]))
 
     assert [matched.reached_at(value) for value in (0.40, 0.50)] == [True, False]
 
@@ -128,7 +134,7 @@ def test_tightening_past_a_matched_pairs_screen_loses_it() -> None:
 def test_no_screen_value_reaches_a_pair_with_no_candidate_row() -> None:
     """The floor on recall this ticket exists to price: a missing substrate is not
     bought back by any screen, however loose."""
-    hole = screen.reach((A, B), seen(fingerprinted=(A,)))
+    hole = screen.reach((A, B), holding(fingerprinted=(A,)))
 
     assert [hole.reached_at(value) for value in (0.40, 0.05, -1.0)] == [False, False, False]
 
@@ -136,10 +142,40 @@ def test_no_screen_value_reaches_a_pair_with_no_candidate_row() -> None:
 def test_the_reached_count_is_the_matched_pairs_plus_the_ones_recovered() -> None:
     found = screen.reaches(
         [(A, B), (B, C), (C, D)],
-        seen(cosines={(A, B): 0.9, (B, C): 0.31}, matched=[(A, B)], fingerprinted=(A, B, C)),
+        holding(
+            cosines={(A, B): 0.9, (B, C): 0.31}, matched=[(A, B)], fingerprinted=(A, B, C)
+        ),
     )
 
     assert [screen.reached(found, value) for value in (0.40, 0.30)] == [1, 2]
+
+
+# --- which pairs are asked about ----------------------------------------------
+
+
+def answer(members, *, surrounding=(), evicted=(), included=()) -> dict:
+    """One row of `labels.sqlite3`, in the shape `label.answers` hands it over."""
+    return {
+        "members": list(members),
+        "camera": "Lumix",
+        "verdict": "accept",
+        "evicted": list(evicted),
+        "included": list(included),
+        "surrounding": list(surrounding),
+    }
+
+
+def test_a_pair_two_answers_agree_about_is_asked_about_once() -> None:
+    """The two rounds partition one run under different linkage rules, so their
+    sets overlap. The unit here is the pair, and counting it twice would weight
+    the share this report prices by how often the sampler returned to a run."""
+    run = (A, B, C)
+    cases = [
+        calibrate.case(answer([A, B]), run),
+        calibrate.case(answer([A, B, C]), run),
+    ]
+
+    assert screen.kept(cases) == [(A, B), (A, C), (B, C)]
 
 
 # --- what it would cost -------------------------------------------------------
@@ -238,7 +274,8 @@ def test_survivors_are_counted_from_the_stored_cosine_and_not_the_stored_verdict
 ) -> None:
     """The whole measurement turns on this: `verdict` is frozen at 0.40, so a
     report reading it would answer every value in the sweep at 0.40."""
-    catalog.frame(A), catalog.frame(B), catalog.frame(C)
+    for sha256 in (A, B, C):
+        catalog.frame(sha256)
     catalog.candidate(A, B, 0.31)
     catalog.candidate(A, C, 0.55)
     catalog.candidate(B, C, 0.20)
@@ -252,7 +289,9 @@ def test_survivors_are_counted_from_the_stored_cosine_and_not_the_stored_verdict
 
 
 def test_what_the_catalog_says_about_a_pair_is_read_from_the_catalog(catalog: Catalog) -> None:
-    catalog.frame(A), catalog.frame(B), catalog.frame(C, vector=False)
+    for sha256 in (A, B):
+        catalog.frame(sha256)
+    catalog.frame(C, vector=False)
     catalog.frame(D, kind="video", vector=False)
     catalog.candidate(A, B, 0.90)
     catalog.match(A, B)
@@ -269,7 +308,8 @@ def test_a_measurement_refuses_a_table_whose_verdicts_were_decided_elsewhere(
     """The refusal guarding the screen constant is borrowed whole rather than
     weakened: pricing a move away from 0.40 means nothing if the rows on the disk
     were decided at some other value."""
-    catalog.frame(A), catalog.frame(B)
+    for sha256 in (A, B):
+        catalog.frame(sha256)
     catalog.candidate(A, B, 0.31, verdict="survivor")
 
     with pytest.raises(candidates.CandidatesRefused):
@@ -277,7 +317,8 @@ def test_a_measurement_refuses_a_table_whose_verdicts_were_decided_elsewhere(
 
 
 def test_a_measurement_writes_nothing(catalog: Catalog) -> None:
-    catalog.frame(A), catalog.frame(B)
+    for sha256 in (A, B):
+        catalog.frame(sha256)
     catalog.candidate(A, B, 0.31)
     rows = "SELECT sha_early, sha_late, screen, verdict FROM candidate_pair"
     before = catalog.conn.execute(rows).fetchall()
@@ -291,7 +332,8 @@ def test_a_measurement_writes_nothing(catalog: Catalog) -> None:
 def test_a_measurement_prices_every_value_it_was_asked_for(catalog: Catalog) -> None:
     """And the value that buys every rejected pair back, which is 0.31 here: the
     row the decision is actually between is not one the caller had to guess."""
-    catalog.frame(A), catalog.frame(B), catalog.frame(C)
+    for sha256 in (A, B, C):
+        catalog.frame(sha256)
     catalog.candidate(A, B, 0.31)
     catalog.candidate(A, C, 0.90)
     catalog.match(A, C)
@@ -306,7 +348,7 @@ def test_a_measurement_prices_every_value_it_was_asked_for(catalog: Catalog) -> 
 
 def test_the_value_that_buys_everything_back_is_the_weakest_pair_the_screen_lost() -> None:
     found = screen.reaches(
-        [(A, B), (B, C)], seen(cosines={(A, B): 0.31, (B, C): 0.09})
+        [(A, B), (B, C)], holding(cosines={(A, B): 0.31, (B, C): 0.09})
     )
 
     assert screen.everything(found) == 0.09
