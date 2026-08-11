@@ -153,13 +153,20 @@ def population(conn: sqlite3.Connection) -> list[Frame]:
     return conn.execute(_POPULATION).fetchall()
 
 
-def runs(frames: Iterable[Frame], ceiling: int = CEILING) -> Iterator[list[str]]:
+def runs(
+    frames: Iterable[Frame], ceiling: int = CEILING, *, alone: bool = False
+) -> Iterator[list[str]]:
     """The population cut into maximal runs, dropping runs of one.
 
     `None == None` here does the job `cam IS lag(cam)` does in `browse.py`: two
     frames from a body that recorded no name are still consecutive captures from one
     camera as far as this grouping can tell.
+
+    A run of one is dropped because it holds no pair, and `alone` keeps it because
+    `photolib.membership` needs the other reading of the same cut: every tile gets a
+    stack, and a frame that shot on its own is a stack of one.
     """
+    least = 1 if alone else 2
     run: list[str] = []
     camera_before: str | None = None
     secs_before = 0
@@ -167,11 +174,11 @@ def runs(frames: Iterable[Frame], ceiling: int = CEILING) -> Iterator[list[str]]
         if run and camera == camera_before and secs - secs_before <= ceiling:
             run.append(sha256)
         else:
-            if len(run) > 1:
+            if len(run) >= least:
                 yield run
             run = [sha256]
         camera_before, secs_before = camera, secs
-    if len(run) > 1:
+    if len(run) >= least:
         yield run
 
 

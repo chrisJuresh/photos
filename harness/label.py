@@ -75,13 +75,29 @@ import re
 import sqlite3
 import sys
 import threading
-from collections.abc import Callable, Container, Iterable, Sequence
+from collections.abc import Container, Iterable, Sequence
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from photolib import candidates, matches
 from photolib.config import load, substrate_path
+
+# The rule itself, which is not the harness's to own: `photolib.membership`
+# materialises the assignment and this harness judges it, so the walk both of them
+# read has to be one walk and it has to be the one that outlives this directory.
+# Imported by name rather than reached through the module so that `label.link` and
+# `label.LINKAGE` go on meaning what they have always meant here.
+from photolib.membership import (  # noqa: F401 -- re-exported for `harness.calibrate`
+    LINKAGE,
+    Joins,
+    Points,
+    complete,
+    link,
+    majority,
+    match,
+    neighbour,
+)
 
 # The line the sets are drawn at. It was **not** the answer this harness exists to
 # find when round one asked -- it was a place to stand while asking, and every set
@@ -169,11 +185,6 @@ LABELS = "labels.sqlite3"  # beside the catalog, which is where the NVMe is name
 
 STATIC_DIR = Path(__file__).resolve().parent
 
-Points = dict[tuple[str, str], int]
-# Whether a frame joins the stack in hand: the linkage rule, as a value. `link`
-# takes one so that `harness.calibrate` can replay the labels against the softer
-# rules ADR 0003 leaves open without a second copy of the walk.
-Joins = Callable[[Sequence[str], str, Points, int], bool]
 Capture = tuple[str, int]  # a frame, and when it was taken
 Run = tuple[str | None, list[Capture]]  # a camera, and its consecutive captures
 Near = tuple[str, int]  # a frame outside the stack, and its gap from the edge
@@ -257,106 +268,6 @@ class Question:
             + [sha for sha, _ in self.after[:shown]]
             + [near[0] for near in self.outside if near is not None]
         )
-
-
-def match(points: Points, a: str, b: str) -> int:
-    """The Match between two frames, or zero where there is no row.
-
-    A pair with no row is a pair the harness has no evidence for -- the screen
-    rejected it, or a substrate it needed was missing. `photolib.matches` is
-    careful to keep those two apart from a checked zero and this is not: what a
-    set is drawn from is evidence that two frames are one picture, and absent
-    evidence and no agreement come to the same drawing.
-
-    Either order, because a run's order is the enumeration's order and a caller
-    should not have to reproduce it to ask a question about two frames.
-    """
-    found = points.get((a, b))
-    return points.get((b, a), 0) if found is None else found
-
-
-def complete(
-    holding: Sequence[str], frame: str, points: Points, strictness: int
-) -> bool:
-    """ADR 0003's linkage: a frame joins only if it agrees with all of the stack.
-
-    Named rather than inlined because `harness.calibrate` replays the labels
-    against this rule and against the softer ones ADR 0003 leaves open, and the
-    rule it calls complete linkage has to be this one and not a second copy of it.
-    """
-    return all(match(points, member, frame) >= strictness for member in holding)
-
-
-def majority(
-    holding: Sequence[str], frame: str, points: Points, strictness: int
-) -> bool:
-    """"Matches most members" -- the softening ADR 0003 left open, and its answer.
-
-    Strictly most, so a frame that agrees with half of a stack does not join it:
-    a tie is not most, and precision is the constraint that breaks ties here.
-    """
-    agreed = sum(1 for member in holding if match(points, member, frame) >= strictness)
-    return agreed * 2 > len(holding)
-
-
-def neighbour(
-    holding: Sequence[str], frame: str, points: Points, strictness: int
-) -> bool:
-    """Single linkage along the run: a frame joins if it agrees with the one before.
-
-    The weakest rule there is, and the one ADR 0003 rejected -- first by argument
-    and then again on round one's labels, which could not price it either way.
-    Round two is drawn to find where it goes wrong, so this is the rule the
-    sampler asks the question *against* rather than one it draws with. See
-    `Question.chain`.
-    """
-    return match(points, holding[-1], frame) >= strictness
-
-
-# The linkage rules as values, in the order a report reads them: the rule ADR 0003
-# argued from, the one its labels chose, and the one they could not price. Here
-# rather than in `harness.calibrate` because both modules need the same three and
-# the arrow points that way -- the harness draws with one of them and the report
-# replays the labels against all of them.
-LINKAGE: dict[str, Joins] = {
-    "complete": complete,
-    "majority": majority,
-    "neighbour": neighbour,
-}
-
-
-def link(
-    run: Sequence[str],
-    points: Points,
-    strictness: int = STRICTNESS,
-    joins: Joins = complete,
-) -> list[list[str]]:
-    """One run cut into stacks, by `joins` at `strictness`.
-
-    The rule is `complete` unless a caller says otherwise, because that is the
-    rule ADR 0003 argued from and the one the softenings are read against. Every
-    caller that draws or replays a round passes the round's own rule: `questions`
-    passes what the sets are cut with, and `harness.calibrate` passes each of
-    `LINKAGE` in turn.
-
-    The walk is forward and greedy whichever rule is in force, which is what
-    `photolib.browse` does with the window, and its failure is the one the reader
-    is being asked about: a frame the walk consumed early can agree with every
-    member of the stack it was placed before. That split is a coin toss and
-    `questions` scores it as one.
-    """
-    stacks: list[list[str]] = []
-    holding: list[str] = []
-    for frame in run:
-        if holding and joins(holding, frame, points, strictness):
-            holding.append(frame)
-        else:
-            if holding:
-                stacks.append(holding)
-            holding = [frame]
-    if holding:
-        stacks.append(holding)
-    return stacks
 
 
 def _margin(

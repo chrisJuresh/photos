@@ -302,6 +302,39 @@ round at 96.5% precision, and this is the run that returns it:
 python -m harness.calibrate --linkage complete,majority
 ```
 
+To read those Matches as **membership** — one row per tile saying which stack it is in,
+at the setting the labels settled. It is stored rather than derived per query because
+membership is a property of the photographs and not of the view: the grid still cuts runs
+at query time, so narrowing the view splits a stack in two, and once membership is written
+a filter can only remove frames from a stack. **Nothing on screen changes after a pass** —
+the grid goes on drawing what it draws, and ticket 41 is what reads the table. The walk is
+the one `harness.calibrate` replayed the labels against, imported from here rather than
+copied, so ADR 0003's numbers describe what the grid will draw and not something adjacent
+to it; `harness/label.py` re-exports it and keeps working. A stack is named by its earliest
+member's sha256 and never by an id, and that is not the **cover**, which is resolved per
+query. **The strictness, the linkage and the window are part of the key**, the relationship
+the Match rows already have with the method that produced them, so moving one adds a
+population rather than overwriting one and `--strictness`/`--linkage` are how a caller says
+so; the ceiling is stored and is deliberately not a flag, being the fence the Match rows
+were computed behind. Every EXIF-dated published tile gets exactly one row, a frame that
+shot alone included; a tile the filesystem dated gets none, because a copy date is not when
+the photograph was taken; and a video gets a stack that is always its own — nothing
+verifies one — without breaking the run around it. **A pair carrying no Match row is read as
+no agreement and never as a match**, so no stack is invented out of absent evidence, and the
+pass counts those pairs and names the frames a *survivor* with no Match row touches, that
+being a hole rather than a design. It reads the catalog on the NVMe and nothing else — no
+substrate, no `G:`, and `state.sqlite3` is not attached. Resumable a run at a time,
+idempotent, and it refuses while a writer holds the catalog.
+Measured: 24,076 EXIF-dated tiles in 1,954 runs placed in 2s — 5s including the plan —
+into 9,108 stacks, 4,138 of them holding more than one frame and the largest 96, collapsing
+19,106 tiles. 3,067,859 of the fence's 3,634,381 pairs carry no Match row and none of them
+survived the screen, so nothing is owed. The table grew the catalog from 2,631 MB to
+2,636 MB.
+
+```bash
+python -m photolib.membership
+```
+
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
 it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
 then drops the facet vocabulary and every `total` the server had memoised — no restart.

@@ -503,9 +503,10 @@ def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
     Phase 5's grouping, which is derived and rebuilt by `archive.pipeline.group`; 008 adds
     the fingerprints, re-derivable from the substrates by `photolib.fingerprints`; 009 adds
     the candidate pairs, re-derivable from those by `photolib.candidates`; 010 adds the
-    Matches that verify the survivors, re-derivable by `photolib.matches`. None of
-    them is ever written by this import, so all are named here rather than
-    allowed in by a loosened assertion.
+    Matches that verify the survivors, re-derivable by `photolib.matches`; 011 adds the
+    stack each tile is assigned to, which is a reading of those Matches at one setting
+    and re-derivable by `photolib.membership`. None of them is ever written by this
+    import, so all are named here rather than allowed in by a loosened assertion.
     """
     survey = {
         "triage_dir",
@@ -523,6 +524,7 @@ def test_no_projection_tables_were_invented(migrated: tuple[Path, Path]):
         "fingerprint",
         "candidate_pair",
         "pair_match",
+        "stack_member",
     }
     connection = db.connect(*migrated)
     try:
