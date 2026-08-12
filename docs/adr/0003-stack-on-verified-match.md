@@ -1,12 +1,24 @@
 # Stack on a verified visual match, fenced by time
 
-**Status: accepted 2026-08-09, implemented 2026-08-11.** Supersedes the *decision* of
-[ADR 0001](0001-stack-on-capture-time-not-phash.md) and none of its measurements: pHash
-still cannot group this library, and 0001 remains the place that proves it.
+**Status: accepted 2026-08-09, implemented 2026-08-11, objective amended 2026-08-12.**
+Supersedes the *decision* of [ADR 0001](0001-stack-on-capture-time-not-phash.md) and none of
+its measurements: pHash still cannot group this library, and 0001 remains the place that
+proves it. The machine below — the screen, the Match, the linkage, the fence — is unchanged
+and is still what stacking is built on; what changed is the objective it is tuned to, which
+is "The objective changed" at the end of this document. Who is in the frames is a second rule
+sitting on top of the Match rather than inside it, and it belongs to
+[ADR 0004](0004-people-veto-a-stack.md) rather than here.
 
 **A stack is the same photograph, taken more than once** — frames verified to show the
 same picture, within one stretch of shooting. Capture time stops deciding membership and
 becomes a fence: a necessary condition, never a sufficient one.
+
+> **Superseded by the reader's own account of what they want.** A stack is *the photographs
+> of one subject you only need to see one of* — the composition need not match and the
+> subject may move. `CONTEXT.md` carries the definition and
+> [ADR 0004](0004-people-veto-a-stack.md) the rule that keeps two subjects out of one stack.
+> Everything below stands as the evidence for *sameness*, which is still the first thing a
+> stack needs; it stopped being the only thing.
 
 ## Why the old rule could not be tuned
 
@@ -58,6 +70,12 @@ Geometry rather than embedding distance alone is the primary evidence because th
 operator's binding constraint is precision — *never open a stack and see two unrelated
 photographs* — and "forty-one points agree on one transform" is a harder claim than a
 cosine over a threshold.
+
+> **The constraint stands as a shape and not as a number.** Geometry is still the primary
+> evidence, and the reader still does not want to open a stack and see two unrelated
+> photographs. What moved is how much recall that is worth paying: the floor is 85% and not
+> 95% — see "The objective changed" at the end. The conjunction of the two signals was
+> measured under the new floor and rejected there too, so the embedding stays a screen.
 
 **Linkage is complete by default**: every pair inside a stack must match, not merely
 each frame and its predecessor. This makes the precision constraint structural rather
@@ -259,6 +277,14 @@ weights a long burst quadratically; a case is one vote each and is coarse for th
 reason. `python -m harness.calibrate` prints the whole sweep, the frontier, and the
 labelled cases every setting gets wrong.
 
+> **The floor was 95% and is 85%.** Precision remains a floor and not a ranking, and the
+> reasoning above is why. What the value was set at is what "The objective changed" at the end
+> of this document revises, and strictness 20 is what the old value bought: the reader browsed
+> the shipped result, reported seeing no wrongly-stacked photographs at all, and reported that
+> the pre-#29 time-window grouping was better. Both readings say the floor sat far above where
+> they wanted it, and that the recall it was paid for is the complaint. The setting itself does
+> not move here — it is re-chosen from a fresh round of labels under the new floor.
+
 ### Complete linkage does need softening — the answer is yes
 
 At strictness 20, "matches most members" beats complete linkage on **both** counts at
@@ -433,3 +459,90 @@ a delivered figure, which is the one thing a measurement over stored rows cannot
 needs a write to the catalog, which is why this ticket did not do it. Revisit the screen if
 that check says the geometry is there; a change would mean re-running the match pass and
 then #40's materialising pass, both resumable and idempotent by design.
+
+## The objective changed
+
+> **Superseded: the 95% precision floor.** Recorded 2026-08-12. The floor is now **85%
+> precision, and recall is maximised underneath it.** Everything above that argued for 95% —
+> *never open a stack and see two unrelated photographs*, precision as a floor and never a
+> ranking, recall best-effort under it — is the reasoning that produced strictness 20 and it
+> stays readable here rather than being deleted. The reader browsed the shipped result and
+> disagreed with it: they report seeing no wrongly-stacked photographs at all, and report
+> that the pre-#29 time-window grouping was better. Those two statements together say the
+> floor was set far above where they want it, and that the recall it was paid for is the
+> whole complaint.
+
+The measurements below were recomputed in the grilling session that produced this ticket and
+the seven after it, over the 60 confident answers already in `labels.sqlite3` —
+**3,730 pairs the reader kept together and 2,507 they pushed apart.**
+
+| Match ≥ | precision | recall | wrongly stacked |
+|---|---|---|---|
+| 5 | 89.9% | 81.2% | 340 |
+| 10 | 93.5% | 68.2% | 177 |
+| 15 | 93.4% | 59.9% | 157 |
+| **20 (shipped)** | **93.4%** | **53.0%** | **140** |
+| 30 | 93.5% | 41.5% | 108 |
+| 40 | 94.0% | 34.6% | 82 |
+| 60 | 95.4% | 26.6% | 48 |
+
+The shipped setting does not clear the old floor on these numbers and clears the new one
+comfortably, which is the shape of the problem: precision is flat from 10 to 40 while recall
+halves across it. **This section does not choose the new strictness.** 5 is what these
+figures point at; the value is chosen from a fresh round of labels through the harness's own
+report, which is where a number that describes the grid has to come from.
+
+**Where the 3,730 kept pairs sit against the shipped threshold**, which is how much of the
+complaint the dial alone can answer:
+
+| kept pairs | where they are | reachable by strictness |
+|---|---|---|
+| 1,977 | clear strictness 20 | already stacked |
+| 1,052 | score 5–19 | yes, by the dial alone |
+| 506 | carry a Match row scoring under 5 | only by abandoning the floor |
+| 192 | rejected by the fingerprint screen at 0.40 | no — see the screen sweep above |
+| 3 | fall outside the 3600s fence | no |
+
+So loosening the dial to 5 buys back 1,052 of them, which is 28% of the labelled population
+and the largest single thing available. **The fence is innocent for the third time**: three
+pairs in 3,730, after two rounds of labelling already found one frame in 118.
+
+**The conjunction was measured and rejected.** Requiring both a Match and a fingerprint
+cosine buys precision only *above* the floor being adopted, so under an 85% floor the second
+signal earns nothing: `Match ≥ 5 AND cos ≥ 0.70` scores 93.6% / 62.8%, which plain
+`Match ≥ 10` beats outright at 93.5% / 68.2%. The Pareto frontier over both signals together
+is `Match ≥ 5` (89.9/81.2), `Match ≥ 10` (93.5/68.2), `Match ≥ 10 AND cos ≥ 0.70`
+(95.5/58.0), `Match ≥ 10 AND cos ≥ 0.80` (97.0/47.3) — the two-signal rules are all up in the
+corner the new floor has no interest in. **Stacking stays one number**, and the fingerprint
+stays a screen. This is worth being explicit about because a two-signal rule is the obvious
+thing to reach for when a threshold disappoints, and the labels have already refused it.
+
+**False merges concentrate, so a rate is not enough.** Counting each wrongly-stacked pair
+once per answer that mentions it: 160 mentions at strictness 20 across 21 of the 60 answers,
+415 at strictness 5 across 32 of them, and in both cases the worst five answers hold nearly
+half — 43% and 49%. A report that prints only a rate therefore hides where the damage is, and
+the recalibration's report must **name the worst cases** as well as score the sweep. The two
+counting conventions in play here are the ones "What is still deliberately not settled here"
+already separates above — once globally in the precision and recall table, once per answer in
+these concentration figures — and they must not be quoted against each other.
+
+**The one case no dial reaches.** A thirteen-frame set the reader kept six frames of and
+evicted seven from carries 50 of the 160 wrongly-stacked mentions at strictness 20, with the
+strongest wrong pair scoring 256 points. It is barely better at strictness 5, at 54, because
+the threshold is not what is wrong with it. This is the set "What the labels settled" already
+names as one the geometry cannot tell apart, and it is the case the people rule exists for:
+the difference between the frames the reader kept and the frames they evicted is who is in
+them. [ADR 0004](0004-people-veto-a-stack.md) is judged against it.
+
+**The caveat, beside the numbers rather than under them.** Every figure in this section is
+**pairwise and linkage-free** — a threshold applied to pairs, with no walk and no stack — and
+its label scoping is slightly wider than the harness's own, because it does not cut the scope
+at the run boundary. That last difference is why the kept-pair count here is 3,730 where the
+screen sweep above says 3,727. These figures are indicative, they are what the change of
+objective was decided on, and they are not a report about the grid: the ticket that
+recalibrates re-derives them through the harness's report, which reads `membership.link` and
+therefore describes what the grid actually draws.
+
+They are also reproducible from the two databases and from nothing in this repository — a
+read-only query over `E:\photolib\catalog.sqlite3` and `E:\photolib\labels.sqlite3` — which
+is why they are written down here rather than asserted in a test.
