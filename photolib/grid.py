@@ -81,6 +81,7 @@ import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import parse_qs
 
 from photolib import browse, db, rebuild as rebuild_module, reveal as reveal_module, triage_api
@@ -259,14 +260,36 @@ def parse_limit(values: list[str]) -> int:
     return min(max(int(raw), 1), MAX_LIMIT)
 
 
+class Stack(NamedTuple):
+    """One row of an assignment: where a stack sits in this ordering, and what it is.
+
+    A named tuple rather than a bare one because three of the four fields are
+    read positionally at four separate sites, and a fourth field arriving turned
+    every one of them into `_, _, members, _`. It still indexes like the tuple it
+    was, which is what the cursor walk below compares.
+    """
+
+    photo_id: int  # the first member's, which is where the stack sits
+    key: object  # that member's sort key, which a keyset cursor compares
+    members: tuple
+    name: str  # `stack_member`'s own, the earliest member's sha256
+
+
 def build_assignment(conn: sqlite3.Connection, query: browse.Query) -> tuple:
-    """Every stack of one view as `(id, sort key, members)`, in order.
+    """Every stack of one view as a `Stack`, in the page's own order.
 
     The id and the key are the *first* member's in this ordering: that is where
     the stack sits in it, and it is what a keyset cursor compares against. Which
     member the stack is drawn as is a separate question with a separate answer —
     it depends on readings this pass does not carry, so it is asked only of the
     stacks a page actually holds.
+
+    The name is `stack_member`'s own — the earliest member's sha256, decided by
+    `photolib.membership` and read here rather than worked out. It is kept rather
+    than dropped once the grouping is done because it is the one thing about a
+    stack that does not move with the view: the cover is resolved per query and
+    the ids are reassigned by every rebuild, so a client that has to point at a
+    stack across a filter change has to point at this.
 
     One read of the stored membership per view; the caller memoises it, and
     both numbers the count pane shows come out of it — see `GridServer.assignment`.
@@ -278,10 +301,13 @@ def build_assignment(conn: sqlite3.Connection, query: browse.Query) -> tuple:
         index = seen.get(stack)
         if index is None:
             seen[stack] = len(stacks)
-            stacks.append([photo_id, key, [photo_id]])
+            stacks.append([photo_id, key, [photo_id], stack])
         else:
             stacks[index][2].append(photo_id)
-    return tuple((photo_id, key, tuple(members)) for photo_id, key, members in stacks)
+    return tuple(
+        Stack(photo_id, key, tuple(members), stack)
+        for photo_id, key, members, stack in stacks
+    )
 
 
 def _scalars(conn: sqlite3.Connection, ids: list[int]) -> dict:
@@ -405,23 +431,28 @@ def _assigned(
     if cursor is not None:
         descending = query.ordering.descending
         while start < len(stacks):
-            here = (stacks[start][1], stacks[start][0])
+            here = (stacks[start].key, stacks[start].photo_id)
             if here < cursor if descending else here > cursor:
                 break
             start += 1
     wanted = stacks[start:start + limit]
-    covers = _covers(conn, [members for _, _, members in wanted])
+    covers = _covers(conn, [stack.members for stack in wanted])
     # Every member and not just the drawn one: the covers alone would leave the
     # overlay a second read behind the click. The same ids `_covers` has just
     # read the quality of, so this adds a row width rather than a query shape.
-    rows = _by_id(conn, [photo_id for _, _, members in wanted for photo_id in members])
+    rows = _by_id(conn, [photo_id for stack in wanted for photo_id in stack.members])
     photos = [
-        {**_photo(rows[cover]), "n": len(members), **_frames(rows, members)}
-        for cover, (_, _, members) in zip(covers, wanted)
+        {
+            **_photo(rows[cover]),
+            "n": len(stack.members),
+            "k": stack.name,
+            **_frames(rows, stack.members),
+        }
+        for cover, stack in zip(covers, wanted)
     ]
     following = None
     if wanted and start + limit < len(stacks):
-        following = {"before": wanted[-1][1], "before_id": wanted[-1][0]}
+        following = {"before": wanted[-1].key, "before_id": wanted[-1].photo_id}
     return photos, following
 
 
@@ -468,6 +499,15 @@ def page(
     `query.stack` is set, and passing None there raises rather than serving a page
     that says nothing about how many stacks it is one of. With stacking off neither
     key is there and the page is byte for byte what it was before stacking existed.
+
+    Every photo also gains `k`, the stack's stored name — the earliest member's
+    sha256, which `photolib.membership` decided and nothing here works out. It is
+    the one handle on a stack that a change of view cannot move: `id` is the
+    cover's and the cover is resolved per query, so a client holding one across a
+    filter change would be holding a frame the page may no longer draw. With
+    stacking off it is absent, and a tile's own `s` is its name — a tile stands
+    for itself there, so two frames of one stack are two tiles and must not share
+    a handle.
 
     A photo whose `n` is more than one also carries `m`, the frames it collapsed
     — `id`, `sha`, `width`, `height` each, in this page's own order — which is

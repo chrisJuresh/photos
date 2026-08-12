@@ -56,14 +56,16 @@ A tile the reader has picked by hand, in select mode — by clicking it, by shif
 to extend from the last tile touched, or by sweeping a marquee over a run of them. The
 selected set is evidence: it is what the Copy button puts on the clipboard, as the ids
 grouped the way the grid grouped them. Selecting a cover selects its whole stack, and a
-selection is metadata that never becomes a file operation. It survives scrolling and a
-resize, and is emptied by anything that changes the answer — the toggle, the two knobs,
-the filters and the sort. **Only a regrouping warns first**, because only a regrouping has
-to empty it: once the toggle, the strictness or the linkage moves, the stacks the
-selection named do not exist. The filters and the sort change the *view* and a selected set
-still describes it, so in principle they could keep it; a selection is nonetheless keyed on
-the *cover* that stood for a stack, and narrowing the view can change which frame that is,
-so carrying one waits on the grid naming a stack rather than pointing at its cover.
+selection is metadata that never becomes a file operation. A pick is keyed on the stack's
+**name**, not on the cover that stands for it, so a set survives scrolling, a resize, a
+filter and a sort: those change the *view*, and the name is a property of the photographs.
+What each pick holds is re-read from the pages of the new view as they arrive, so a stack
+the filter shrank stays selected holding less. A pick the new view has not shown keeps
+what it last held — the sheet pages as the reader scrolls, so "further down this view" and
+"not in this view at all" look alike until the view runs out, and a set that dropped the
+second would drop the first with it. Only a **regrouping** empties a set — the toggle, the
+strictness or the linkage — because only then do the stacks the selection named stop
+existing, and that is the one change the Stacks panel warns about first.
 _Avoid_: marked, checked, ticked, chosen, tagged, flagged
 
 **View**:
@@ -89,7 +91,13 @@ same picture fired five times over with a handheld reposition between presses be
 Membership is a property of the photographs, so it holds however the view is narrowed.
 A tile whose date came from the filesystem rather than from EXIF never joins one: a copy
 date is not when the photograph was taken.
-_Avoid_: group, cluster, burst, series, similarity stack
+
+A stack's **name** is its earliest member's sha256 — decided by the membership pass,
+stored, and carried to the client as a tile's `k`. It is the handle on a stack that the
+view cannot move, where the cover can and the ids are reassigned by every rebuild. It is
+total: a frame that shot alone is a stack of one named by itself, and with stacking off a
+tile stands for itself and its own hash is its name.
+_Avoid_: group, cluster, burst, series, similarity stack; and for the name: id, key, hash
 
 **Match**:
 How strongly two frames agree that they are the same picture — the count of distinctive

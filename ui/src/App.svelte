@@ -16,7 +16,16 @@
   import Rebuild from "./lib/Rebuild.svelte";
   import RuleBar from "./lib/RuleBar.svelte";
   import Rules from "./lib/Rules.svelte";
-  import { shareText, stackOf, sweep, tally, toggle } from "./lib/select.js";
+  import {
+    grouping,
+    nameOf,
+    refresh,
+    shareText,
+    stackOf,
+    sweep,
+    tally,
+    toggle,
+  } from "./lib/select.js";
   import Sheet from "./lib/Sheet.svelte";
   import { photoRect } from "./lib/sheet.js";
   import { remember, restore, settle } from "./lib/stack.js";
@@ -141,16 +150,29 @@
   const selectedKeys = $derived(selected.map((entry) => entry.key));
   const selectedTally = $derived(tally(selected));
 
-  // A selected set that survived a change to the query would describe a page that no
-  // longer exists — a selection is keyed on the cover that stands for a stack, and
-  // narrowing the view can change which frame that is. `gridQuery` is recomputed by
-  // the sort, the filters and the toggle, so it is the signal rather than a list of
-  // them restated here.
+  // What a selection is a claim about. A filter or a sort changes the *view*:
+  // those are still the tiles the reader picked, still grouped the way the grid
+  // grouped them, and a pick is keyed on the stack's name, which the view cannot
+  // move. The toggle and the two knobs change the *grouping*, and then the stacks
+  // the picks named do not exist. One string rather than three variables watched
+  // together, and the same one the report's conditions line carries.
+  const grouped = $derived(grouping(stacking));
+
+  $effect(() => {
+    void grouped;
+    untrack(() => {
+      selected = [];
+    });
+  });
+
+  // The anchor goes on any change to the query, selection or no selection: it is
+  // an index into the sheet's page order, and a new query is a new order. What
+  // shift-click extends from is then the next tile touched, which is the only
+  // honest answer once the run it named has been repacked.
   $effect(() => {
     void gridQuery;
     untrack(() => {
-      selected = [];
-      selectAnchor = null; // it indexes an order this query no longer has
+      selectAnchor = null;
     });
   });
 
@@ -515,13 +537,25 @@
 
   // --- the sheet ----------------------------------------------------------
 
-  function fetchPage(cursor) {
-    if (mode === "grid") {
-      // No `kind` unless the reader picked one: the server's default is still
-      // photography, which is `image` and `raw_image` both and no video.
-      return api.photos({ limit: 500, ...gridQuery, ...(cursor || {}) });
+  async function fetchPage(cursor) {
+    if (mode !== "grid") return api.page(candidate, cursor);
+    // Which view asked, so a page that lands after the reader has moved on can be
+    // told from one that is still being looked at — the same fact the sheet keeps
+    // as its generation, read here because this is where it is needed.
+    const view = sheetKey;
+    // No `kind` unless the reader picked one: the server's default is still
+    // photography, which is `image` and `raw_image` both and no video.
+    const body = await api.photos({ limit: 500, ...gridQuery, ...(cursor || {}) });
+    // A pick survives a filter; what it holds does not, because a filter removes
+    // frames from a stack. So every page of the view re-reads the picks it
+    // carries, which is what keeps the count and the report describing the view
+    // their conditions line names. Only for the view that is still on screen: a
+    // page from the one before it landing late would be answering about a page
+    // nobody is looking at, exactly as the sheet's own generation says.
+    if (selected.length && view === sheetKey) {
+      selected = refresh(selected, body.photos.map(stackOf));
     }
-    return api.page(candidate, cursor);
+    return body;
   }
 
   // What the overlay draws for one tile. `m` is the page's own answer to what a
@@ -571,7 +605,7 @@
     guard(() => api.revealOrigin(item.id));
   }
 
-  const isSelected = (item) => selected.some((entry) => entry.key === item.id);
+  const isSelected = (item) => selected.some((entry) => entry.key === nameOf(item));
 
   // The marquee, in three moments.
   //

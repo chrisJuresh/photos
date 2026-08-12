@@ -7,6 +7,7 @@
   import { createSheet } from "./sheet.js";
   import { thumbHashToDataURL } from "./thumbhash.js";
   import { PHOTOS_ROOT, folderOf, isUnder } from "./screens.js";
+  import { nameOf } from "./select.js";
 
   let {
     key = "",
@@ -17,10 +18,11 @@
     // drawn from them and not from its own state, so a folder excluded from
     // screen 6's table reddens the tiles in it too.
     excludedDirs = [],
-    // Grid select mode: whether the tickboxes are shown at all, and the cover
-    // ids of the tiles that are selected. Owned by App, exactly as the rule set
-    // is — a tile displays them and does not hold them, which is what lets a
-    // recycled tile come back selected.
+    // Grid select mode: whether the tickboxes are shown at all, and the names of
+    // the stacks that are selected. Owned by App, exactly as the rule set is — a
+    // tile displays them and does not hold them, which is what lets a recycled
+    // tile come back selected, and a name rather than a cover id is what lets one
+    // come back selected under a different filter.
     selecting = false,
     selectedKeys = [],
     onActivate = () => {},
@@ -120,7 +122,7 @@
   // tile stay selected through recycling: one scrolled out is released, and the
   // one that comes back is bound here against the set as it stands now.
   function fillTick(el, item) {
-    el.dataset.selected = lookup.has(item.id) ? "on" : "off";
+    el.dataset.selected = lookup.has(nameOf(item)) ? "on" : "off";
   }
 
   onMount(() => {
