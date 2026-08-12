@@ -57,6 +57,13 @@ middle-exposure third — resolved from one read over the members of the stacks 
 the page and never materialised, because that is a question about the members the
 view left rather than about the stack.
 
+`strictness=` and `linkage=` name *which* stored assignment to read, and default
+to the one ADR 0003's labels settled. They are the two of `stack_member`'s five key
+columns a reader may move, and a request may only name an assignment somebody ran
+the pass at — `GridServer.settings` is that list, and it is the same one the
+Stacks panel was offered, so a knob the panel showed is never a 400 and a setting
+nobody wrote is never answered with a page of stacks of one.
+
 What can be filtered and sorted by lives in `photolib.browse`, so the vocabulary
 can be read, measured and tested without a server. This module keeps the query
 string, the envelope, and the security posture, and holds no filter of its own.
@@ -448,7 +455,10 @@ def page(
     of one view, so it is counted once per view — see
     `GridServer.total`.
 
-    With stacking on the envelope echoes `stack`, and every photo gains `n`, its
+    With stacking on the envelope echoes `stack` and the two knobs that decided the
+    grouping — `strictness` and `linkage`, echoed for `sort`'s reason: a page that
+    said nothing about which assignment it is a slice of could not be told from a
+    page of another one. Every photo gains `n`, its
     stack's size. It also carries `stacks`, how many rows the whole view
     collapses to: `total` still counts tiles, so the two together are the count
     pane's two numbers and the first of them is what the sheet reserves its height
@@ -481,6 +491,8 @@ def page(
     if query.stack:
         envelope["stack"] = True
         envelope["stacks"] = len(assignment)
+        envelope["strictness"] = query.strictness
+        envelope["linkage"] = query.linkage
     return envelope
 
 
@@ -616,6 +628,20 @@ class GridServer(ThreadingHTTPServer):
     def kind_totals(self) -> dict[str, int]:
         """`photo` rows per media kind. A view of `facets`, not a second query."""
         return self.facets()["kinds"]
+
+    def settings(self) -> tuple[dict[str, str | int], ...]:
+        """The assignments `stack_member` holds — what a request may name.
+
+        A view of `facets`, not a second query, and the same list the Stacks panel
+        was offered: the panel and the validation cannot come to disagree about
+        which settings exist, so a knob the panel offered is never a 400 and one it
+        did not is never served. The label rides along in the payload and is not
+        part of the name, so it is dropped here.
+        """
+        return tuple(
+            {name: entry[name] for name in browse.STACK_KNOBS}
+            for entry in self.facets()["stacking"]["settings"]
+        )
 
     def total(self, query: browse.Query) -> int:
         """How many tiles one view holds, counted once per view.
@@ -835,7 +861,11 @@ class GridHandler(BaseHTTPRequestHandler):
         params = parse_qs(query, keep_blank_values=True)
         try:
             limit = parse_limit(params.get("limit", []))
-            view = browse.parse(params, kinds=parse_kinds(params.get("kind", [])))
+            view = browse.parse(
+                params,
+                kinds=parse_kinds(params.get("kind", [])),
+                settings=self.server.settings(),
+            )
             cursor = browse.parse_cursor(
                 view.ordering, params.get("before", []), params.get("before_id", [])
             )

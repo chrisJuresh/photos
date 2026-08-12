@@ -259,19 +259,24 @@ def place(conn: sqlite3.Connection, rows) -> None:
     )
 
 
-def store_membership(conn: sqlite3.Connection, stacks) -> None:
+def store_membership(conn: sqlite3.Connection, stacks, **knobs) -> None:
     """Write `stack_member` rows for each stack, earliest member first.
 
     The one place a test corpus says what the grid reads: the setting is
     `browse.STACK_SETTING`, which `photolib.membership` is asserted to agree with, and
     a stack is named by its earliest member's sha256 — read off the sequence rather
     than invented, exactly as the pass reads it off the run.
+
+    `knobs` overrides part of that setting, so a corpus can hold a second population
+    the way the real table does — two assignments of the same frames, each readable
+    as its own setting's.
     """
+    setting = {**browse.STACK_SETTING, **knobs}
     conn.executemany(
         "INSERT INTO stack_member (method, version, strictness, linkage, ceiling, "
         "sha256, stack) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
-            (*browse.STACK_SETTING.values(), sha, members[0])
+            (*setting.values(), sha, members[0])
             for members in stacks
             for sha in members
         ],

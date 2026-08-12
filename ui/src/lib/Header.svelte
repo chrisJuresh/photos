@@ -9,6 +9,7 @@
   import { onMount } from "svelte";
   import { count } from "./api.js";
   import { refract } from "./glass.js";
+  import { choose } from "./stack.js";
   import { current, set } from "./theme.js";
 
   let {
@@ -20,9 +21,11 @@
     // by hand out of it.
     filters = {},
     sort = "newest",
-    // `{on}`, owned and remembered by App exactly as the filters are owned by
-    // it: this proposes the next one.
-    stacking = { on: false },
+    // `{on, strictness, linkage}`, owned and remembered by App exactly as the
+    // filters are owned by it: this proposes the next one. The two knobs are null
+    // until the reader moves one, meaning whichever assignment the server is
+    // pointed at — `facets.stacking.default` is which that is.
+    stacking = { on: false, strictness: null, linkage: null },
     // The rows the answer holds, and — while stacking is on — the tiles those
     // rows stand for. `tiles` is null when a row is already a tile, which is
     // what lets the pane read photographs in both modes without being told the
@@ -100,6 +103,75 @@
   function flipTheme() {
     theme = set(theme === "dark" ? "light" : "dark");
   }
+
+  // --- the two knobs, and the warning in front of them ---------------------
+  // The assignments `stack_member` actually holds, and the one the grid is reading.
+  // The panel offers what exists and never the whole cartesian product of the key:
+  // a setting nobody ran the pass at has no rows, and a page read from no rows is
+  // every tile in a stack of its own — a plausible page rather than an error, which
+  // is the one thing a reader could not see for themselves.
+  const offered = $derived(facets?.stacking?.settings ?? []);
+  const setting = $derived({
+    strictness: stacking.strictness ?? facets?.stacking?.default?.strictness,
+    linkage: stacking.linkage ?? facets?.stacking?.default?.linkage,
+  });
+  const strictnesses = $derived([
+    ...new Set(offered.map((entry) => entry.strictness)),
+  ].sort((a, b) => a - b));
+  // The rules that exist at the strictness on screen, labelled by the server —
+  // narrowed rather than listed in full, so the panel cannot show a rule that would
+  // drag the strictness away from where the reader just put it.
+  const linkages = $derived(
+    offered.filter((entry) => entry.strictness === setting.strictness),
+  );
+  // Whether a pass has written the grouping the grid is asking for. The default is
+  // served whether or not one has — an empty table read as stacks of one is the
+  // documented no-op — so this is the one thing the reader cannot see for
+  // themselves: with no rows behind it, every tile is drawn as a stack of one and
+  // the page looks exactly like a library that brackets nothing.
+  const written = $derived(
+    offered.some(
+      (entry) =>
+        entry.strictness === setting.strictness && entry.linkage === setting.linkage,
+    ),
+  );
+
+  // The regrouping change the reader has asked for and has not confirmed, or null.
+  // A filter or a sort changes the *view* and the selected set still describes it;
+  // the toggle and the two knobs change the *grouping*, and after one of those the
+  // stacks the selection named do not exist, so it is emptied. Ten minutes of
+  // picking is worth a sentence in front of it.
+  let pending = $state(null);
+
+  // Compared against the *resolved* setting, so pressing the knob position that is
+  // already lit does nothing at all: it is not a regrouping, and warning about one
+  // — or reloading the sheet to arrive where it already is — would be the panel
+  // inventing a cost. It is also how the default stops being a special case, since
+  // a null and the value it stands for are the same grouping.
+  function propose(next) {
+    if (
+      next.on === stacking.on &&
+      (next.strictness ?? setting.strictness) === setting.strictness &&
+      (next.linkage ?? setting.linkage) === setting.linkage
+    ) {
+      return;
+    }
+    if (selectedTally.stacks > 0) pending = next;
+    else onstack(next);
+  }
+
+  function regroup() {
+    const next = pending;
+    pending = null;
+    onstack(next);
+  }
+
+  // A panel closed mid-warning gets no answer, so the question does not survive it
+  // — reopening the panel showing a change the reader walked away from would be a
+  // press away from emptying a set they still have.
+  $effect(() => {
+    if (panel !== "stacks") pending = null;
+  });
 
   // Escape closes whatever is open, and a click anywhere that is not the header
   // does the same. Both are on window rather than on a backdrop element: a
@@ -293,7 +365,7 @@
               class:on={stacking.on}
               role="switch"
               aria-checked={stacking.on}
-              onclick={() => onstack({ ...stacking, on: !stacking.on })}
+              onclick={() => propose({ ...stacking, on: !stacking.on })}
             >
               {stacking.on ? "On" : "Off"}
             </button>
@@ -305,6 +377,80 @@
             never breaks one in two.
           </p>
         </section>
+
+        <!-- The two knobs, and only while there is a grouping for them to be about:
+             with the switch off nothing is grouped, so a knob there would be a
+             control that warns about emptying a selection and then changes nothing.
+             There is no third knob — the window is the fence the stored Matches were
+             computed behind, so every other value asks about pairs nothing ever
+             checked. -->
+        {#if stacking.on && strictnesses.length}
+          <section>
+            <h2>
+              Strictness
+              <span class="help" title="How many distinctive points two frames have to agree on before they are one stack.">?</span>
+            </h2>
+            <div class="options">
+              {#each strictnesses as value}
+                <button
+                  class="option"
+                  class:on={value === setting.strictness}
+                  onclick={() => propose({ ...stacking, ...choose(offered, setting, { strictness: value }) })}
+                >
+                  {value}
+                </button>
+              {/each}
+            </div>
+          </section>
+          <section>
+            <h2>
+              Linkage
+              <span class="help" title="How many members of a stack a frame has to agree with, rather than only the frame before it.">?</span>
+            </h2>
+            <div class="options">
+              {#each linkages as entry}
+                <button
+                  class="option"
+                  class:on={entry.linkage === setting.linkage}
+                  onclick={() => propose({ ...stacking, ...choose(offered, setting, { linkage: entry.linkage }) })}
+                >
+                  {entry.label}
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
+        <!-- The page a reader cannot read for themselves. Said whether or not the
+             switch is on, because it is the switch that would otherwise do nothing
+             visible. -->
+        {#if facets && !written}
+          <p class="note">
+            Nothing has been grouped at this setting, so every tile is a stack of its
+            own. <code>python -m photolib.membership</code> is the pass that writes
+            one, and the settings it has been run at are what this panel offers.
+          </p>
+        {/if}
+
+        <!-- Said before it happens rather than after. A filter or a sort changes
+             what is on screen and the selected set still describes it; these three
+             change how the photographs are grouped, so the stacks it named stop
+             existing. -->
+        {#if pending}
+          <section class="warn">
+            <p class="note">
+              Regrouping empties what you have selected —
+              <strong>{count(selectedTally.stacks)}</strong>
+              {selectedTally.stacks === 1 ? "stack" : "stacks"}, {count(selectedTally.photos)}
+              {selectedTally.photos === 1 ? "photograph" : "photographs"}. The stacks
+              it names will not exist afterwards.
+            </p>
+            <div class="options">
+              <button class="option" onclick={regroup}>Regroup anyway</button>
+              <button class="option on" onclick={() => (pending = null)}>Keep the selection</button>
+            </div>
+          </section>
+        {/if}
       </div>
     {/if}
 
@@ -626,10 +772,33 @@
     max-width: 100%;
   }
 
+  /* The change the reader has asked for and not confirmed, set off from the knob
+     they pressed: a warning that looked like the rest of the panel would be read as
+     more explanation. A rule above it and the panel's full ink in the sentence,
+     which is the only place in here that gets it — the two buttons under it say
+     which way is which, so the colour is not carrying the meaning on its own. */
+  .warn {
+    border-top: 1px solid color-mix(in srgb, var(--glass-ink) 14%, transparent);
+    padding-top: var(--s-3);
+  }
+
+  .warn .note {
+    margin-top: 0;
+    color: var(--glass-text);
+  }
+
+  /* A command the reader is meant to type. Monospace and nothing else: it sits in
+     a sentence rather than in a block, and a tinted box around three words in a
+     panel this narrow is more furniture than the words are worth. */
+  .stacks code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.92em;
+  }
+
   /* A sentence under a control, in the panel's own ink. The hints on the filter
      panel are a `?` because there are fifteen of them and fifteen sentences is
-     a page; there is one here, and a sentence you have to hover for is a
-     sentence nobody reads. */
+     a page; the sentences here are what the switch and the two knobs mean, and a
+     sentence you have to hover for is a sentence nobody reads. */
   .note {
     margin: var(--s-2) 0 0;
     font-size: var(--fs-100);

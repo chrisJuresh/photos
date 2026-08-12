@@ -57,11 +57,13 @@ to extend from the last tile touched, or by sweeping a marquee over a run of the
 selected set is evidence: it is what the Copy button puts on the clipboard, as the ids
 grouped the way the grid grouped them. Selecting a cover selects its whole stack, and a
 selection is metadata that never becomes a file operation. It survives scrolling and a
-resize, and is emptied by anything that changes the answer — the toggle, the filters and
-the sort. Only the toggle regroups, so in principle a filter could keep it; a selection is
-nonetheless keyed on the *cover* that stood for a stack, and narrowing the view can change
-which frame that is, so carrying one waits on the grid naming a stack rather than pointing
-at its cover.
+resize, and is emptied by anything that changes the answer — the toggle, the two knobs,
+the filters and the sort. **Only a regrouping warns first**, because only a regrouping has
+to empty it: once the toggle, the strictness or the linkage moves, the stacks the
+selection named do not exist. The filters and the sort change the *view* and a selected set
+still describes it, so in principle they could keep it; a selection is nonetheless keyed on
+the *cover* that stood for a stack, and narrowing the view can change which frame that is,
+so carrying one waits on the grid naming a stack rather than pointing at its cover.
 _Avoid_: marked, checked, ticked, chosen, tagged, flagged
 
 **View**:
@@ -114,7 +116,10 @@ in `docs/adr/0003`. *Complete* is every pair inside the stack, which makes "two 
 photographs never share a stack" structurally true rather than merely likely, and cannot
 express a burst holding one pair the geometry agrees nothing about. *Neighbour* asks only
 that each frame match the one before it, which is cheaper and lets a stack walk from one
-subject to another in small steps — measured and rejected, not merely feared.
+subject to another in small steps — measured and rejected, not merely feared. It is a knob
+in the Stacks panel beside **strictness**, and both offer the assignments
+`python -m photolib.membership` has written rather than every value the rule allows: a
+setting is a choice of which stored grouping to read.
 _Avoid_: clustering, chaining, closure
 
 **Window**:
@@ -123,8 +128,9 @@ stack. Necessary, never sufficient: it fences a stack to one stretch of shooting
 keeps stacks contiguous in capture order, and the match decides everything inside the
 fence. It stopped being the only number stacking has — see `docs/adr/0003` — and then
 stopped being a number a reader sets: at 3600s it is the fence the stored Matches were
-computed behind, so moving it would ask about pairs nothing ever checked. The grid's one
-stacking control is the on/off pill.
+computed behind, so moving it would ask about pairs nothing ever checked. It is the one
+part of a setting the Stacks panel does not offer, and `docs/adr/0003` records that this
+is settled rather than pending.
 _Avoid_: threshold, tolerance, distance, sensitivity
 
 **Candidate**:

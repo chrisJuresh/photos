@@ -48,9 +48,22 @@ strictness 20 with *matches most members* behind the 3600s fence, and `browse.py
 is the decision and [ADR 0001](adr/0001-stack-on-capture-time-not-phash.md) the
 measurements it stands on. There is no window to send: what used to be a slider is the
 fence the Match rows were computed behind, and a walk at any other value would be reading
-pairs nothing ever checked. `browse.STACK_SETTING` names the assignment the grid reads and
-`tests/test_membership.py` asserts it is the one the pass writes; a request at any other
-setting is not expressible, which is deliberate.
+pairs nothing ever checked. `browse.STACK_SETTING` names the assignment the grid reads by
+default and `tests/test_membership.py` asserts it is the one the pass writes.
+
+**`strictness=` and `linkage=` name another one**, and are the whole of what the Stacks
+panel's two knobs send. They cost nothing extra — a setting is five bound values in the
+same join, so a second population is a different key into the same index and never a
+second query shape — and they are validated against `browse.settings`, one
+`SELECT DISTINCT` over `stack_member`'s key read once per process beside the facets. That
+read is a `SEARCH … USING PRIMARY KEY` and not a pass over the table, so it does not grow
+with the assignment: 0.1 ms over 72,000 rows in three populations, and a test asserts the
+plan. That
+list is what the panel is offered, so **the panel and the refusal read one list**: a knob
+the panel showed is never a 400, and a setting nobody ran the pass at is a 400 rather than
+a page. That last part is the point of validating at all — with no rows the LEFT JOIN
+below answers every tile as its own stack, which is a plausible page and not an error, and
+no reader could tell it from a library that brackets nothing.
 
 Only tiles membership placed carry a row. A tile the filesystem dated gets none — a copy
 date is not when the photograph was taken — and reaches the grid as a stack of one named
@@ -101,7 +114,10 @@ size, as it was.
 **Both of the count pane's numbers come out of that one pass.** `stacks` is the
 assignment's length rather than a count of its own, which is how two readings of one
 view are kept from disagreeing; `total` still counts tiles, and its memo drops the
-stacking mode because grouping tiles does not change how many there are. The badge on the
+stacking mode *and the setting*, because no grouping changes how many tiles there are —
+so moving a knob costs one assignment and never a recount. The assignment memo keeps
+both, since two settings are two populations and a memo that mixed them would answer
+about one and be read as the other. The badge on the
 Stacks pill is the first number, the pane beside it reads `<photos> photos` in both modes,
 and a reader who has not turned stacking on pays for no pass at all.
 

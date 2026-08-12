@@ -79,15 +79,28 @@ the on/off pill. Their existence is free — an untouched knob is a constant in 
 key and hits the same cache entry — and moving one is a cache miss, which the interface
 warns about.
 
-> **Superseded by what was built.** One knob is reader-facing: the on/off pill. The other
-> three are not free after all, because the grouping is materialised rather than computed
-> per request — a knob off its default would have to be answered from a population of
-> `stack_member` nobody wrote, or by falling back to a live walk over the Match rows, which
-> is a second implementation of the rule and the thing "the walk is one walk" was worth
-> most. The window is additionally the fence the Match rows were computed behind, so it was
-> never a knob that could be turned without another offline pass. Strictness and linkage are
-> `python -m photolib.membership`'s flags, where turning one writes the population it
-> describes.
+> **Superseded by what was built, twice.** Three knobs are reader-facing, and the window
+> is not one of them.
+>
+> None of the three are free in the sense meant here, because the grouping is materialised
+> rather than computed per request: a knob off its default would have to be answered from a
+> population of `stack_member` nobody wrote, or by falling back to a live walk over the
+> Match rows, which is a second implementation of the rule and the thing "the walk is one
+> walk" was worth most. So a knob is not a threshold the reader dials to any value they
+> like; it is a **choice of which stored assignment to read**, and `photolib.browse.settings`
+> offers the ones a pass has actually written. Strictness and linkage are
+> `python -m photolib.membership`'s flags, so a setting the panel offers is one somebody
+> ran, and a request naming any other is a 400 rather than a page of stacks of one.
+>
+> **The window is not a knob and this document was the one that had it wrong.**
+> `migrations/011_stack_member.sql` is where it is written down correctly: the ceiling is
+> the fence the Match rows were computed behind, so an assignment at any other value would
+> have been decided over pairs nothing ever checked — narrowing it asks about a subset of
+> the evidence and would still need a pass to write the answer, and widening it reaches
+> pairs that were never checked at all. It stays in the key so that a build-time commitment
+> that changed could be seen to have changed. Ticket 42 settled it that way; the "four
+> knobs" line above is the superseded half, and "Its cost saturates" is a measurement about
+> a grouping that no longer runs at query time.
 
 ## What this makes true that was not
 

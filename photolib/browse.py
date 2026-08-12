@@ -79,10 +79,16 @@ NULL_NUMBER = -1e9
 MAX_VALUES = 64
 MAX_VALUE_CHARS = 200
 
-# The only thing a request says about stacking: draw it, or do not. There is no
-# window to send any more -- membership is stored, and the gap that fenced it is a
-# build-time commitment recorded in `STACK_SETTING` below rather than a knob.
+# Whether the request draws stacks at all. There is no window to send -- membership
+# is stored, and the gap that fenced it is a build-time commitment recorded in
+# `STACK_SETTING` below rather than a knob.
 STACK_ON = "on"
+
+# The setting the grid reads unless the reader names another: what
+# `python -m photolib.membership` writes by default, which is what ADR 0003's
+# labels settled.
+DEFAULT_STRICTNESS = 20
+DEFAULT_LINKAGE = "majority"
 
 # The assignment the grid reads: the setting `photolib.membership` wrote
 # `stack_member` under. A change of any of the five adds a population to that table
@@ -99,9 +105,28 @@ STACK_ON = "on"
 STACK_SETTING: dict[str, str | int] = {
     "method": "sift_ratio_homography",
     "version": "1",
-    "strictness": 20,
-    "linkage": "majority",
+    "strictness": DEFAULT_STRICTNESS,
+    "linkage": DEFAULT_LINKAGE,
     "ceiling": 3600,
+}
+
+# The two of those five a reader may move, and it is deliberately not all five.
+# `method` and `version` say what the Match rows are, so a reader choosing one
+# would be choosing evidence rather than reading it; `ceiling` is the fence those
+# rows were computed behind, so an assignment at any other value would have been
+# decided over pairs nothing ever checked -- `migrations/011_stack_member.sql` is
+# where that is written down, and it is the document ADR 0003's "four knobs" line
+# lost to. Strictness and linkage are the two `photolib.membership` takes as
+# flags, so moving one names a population somebody wrote.
+STACK_KNOBS = ("strictness", "linkage")
+
+# What each linkage rule asks of a frame, in the words CONTEXT.md settles them in.
+# Served with the settings rather than known to the client, for the reason the
+# filter dimensions are: the header names no vocabulary of its own.
+LINKAGE_LABELS = {
+    "complete": "matches every member",
+    "majority": "matches most members",
+    "neighbour": "matches its neighbour",
 }
 
 
@@ -283,6 +308,7 @@ COLUMNS: dict[str, str] = {"ext": "f.ext", "camera": "f.camera", "lens": "f.lens
 NULLABLE = frozenset({"camera", "lens"})
 
 _YEAR = re.compile(r"^[0-9]{4}$")
+_DIGITS = re.compile(r"^[0-9]{1,9}$")
 
 
 def parse_stack(values: list[str]) -> bool:
@@ -301,6 +327,78 @@ def parse_stack(values: list[str]) -> bool:
     return True
 
 
+def settings(conn) -> tuple[dict[str, str | int], ...]:
+    """The assignments `stack_member` actually holds, as `{strictness, linkage}`.
+
+    What the Stacks panel may offer, and what a request naming a setting is checked
+    against. It is the populations that exist and never the cartesian product of the
+    key: the grid reads an assignment and does not compute one, so a setting nobody
+    ran the pass at has no rows to read, and the LEFT JOIN below would answer it
+    with a plausible page of stacks of one rather than with an error.
+
+    Scoped to the method, version and ceiling the grid reads -- the three that are
+    not knobs -- so a population left behind by an older match method is not offered
+    as a strictness. Sorted, so two readings of one table are one list.
+
+    One query per process, read at startup beside `facets` and memoised with it. A
+    `python -m photolib.membership` run while the server is up therefore is not
+    offered until it restarts -- the pass refuses only while a *writer* holds the
+    catalog and the grid is a reader, so this is a real staleness rather than an
+    impossible one. It is the same staleness `facets` has and is left the same way:
+    both describe a catalog that an offline command can change under them, the
+    website is a read-only server over regenerable state, and restarting it is what
+    the pass's own instructions already end with.
+    """
+    fixed = {name: value for name, value in STACK_SETTING.items() if name not in STACK_KNOBS}
+    columns = ", ".join(STACK_KNOBS)
+    rows = conn.execute(
+        f"SELECT DISTINCT {columns} FROM stack_member "
+        f"WHERE {' AND '.join(f'{name} = ?' for name in fixed)} "
+        f"ORDER BY {columns}",
+        list(fixed.values()),
+    ).fetchall()
+    return tuple(dict(zip(STACK_KNOBS, row)) for row in rows)
+
+
+def parse_setting(
+    params: dict[str, list[str]], available: tuple[dict[str, str | int], ...]
+) -> tuple[int, str]:
+    """Which assignment the reader is asking to be shown, validated against the
+    ones that exist.
+
+    Absent means the default, which is accepted whether or not a pass has written
+    it: that is the setting a clean checkout is pointed at, and `assignment_sql`
+    reading an empty table as "every tile is its own stack" is
+    `docs/grid-queries.md`'s documented no-op rather than a wrong answer. Any
+    *other* value is a claim about a population, so it is refused by name unless
+    `available` holds it -- a page of stacks of one is indistinguishable from a
+    library that brackets nothing, and the reader would have no way to tell.
+
+    The pair is checked and not each value alone: two settings existing does not
+    mean their four combinations do.
+    """
+    raw = _tokens("strictness", params.get("strictness", []), split=False)
+    # `_DIGITS` and not `isdigit`, which is true of '\xb2' and every other unicode
+    # digit `int` then refuses -- a 500 where this is a malformed request.
+    if len(raw) > 1 or (raw and not _DIGITS.match(raw[0])):
+        raise BadFilter("strictness")
+    strictness = int(raw[0]) if raw else DEFAULT_STRICTNESS
+
+    linkages = _tokens("linkage", params.get("linkage", []), split=False)
+    if len(linkages) > 1 or (linkages and linkages[0] not in LINKAGE_LABELS):
+        raise BadFilter("linkage")
+    linkage = linkages[0] if linkages else DEFAULT_LINKAGE
+
+    asked = {"strictness": strictness, "linkage": linkage}
+    default = {"strictness": DEFAULT_STRICTNESS, "linkage": DEFAULT_LINKAGE}
+    if asked != default and asked not in available:
+        # Name the knob the request moved, so the client is told which control it
+        # was refused about. A request that moved both is told about the linkage:
+        # a strictness is picked first and which rules exist depends on it.
+        raise BadFilter("linkage" if linkages else "strictness")
+    return strictness, linkage
+
+
 @dataclass(frozen=True)
 class Query:
     """A validated view -- what the filters and the sort put on screen.
@@ -316,19 +414,38 @@ class Query:
     roots: tuple[str, ...]
     sort: str
     stack: bool = False
+    # Which assignment it groups on, of the ones `stack_member` holds. In the key
+    # for the reason the five columns are in `stack_member`'s: two settings are two
+    # populations, so a memo that mixed them would answer about one and be read as
+    # the other.
+    strictness: int = DEFAULT_STRICTNESS
+    linkage: str = DEFAULT_LINKAGE
 
     @property
     def ordering(self) -> Sort:
         return SORTS[self.sort]
 
-    def unstacked(self) -> Query:
-        """The same view with stacking off.
+    @property
+    def setting(self) -> dict[str, str | int]:
+        """The whole five-column name of the assignment to read: the three that are
+        not knobs, and the two the reader moved."""
+        return {**STACK_SETTING, "strictness": self.strictness, "linkage": self.linkage}
 
-        `total` counts tiles and the grouping cannot change how many there are, so
-        both modes of one view share one count rather than paying 230-400 ms
-        each time the toggle moves.
+    def unstacked(self) -> Query:
+        """The same view with stacking off, and at the default setting.
+
+        `total` counts tiles and no grouping can change how many there are, so every
+        mode and every setting of one view share one count rather than paying
+        230-400 ms each time a knob moves.
         """
-        return self if not self.stack else replace(self, stack=False)
+        if not self.stack and (self.strictness, self.linkage) == (
+            DEFAULT_STRICTNESS,
+            DEFAULT_LINKAGE,
+        ):
+            return self
+        return replace(
+            self, stack=False, strictness=DEFAULT_STRICTNESS, linkage=DEFAULT_LINKAGE
+        )
 
 
 def _tokens(field: str, values: list[str], *, split: bool) -> tuple[str, ...]:
@@ -347,8 +464,16 @@ def _tokens(field: str, values: list[str], *, split: bool) -> tuple[str, ...]:
     return tuple(dict.fromkeys(raw))
 
 
-def parse(params: dict[str, list[str]], *, kinds: tuple[str, ...]) -> Query:
-    """The whole view, validated. `kinds` comes from the existing parser."""
+def parse(
+    params: dict[str, list[str]],
+    *,
+    kinds: tuple[str, ...],
+    settings: tuple[dict[str, str | int], ...] = (),
+) -> Query:
+    """The whole view, validated. `kinds` comes from the existing parser, and
+    `settings` from the function of that name -- the assignments that exist, which
+    is what a request naming one is allowed to name; the parameter shadows it inside
+    this function, which never calls it. Empty means only the default."""
     enums = []
     for field, vocabulary in ENUMS.items():
         tokens = _tokens(field, params.get(field, []), split=True)
@@ -372,6 +497,8 @@ def parse(params: dict[str, list[str]], *, kinds: tuple[str, ...]) -> Query:
     if any(not value.isdigit() or not 1 <= int(value) <= 12 for value in raw_months):
         raise BadFilter("month")
 
+    strictness, linkage = parse_setting(params, settings)
+
     return Query(
         kinds=kinds,
         enums=tuple(enums),
@@ -381,6 +508,8 @@ def parse(params: dict[str, list[str]], *, kinds: tuple[str, ...]) -> Query:
         roots=_tokens("root", params.get("root", []), split=False),
         sort=parse_sort(params.get("sort", [])),
         stack=parse_stack(params.get("stack", [])),
+        strictness=strictness,
+        linkage=linkage,
     )
 
 
@@ -449,8 +578,10 @@ def where(query: Query) -> tuple[list[str], list]:
 # the paging silently.
 KEY = 5
 
-# Which stack each tile in the view is in, at `STACK_SETTING`, generated from that
-# mapping so the five placeholders are in its own order. A LEFT JOIN because a tile
+# Which stack each tile in the view is in, at the setting the query names, generated
+# from `STACK_SETTING` so the five placeholders are in the same order `Query.setting`
+# hands them over in -- the SQL's order and the parameters' order are then one thing
+# and there is no way to bind a strictness to a linkage. A LEFT JOIN because a tile
 # the filesystem dated carries no row -- a copy date is not when the photograph was
 # taken, so it can be nobody's neighbour -- and such a tile is a stack of one named
 # by itself. Its own sha256 cannot collide with a stack's name: a stack is named by
@@ -523,7 +654,7 @@ def assignment_sql(query: Query) -> tuple[str, list]:
         f"{_MEMBERSHIP}\n"
         f"WHERE {' AND '.join(f'({term})' for term in terms)}\n"
         f"ORDER BY {sort.key} {direction}, p.id {direction}",
-        [*STACK_SETTING.values(), *params],
+        [*query.setting.values(), *params],
     )
 
 
@@ -815,6 +946,16 @@ def facets(conn) -> dict:
         # Kept as its own key because `main`'s banner and the page total both want
         # it by kind and neither wants to walk the dimension list to find it.
         "kinds": {kind: count for kind, count in tally["kind"].items() if kind is not None},
+        # The groupings the reader may ask for, which is the ones somebody ran the
+        # pass at -- see `settings`. Labelled here rather than in the client for the
+        # reason the dimensions are: the header names no vocabulary of its own.
+        "stacking": {
+            "default": {"strictness": DEFAULT_STRICTNESS, "linkage": DEFAULT_LINKAGE},
+            "settings": [
+                {**entry, "label": LINKAGE_LABELS[str(entry["linkage"])]}
+                for entry in settings(conn)
+            ],
+        },
     }
 
 

@@ -80,7 +80,16 @@ export function tally(selected) {
  * not reach this either.
  */
 export function conditions(query) {
-  const stack = query.stacking.on ? "on" : "off";
+  // The setting rides with the mode, and only while stacking is on: which
+  // assignment the grid was reading is what makes a set of groups mean anything,
+  // and a reader who never moved a knob was looking at the default, which the two
+  // nulls say more honestly than a number copied out of the server would.
+  const stack = query.stacking.on
+    ? "on" +
+      (query.stacking.strictness === null && query.stacking.linkage === null
+        ? ""
+        : ` strictness=${query.stacking.strictness} linkage=${query.stacking.linkage}`)
+    : "off";
   const filters = Object.entries(query.filters)
     .filter(([, values]) => values.length > 0)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

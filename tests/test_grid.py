@@ -991,6 +991,146 @@ def test_stacking_off_returns_what_it_returned_before_stacking_existed(stacked):
     assert len(body["photos"]) == body["total"] == len(stacked.rows)
 
 
+# -- the reader's two knobs ----------------------------------------------
+
+
+STRICTER = {"strictness": 40, "linkage": browse.DEFAULT_LINKAGE}
+
+
+def place_stricter(grid: Grid) -> dict[str, list[int]]:
+    """Write a second assignment of the same frames and return what it groups them
+    into: every stack loses its last member to a stack of its own.
+
+    A second population and not a replacement, exactly as moving a knob leaves the
+    real table -- so the corpus can be asked the one question that matters here,
+    which is whether the grid reads the assignment it was asked for. Written before
+    the first request, because the settings are read once with the facets.
+    """
+    stacks = expected_stacks(grid.rows)
+    shas = {row[0]: row[1] for row in grid.rows}
+    stricter: dict[str, list[int]] = {}
+    for name, members in stacks.items():
+        stricter[name] = members[:-1] if len(members) > 1 else list(members)
+        if len(members) > 1:
+            stricter[f"{name}:last"] = [members[-1]]
+
+    conn = sqlite3.connect(grid.roots.catalog_db)
+    conn.execute("BEGIN")
+    synthetic.store_membership(
+        conn, [[shas[member] for member in members] for members in stricter.values()], **STRICTER
+    )
+    conn.execute("COMMIT")
+    conn.close()
+    return stricter
+
+
+def test_the_facets_route_offers_the_assignments_that_exist(stacked):
+    """What the Stacks panel may show. The corpus has run one pass, so one setting
+    is offered, labelled in the words CONTEXT.md settles the rules in -- the header
+    names no vocabulary of its own."""
+    place_stricter(stacked)
+    stacking = get_json(stacked.port, "/api/facets")["stacking"]
+    assert stacking["default"] == {"strictness": 20, "linkage": "majority"}
+    assert stacking["settings"] == [
+        {"strictness": 20, "linkage": "majority", "label": "matches most members"},
+        {"strictness": 40, "linkage": "majority", "label": "matches most members"},
+    ]
+
+
+def test_the_facets_route_offers_no_setting_when_no_pass_has_run(grid):
+    """A clean checkout. The panel shows the pill and no knobs, rather than knobs
+    whose every position would draw a page of stacks of one."""
+    assert get_json(grid.port, "/api/facets")["stacking"]["settings"] == []
+
+
+def test_a_page_is_grouped_at_the_setting_the_reader_asked_for(stacked):
+    """The knob end to end: the same 74 tiles, grouped the way the pass at that
+    strictness grouped them, and the envelope says which assignment it is a slice
+    of."""
+    stricter = place_stricter(stacked)
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=on&strictness=40")
+
+    assert (body["strictness"], body["linkage"]) == (40, "majority")
+    assert body["total"] == len(stacked.rows)  # the knob groups tiles, never hides them
+    assert body["stacks"] == len(body["photos"]) == len(stricter) > 38
+    assert sum(photo["n"] for photo in body["photos"]) == len(stacked.rows)
+
+    at_default = get_json(stacked.port, "/api/photos?limit=1000&stack=on")
+    assert (at_default["strictness"], at_default["linkage"]) == (20, "majority")
+    assert at_default["stacks"] == 38
+
+
+def test_a_setting_nobody_wrote_is_refused_rather_than_drawn(stacked):
+    """The whole reason the panel offers what exists: read at a setting with no
+    rows, the LEFT JOIN answers every tile as its own stack, which is a page a
+    reader cannot tell from a library that brackets nothing."""
+    for query, field in (
+        ("strictness=40", "strictness"),
+        ("linkage=neighbour", "linkage"),
+        ("strictness=40&linkage=complete", "linkage"),
+    ):
+        status, _, body = http_request(
+            stacked.port, "GET", f"/api/photos?limit=10&stack=on&{query}"
+        )
+        assert status == 400, query
+        assert json.loads(body) == {"error": field}
+
+
+def test_the_knobs_key_the_assignment_and_not_the_tile_count(stacked):
+    """Two settings are two assignments, so a memo that mixed them would answer
+    about one and be read as the other. A tile count is the same number for all of
+    them, so it stays one entry."""
+    place_stricter(stacked)
+    for url in (
+        "/api/photos?limit=5&stack=on",
+        "/api/photos?limit=5&stack=on&strictness=40",
+        "/api/photos?limit=5&stack=on&strictness=40",  # the same one, again
+    ):
+        get_json(stacked.port, url)
+    assert sorted(
+        (key.strictness, key.linkage) for key in stacked.server._assignments
+    ) == [(20, "majority"), (40, "majority")]
+    assert len(stacked.server._totals) == 1
+    assert all(
+        (key.strictness, key.linkage) == (20, "majority") for key in stacked.server._totals
+    )
+
+
+def test_the_panel_and_the_refusal_read_one_list(stacked):
+    """A knob the panel offered is never a 400 and a setting it did not is never
+    served, because both come off the same memoised read."""
+    place_stricter(stacked)
+    offered = get_json(stacked.port, "/api/facets")["stacking"]["settings"]
+    assert stacked.server.settings() == tuple(
+        {"strictness": entry["strictness"], "linkage": entry["linkage"]} for entry in offered
+    )
+    for entry in offered:
+        body = get_json(
+            stacked.port,
+            "/api/photos?limit=1&stack=on"
+            f"&strictness={entry['strictness']}&linkage={entry['linkage']}",
+        )
+        assert (body["strictness"], body["linkage"]) == (entry["strictness"], entry["linkage"])
+
+
+@pytest.mark.parametrize("value", ["-1", "20.5", "twenty", "", "%3Cscript%3E"])
+def test_a_malformed_strictness_is_refused_by_name(stacked, value):
+    status, _, body = http_request(
+        stacked.port, "GET", f"/api/photos?stack=on&strictness={value}"
+    )
+    assert status == 400
+    assert json.loads(body) == {"error": "strictness"}
+    assert b"script" not in body
+
+
+@pytest.mark.parametrize("value", ["chain", "Majority", "", "%3Cscript%3E"])
+def test_a_malformed_linkage_is_refused_by_name(stacked, value):
+    status, _, body = http_request(stacked.port, "GET", f"/api/photos?stack=on&linkage={value}")
+    assert status == 400
+    assert json.loads(body) == {"error": "linkage"}
+    assert b"script" not in body
+
+
 @pytest.mark.parametrize("value", ["4", "0", "11", "-1", "4.5", "four", "", "%3Cscript%3E"])
 def test_a_malformed_stack_value_is_refused_by_name(stacked, value):
     status, _, body = http_request(stacked.port, "GET", f"/api/photos?stack={value}")

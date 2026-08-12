@@ -112,7 +112,12 @@ Membership is **read from `stack_member`** and never computed per query: `stack=
 mode and not a window, so narrowing the filters removes frames from a stack and never
 splits one, while the cover is still resolved per query because which members are present
 is a property of the view. Nothing is drawn stacked until
-`python -m photolib.membership` has run. It is grid-only: `/api/triage/*` is untouched and
+`python -m photolib.membership` has run. The Stacks panel's two knobs — **strictness** and
+**linkage** — pick *which* stored assignment to read, and offer only the settings a pass has
+written, so a knob is a choice between populations rather than a threshold dialled live;
+the window is not among them, being the fence the Match rows were computed behind.
+Moving one regroups, which empties the selected set, so the panel says so before it happens
+rather than after. It is grid-only: `/api/triage/*` is untouched and
 a triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
 not and with stacking off as well: a tile with no siblings is drawn as the one frame it
 stands for, and revealing in Explorer is the second press, on the frame. Triage is the

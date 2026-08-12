@@ -15,8 +15,12 @@ from client_js import call, needs_node
 SELECT = "ui/src/lib/select.js"
 
 
-def query(on=True, sort="newest", filters=None):
-    return {"stacking": {"on": on}, "sort": sort, "filters": filters or {}}
+def query(on=True, sort="newest", filters=None, strictness=None, linkage=None):
+    return {
+        "stacking": {"on": on, "strictness": strictness, "linkage": linkage},
+        "sort": sort,
+        "filters": filters or {},
+    }
 
 
 def stack(key, ids):
@@ -157,11 +161,24 @@ def test_the_share_string_is_the_conditions_then_the_groups():
 @needs_node
 def test_the_conditions_say_when_stacking_is_off():
     """A set of runs reported with stacking off is not a finding about grouping at
-    all, so the line has to say which mode was on screen. There is no window to
-    report any more: the grouping is stored, so `on` names it completely."""
-    assert call(SELECT, "conditions", query(on=False)) == (
+    all, so the line has to say which mode was on screen. Nothing about the setting
+    with it: there is no grouping for a strictness to have decided."""
+    assert call(SELECT, "conditions", query(on=False, strictness=40, linkage="complete")) == (
         "stack=off sort=newest filters=none"
     )
+
+
+@needs_node
+def test_the_conditions_say_which_assignment_was_on_screen():
+    """The knobs choose which stored assignment the grid reads, so a report of what
+    the grid grouped has to say which one it was reading -- two settings group the
+    same frames differently, and a set of groups from one is not evidence about the
+    other. A reader who moved no knob was looking at the default, and the line says
+    only `on`, because the number the default stands for is the server's."""
+    assert call(SELECT, "conditions", query(strictness=40, linkage="complete")) == (
+        "stack=on strictness=40 linkage=complete sort=newest filters=none"
+    )
+    assert call(SELECT, "conditions", query()) == "stack=on sort=newest filters=none"
 
 
 @needs_node

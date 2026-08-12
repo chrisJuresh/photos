@@ -130,16 +130,23 @@ def catalog(tmp_path_factory) -> sqlite3.Connection:
 ALL_KINDS = ("image", "raw_image", "video")
 
 
-def view(**params) -> browse.Query:
+def view(*, offered=None, **params) -> browse.Query:
     """A `browse.Query` from the query-string form the client would send.
 
     `kind` is passed through as-is rather than through `parse_kinds`, so a test
     can select `image` without raw coming with it. The expansion has its own
     test.
+
+    `offered` stands in for what `browse.settings` would have returned — the
+    assignments the corpus holds, which is what a request naming one is checked
+    against. It defaults to the `bursts` fixture's second population, so a test can
+    ask to be shown it; a test about the refusal passes `()`.
     """
     values = {key: value if isinstance(value, list) else [value] for key, value in params.items()}
     kinds = tuple(values.pop("kind", ())) or ALL_KINDS
-    return browse.parse(values, kinds=kinds)
+    return browse.parse(
+        values, kinds=kinds, settings=(STRICTER,) if offered is None else tuple(offered)
+    )
 
 
 def ids(conn, query: browse.Query, limit: int = 100) -> list[int]:
@@ -520,6 +527,26 @@ UNPLACED = (105, 113, 114)
 # apiece for the tiles no assignment holds.
 STACKS = len(PLACED) + len(UNPLACED)
 
+# A second assignment of the same frames, stored the way a second
+# `python -m photolib.membership --strictness 40` would store it: a stricter
+# threshold on the Match keeps less together, so the bracket comes apart and the
+# two frames the camera recorded no name for stop being one stack. The corpus holds
+# both populations at once because the real table does — moving a knob adds one
+# rather than overwriting one.
+STRICTER = {"strictness": 40, "linkage": browse.DEFAULT_LINKAGE}
+STRICTER_PLACED = {
+    "bracket, unpicked": (101, 103),
+    "bracket, the rest": (106, 107),
+    "second body": (102, 104),
+    "after the bracket": (108,),
+    "far away": (109,),
+    "unnamed": (110,),
+    "unnamed, unpicked": (111,),
+    "unnamed later": (112,),
+    "turned away": (115,),
+    "what it turned to": (116,),
+}
+
 
 @pytest.fixture(scope="module")
 def bursts(tmp_path_factory) -> sqlite3.Connection:
@@ -547,6 +574,13 @@ def bursts(tmp_path_factory) -> sqlite3.Connection:
     # are in capture order above, so the first of each is the stack's name.
     synthetic.store_membership(
         conn, [[sha_for(member) for member in members] for members in PLACED.values()]
+    )
+    # And a second pass's, at a strictness of its own. Both are in the table because
+    # a knob adds a population rather than replacing one.
+    synthetic.store_membership(
+        conn,
+        [[sha_for(member) for member in members] for members in STRICTER_PLACED.values()],
+        **STRICTER,
     )
     conn.execute("COMMIT")
     conn.close()
@@ -704,6 +738,126 @@ def test_stacking_is_a_mode_and_not_a_measurement(bursts):
     assert view(stack="on").unstacked() == view()
     unstacked = view()
     assert unstacked.unstacked() is unstacked
+
+
+# ------------------------------------------------------- the reader's two knobs
+
+
+def test_the_panel_is_offered_the_assignments_that_exist(bursts):
+    """Not the cartesian product of the key. The corpus holds two populations, so
+    two are offered, in one order however the table is read."""
+    assert browse.settings(bursts) == (
+        {"strictness": browse.DEFAULT_STRICTNESS, "linkage": browse.DEFAULT_LINKAGE},
+        STRICTER,
+    )
+
+
+def test_the_settings_are_found_by_key_and_never_by_scanning_the_table(bursts):
+    """It runs once per process and is in front of the first page, so what it must
+    not do is read the assignment to find out which assignments exist. The key's
+    leading columns are the three that are not knobs, so this is a search over the
+    index rather than a pass over every row of every population -- measured at
+    0.1 ms over 72,000 rows in three populations."""
+    seen: list[tuple] = []
+
+    class Recording:
+        def execute(self, sql, params):
+            seen.append((sql, params))
+            return bursts.execute(sql, params)
+
+    browse.settings(Recording())
+    sql, params = seen[0]
+    plan = " ".join(row[-1] for row in bursts.execute(f"EXPLAIN QUERY PLAN {sql}", params))
+    assert "SEARCH stack_member USING PRIMARY KEY" in plan, plan
+    assert "SCAN" not in plan, plan
+
+
+def test_a_population_of_another_method_is_not_offered_as_a_strictness(bursts, monkeypatch):
+    """The three columns that are not knobs scope the list: rows left behind by an
+    older match method are that method's answer, and offering their strictness would
+    invite a reader to compare it with this one's."""
+    monkeypatch.setattr(browse, "STACK_SETTING", {**browse.STACK_SETTING, "version": "2"})
+    assert browse.settings(bursts) == ()
+
+
+def test_the_grid_groups_at_the_setting_the_reader_asked_for(bursts):
+    """The knob is a choice of which stored assignment to read, so the same frames
+    come back grouped the way that pass grouped them -- the stricter one takes the
+    bracket apart, which is the reader's own complaint about a stack holding
+    something that does not belong."""
+    assert stack_sets(bursts, view(stack="on", strictness="40")) == {
+        frozenset(members) for members in STRICTER_PLACED.values()
+    } | {frozenset({alone}) for alone in UNPLACED}
+
+
+def test_a_knob_moves_and_the_tiles_in_view_do_not(bursts):
+    """A setting decides how the tiles are grouped and never which ones are there,
+    which is why one tile count serves every setting of one view."""
+    for query in (view(stack="on"), view(stack="on", strictness="40")):
+        assert counted(bursts, query) == len(BURSTS)
+    assert view(stack="on", strictness="40").unstacked() == view()
+
+
+def test_an_assignment_nobody_wrote_is_refused_rather_than_drawn(bursts):
+    """The hole a LEFT JOIN would leave. A setting with no rows reads as every tile
+    in a stack of its own, which is a plausible page and not an error, so a reader
+    could not tell it from a library that brackets nothing -- and the answer is to
+    refuse the request by name, since the panel never offered it."""
+    with pytest.raises(browse.BadFilter) as raised:
+        view(stack="on", strictness="40", offered=())
+    assert raised.value.field == "strictness"
+
+    with pytest.raises(browse.BadFilter) as raised:
+        view(stack="on", linkage="neighbour")
+    assert raised.value.field == "linkage"
+
+
+def test_a_pair_is_checked_and_not_each_half_of_it(bursts):
+    """Two settings existing does not make their four combinations exist. Both of
+    these values are offered and this pairing of them is not."""
+    offered = ({"strictness": 20, "linkage": "majority"}, {"strictness": 40, "linkage": "complete"})
+    with pytest.raises(browse.BadFilter) as raised:
+        view(stack="on", strictness="40", linkage="majority", offered=offered)
+    assert raised.value.field == "linkage"
+
+
+def test_the_default_setting_is_asked_for_without_being_offered(bursts):
+    """A clean checkout has run no pass, and the grid still has to serve a page:
+    the default is the setting the code is pointed at, and an empty table read as
+    stacks of one is `docs/grid-queries.md`'s documented no-op. Any other value is
+    a claim about a population and is checked."""
+    query = view(stack="on", offered=())
+    assert (query.strictness, query.linkage) == (
+        browse.DEFAULT_STRICTNESS,
+        browse.DEFAULT_LINKAGE,
+    )
+
+
+@pytest.mark.parametrize(
+    "value", ["", "-1", "20.5", "twenty", " 20", "0x14", "²", "٤", "9" * 10]
+)
+def test_a_malformed_strictness_is_refused_by_name(value):
+    with pytest.raises(browse.BadFilter) as raised:
+        view(stack="on", strictness=value)
+    assert raised.value.field == "strictness"
+
+
+@pytest.mark.parametrize("value", ["", "chain", "Majority", "single", "most"])
+def test_a_linkage_outside_the_vocabulary_is_refused_by_name(value):
+    """The three rules `migrations/011_stack_member.sql` allows, and nothing else --
+    checked before the population is, so an unknown rule is never looked up."""
+    with pytest.raises(browse.BadFilter) as raised:
+        view(stack="on", linkage=value)
+    assert raised.value.field == "linkage"
+
+
+def test_two_knobs_are_two_settings_and_never_a_repeated_one(bursts):
+    """A repeated parameter widens a filter, because a filter is a set of values.
+    A setting is one assignment, so two of them is not a request the grid can
+    answer -- it is refused rather than read as the last one."""
+    with pytest.raises(browse.BadFilter) as raised:
+        view(stack="on", strictness=["20", "40"])
+    assert raised.value.field == "strictness"
 
 
 def test_stacking_does_not_change_which_tiles_are_in_view(bursts):

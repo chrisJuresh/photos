@@ -19,7 +19,7 @@
   import { shareText, stackOf, sweep, tally, toggle } from "./lib/select.js";
   import Sheet from "./lib/Sheet.svelte";
   import { photoRect } from "./lib/sheet.js";
-  import { remember, restore } from "./lib/stack.js";
+  import { remember, restore, settle } from "./lib/stack.js";
   import Table from "./lib/Table.svelte";
   import Tree from "./lib/Tree.svelte";
   import Tuner from "./lib/Tuner.svelte";
@@ -116,9 +116,20 @@
   // string with no `stack` in it at all rather than one the server has to read as
   // "off" — and the sheet key below then says the two are different answers, which
   // they are.
+  // The two knobs ride with the mode, and only when the reader has moved one: null
+  // means whichever assignment the server is pointed at, and a client that spelled
+  // that out would be writing down a number ADR 0003 settled and `photolib.browse`
+  // owns. Both or neither, because a setting is a pair.
   const gridQuery = $derived({
     sort,
-    ...(stacking.on ? { stack: "on" } : {}),
+    ...(stacking.on
+      ? {
+          stack: "on",
+          ...(stacking.strictness === null
+            ? {}
+            : { strictness: String(stacking.strictness), linkage: stacking.linkage }),
+        }
+      : {}),
     ...Object.fromEntries(
       Object.entries(filters).filter(([, values]) => values.length > 0),
     ),
@@ -291,6 +302,20 @@
   onMount(() => {
     guard(async () => {
       facets = await api.facets();
+    });
+  });
+
+  // The remembered setting outlives the table it names: the assignments come with
+  // the vocabulary, so this is the first moment the client can tell whether the one
+  // it restored is still there. The server refuses a setting nobody wrote — this is
+  // why a reader who rebuilt the catalog reopens the grid at the default rather than
+  // on that refusal, and it runs again after a rebuild for the same reason.
+  $effect(() => {
+    const offered = facets?.stacking?.settings;
+    if (!offered) return;
+    untrack(() => {
+      const settled = settle(stacking, offered);
+      if (settled !== stacking) stacking = remember(settled);
     });
   });
 
@@ -642,8 +667,8 @@
 
   // The selected set as the report it exists to produce. Nothing leaves the
   // machine: this is the system clipboard, there is no endpoint behind it, and
-  // the conditions line is what stops the reader being asked which window they
-  // were on.
+  // the conditions line is what stops the reader being asked which grouping they
+  // were looking at.
   function share() {
     guard(() => navigator.clipboard.writeText(shareText({ stacking, sort, filters }, selected)));
   }
