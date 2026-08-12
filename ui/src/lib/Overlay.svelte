@@ -21,12 +21,26 @@
   // of the middle exposure third, and the whole reason to open a stack is to
   // disagree with it; a thumbnail cannot show you what you would be disagreeing
   // about.
+  //
+  // The cover is the frame the tile had been drawing, and it is the one that
+  // moves: it flies out of the tile's own rect into its place among the frames,
+  // and back into it on the way out. Everything else arrives where it belongs
+  // and leaves from there. It is the first frame of its stack about a quarter
+  // of the time, so a stack that fans out into a sheet of frames would
+  // otherwise leave the reader with no idea where the picture they clicked
+  // went — and forty frames all flying out of one rect is no answer to that,
+  // because none of them is then the one that came from the tile. A tile that
+  // stood for one photograph is its own cover, so the movement is the same
+  // gesture there rather than a case of its own.
   import { onMount } from "svelte";
   import { refract } from "./glass.js";
   import { GAP, aspect } from "./layout.js";
 
   let {
     frames = [],
+    // Which of them the tile was drawing, by id. Every frame carries one, and a
+    // tile's own id is its cover's — see `_assigned` in `photolib/grid.py`.
+    cover = null,
     origin = null,
     back = false,
     forward = false,
@@ -52,6 +66,9 @@
   const label = $derived(
     frames.length === 1 ? "one photograph" : `${frames.length} frames in this stack`,
   );
+
+  // Where the cover landed, as an index into the frames on screen.
+  const coverAt = $derived(frames.findIndex((frame) => frame.id === cover));
 
   // The pane's own box, and not the window's. `innerWidth` counts the sheet's
   // scrollbar, which the pane is not laid out across — so packing against it
@@ -163,10 +180,11 @@
     return out;
   }
 
-  // Where a frame starts: the current tile's rect, as the offset and scale that
-  // maps its final box back onto it. One `transform` off `transform-origin: 0 0`
-  // rather than four animated lengths, so the flight is the compositor's work
-  // and not the layout engine's.
+  // Where the cover starts, and where it goes back to: the current tile's rect,
+  // as the offset and scale that maps its final box back onto it. One
+  // `transform` off `transform-origin: 0 0` rather than four animated lengths,
+  // so the flight is the compositor's work and not the layout engine's — and
+  // one property for both directions, since closing is opening run backwards.
   //
   // The current tile and not the clicked one: the sheet scrolls under the pane
   // on every step, so the rect handed in is always a tile that is mounted and on
@@ -183,9 +201,28 @@
   function flight(box) {
     if (!origin || !box || !box.w || !box.h) return "none";
     const dx = origin.left - (SIDE + box.x);
-    const dy = origin.top - (PAD + box.y);
+    const dy = origin.top - drift - (PAD + box.y);
     return `translate(${dx}px, ${dy}px) scale(${origin.width / box.w}, ${origin.height / box.h})`;
   }
+
+  // How far the sheet has scrolled under the pane since that rect was read. The
+  // grid is not locked while this is over it — a wheel still moves it, and
+  // locking it would resize the sheet and repack the rows the reader is coming
+  // back to — so by the time the cover flies home its tile may not be where it
+  // was when the tile was clicked. A viewport rect against a sheet that only
+  // scrolls vertically, so the correction is one number, and it is read at the
+  // moment the exit begins rather than tracked.
+  let anchor = window.scrollY;
+  let drift = $state(0);
+
+  // A step is a new rect, read after the sheet has scrolled to the tile it
+  // belongs to, so the drift is measured from there instead. Nothing puts it
+  // back to zero: the exit is the only thing that ever moves it, and the exit
+  // is the end of this component.
+  $effect(() => {
+    void origin;
+    anchor = window.scrollY;
+  });
 
   // --- the arrows ----------------------------------------------------------
 
@@ -205,9 +242,37 @@
 
   // --- open and close ------------------------------------------------------
 
+  // How long the way out takes, and the one place that number is written: the
+  // pane carries it to the stylesheet as `--leave`, so the animation that plays
+  // and the timer that ends the overlay cannot disagree about the length of the
+  // exit. A little shorter than the way in — a reader closing has already seen
+  // where the cover was and is on their way somewhere else.
+  const LEAVE_MS = 220;
+
+  let leaving = $state(false);
+  let leaveTimer = 0;
+
+  // Closing is the flight backwards, so the pane cannot simply be unmounted:
+  // `onclose` is what unmounts it, and it is held until the cover has landed
+  // back in its tile. Once, and after that every press is ignored — a second
+  // Escape during the exit would schedule a second close over a component that
+  // is already going.
+  function leave() {
+    if (leaving) return;
+    drift = window.scrollY - anchor;
+    leaving = true;
+    leaveTimer = setTimeout(onclose, LEAVE_MS);
+  }
+
+  // Stepping while the exit is playing would hand the pane a fresh set of
+  // frames to fade out and a tile the reader is no longer arriving at.
+  function stepBy(delta, held = false) {
+    if (!leaving) onstep(delta, held);
+  }
+
   function onkeydown(event) {
     if (event.key === "Escape") {
-      onclose();
+      leave();
       return;
     }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -216,7 +281,7 @@
     event.preventDefault();
     // `repeat` is the whole of what the rate limit is for: a key being held
     // down. A press the reader made is never too fast to mean something.
-    onstep(event.key === "ArrowLeft" ? -1 : 1, event.repeat);
+    stepBy(event.key === "ArrowLeft" ? -1 : 1, event.repeat);
   }
 
   // A click on anything that is not a frame or an arrow's lane closes it.
@@ -231,13 +296,26 @@
   // up to the window and shut immediately. The `pointerdown` that opened it has
   // already been and gone.
   function onpointerdown(event) {
-    if (!event.target.closest(".frame, .lane")) onclose();
+    if (!event.target.closest(".frame, .lane")) leave();
+  }
+
+  // The second press. The reveal goes at once and the pane leaves the way
+  // Escape makes it leave, so the reader comes back from Explorer to a grid
+  // that put the cover back in its tile rather than to one the pane vanished
+  // off.
+  function reveal(frame) {
+    if (leaving) return;
+    onreveal(frame);
+    leave();
   }
 
   onMount(() => {
     pane?.focus();
     stir();
-    return () => clearTimeout(restTimer);
+    return () => {
+      clearTimeout(restTimer);
+      clearTimeout(leaveTimer);
+    };
   });
 </script>
 
@@ -257,9 +335,11 @@
 <div
   class="glass pane"
   class:resting
+  class:leaving
   bind:this={pane}
   bind:clientWidth={width}
   bind:clientHeight={height}
+  style:--leave="{LEAVE_MS}ms"
   role="dialog"
   aria-label={label}
   tabindex="-1"
@@ -268,15 +348,25 @@
     {#each frames as frame, index (frame.id)}
       <button
         class="frame"
+        class:cover={index === coverAt}
         type="button"
         title="Reveal this frame in Explorer"
         style:left="{boxes[index].x}px"
         style:top="{boxes[index].y}px"
         style:width="{boxes[index].w}px"
         style:height="{boxes[index].h}px"
-        style:--flight={flight(boxes[index])}
-        onclick={() => onreveal(frame)}
+        style:--flight={index === coverAt ? flight(boxes[index]) : null}
+        onclick={() => reveal(frame)}
       >
+        <!-- Under the cover alone: the 384px thumbnail the tile in the grid is
+             already drawing, which is in the cache and paints on the first
+             frame. Without it the flight would carry an empty rectangle for as
+             long as a 1536px read takes, and an empty rectangle arriving among
+             frames that are still empty says nothing about which one the tile
+             had been drawing. -->
+        {#if index === coverAt}
+          <img class="thumb" src="/t/{frame.s}.webp" alt="" />
+        {/if}
         <img
           class:loaded={loaded.has(frame.id)}
           src="/d/{frame.s}.webp"
@@ -302,7 +392,7 @@
       title="Previous tile"
       aria-label="Previous tile"
       disabled={!back}
-      onclick={() => onstep(-1)}
+      onclick={() => stepBy(-1)}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 7.5 12l7 7" /></svg>
     </button>
@@ -316,7 +406,7 @@
       title="Next tile"
       aria-label="Next tile"
       disabled={!forward}
-      onclick={() => onstep(1)}
+      onclick={() => stepBy(1)}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5l7 7-7 7" /></svg>
     </button>
@@ -377,25 +467,80 @@
     overflow: hidden;
     cursor: pointer;
     transform-origin: 0 0;
-    animation: emanate 260ms cubic-bezier(0.22, 0.7, 0.3, 1) both;
   }
 
   /* Out of the tile that is behind the pane and into place. `--flight` is that
      tile's rect expressed as this frame's own transform; the component writes
-     it. Re-running on every step is what the keyed `{#each}` buys: a step is a
-     new set of frames, so these are new elements and the animation is new. */
+     it, and writes it on the cover alone. Over its neighbours rather than under
+     them, because it starts on top of whichever of them the tile sat behind.
+     Re-running on every step is what the keyed `{#each}` buys: a step is a new
+     set of frames, so these are new elements and the animation is new. */
+  .frame.cover {
+    z-index: 1;
+    animation: emanate 260ms cubic-bezier(0.22, 0.7, 0.3, 1) both;
+  }
+
   @keyframes emanate {
     from {
       transform: var(--flight, none);
     }
   }
 
-  /* The cross-fade. The frames arrive where they belong and the pane's own
-     `rise` is the whole of the movement, which is the point: nothing here
-     travels across the window. */
+  /* The way out: the cover goes back where it came from while the rest of the
+     sheet clears in front of it, and the pane holds its blur until the cover
+     has nearly landed rather than dissolving out from under it. `--leave` is
+     `LEAVE_MS`, so the animation and the timer that ends the overlay cannot
+     disagree about how long the exit is. */
+  .pane.leaving {
+    animation: fade var(--leave) cubic-bezier(0.7, 0, 0.9, 0.35) both;
+  }
+
+  .leaving .frame {
+    animation: fade 140ms ease both;
+  }
+
+  /* One way of going for both, at two speeds: the frames clear the cover's path
+     early and the pane holds on behind it. */
+  @keyframes fade {
+    to {
+      opacity: 0;
+    }
+  }
+
+  /* Opacity is the pane's to fade here: a cover that dimmed on its own would
+     arrive back at the tile as nothing, and the tile it is landing on is the
+     thing the reader is meant to end up looking at. */
+  .leaving .frame.cover {
+    animation: land var(--leave) cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+
+  @keyframes land {
+    to {
+      transform: var(--flight, none);
+    }
+  }
+
+  /* The cross-fade. The frames arrive where they belong and leave from there,
+     and the pane's own fade is the whole of the movement in both directions,
+     which is the point: nothing here travels across the window. `.frame.cover`
+     is named rather than left to `.frame`, which cannot reach it: one class
+     loses to two however late it is written, so the cover would go on flying
+     out of the tile for the one reader who asked it not to. */
   @media (prefers-reduced-motion: reduce) {
-    .frame {
+    .frame,
+    .frame.cover,
+    .leaving .frame,
+    .leaving .frame.cover {
       animation: none;
+    }
+
+    /* Which leaves the cover unmarked, and marking it is the whole of why the
+       movement exists. So it is said in the one way that costs no movement: a
+       ring, dashed rather than the solid one focus draws, for as long as the
+       pane is open. */
+    .frame.cover {
+      outline: 2px dashed var(--accent);
+      outline-offset: 2px;
     }
   }
 
@@ -404,13 +549,24 @@
     outline-offset: 2px;
   }
 
+  /* Absolute, because the cover carries two of these: the thumbnail it flies
+     with and the substrate that lands on top of it. */
   .frame img {
+    position: absolute;
+    inset: 0;
     display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
     opacity: 0;
     transition: opacity 160ms ease;
+  }
+
+  /* Already decoded, so it is drawn rather than faded in — a cover that faded
+     up over the flight would be the empty rectangle this exists to avoid. */
+  .frame img.thumb {
+    opacity: 1;
+    transition: none;
   }
 
   /* The substrate is a 1536px read and arrives after the flight does. Fading it

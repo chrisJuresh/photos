@@ -121,9 +121,13 @@ rather than after. It is grid-only: `/api/triage/*` is untouched and
 a triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
 not and with stacking off as well: a tile with no siblings is drawn as the one frame it
 stands for, and revealing in Explorer is the second press, on the frame. Triage is the
-exception and still reveals on the first. The overlay draws its frames from the 1536px
-substrate tree on the NVMe, served by `/d/<sha256>.webp` and filled by
-`python -m photolib.substrates` below. `docs/adr/0003-stack-on-verified-match.md` records
+exception and still reveals on the first. **The cover is the frame that moves**: it flies
+out of the tile's own rect into its place among the frames and back into it on the way out,
+which is how a reader who clicked one picture finds it again in a sheet of fifty — the cover
+is the first frame of its stack only about a quarter of the time. The others arrive where
+they belong, and `prefers-reduced-motion` leaves the pane's fade as the whole of it. The
+overlay draws its frames from the 1536px substrate tree on the NVMe, served by
+`/d/<sha256>.webp` and filled by `python -m photolib.substrates` below. `docs/adr/0003-stack-on-verified-match.md` records
 why membership is a verified pairwise match with the clock kept only as a fence, `0001` why
 it is neither the clock alone nor the perceptual hash that exists for apparently this exact
 purpose, and `docs/grid-queries.md` what each stacked query costs.

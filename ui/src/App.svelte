@@ -561,7 +561,11 @@
       // The photograph's rect and not the tile's: a stacked tile's element is
       // taller than its picture by the deck above it, and the overlay has to
       // fly out of the picture.
-      opened = { frames: framesOf(item), origin: photoRect(tile), at };
+      //
+      // The tile's own id is the cover's — a stacked page's row is the drawn
+      // member — so this says which of the frames the reader had been looking
+      // at, and it says it the same way for a tile that is its own only frame.
+      opened = { frames: framesOf(item), cover: item.id, origin: photoRect(tile), at };
       return;
     }
     guard(() => api.revealOrigin(item.id));
@@ -638,6 +642,7 @@
       if (!landed || !opened) return;
       opened = {
         frames: framesOf(landed.item),
+        cover: landed.item.id,
         origin: photoRect(landed.tile),
         at: next,
       };
@@ -646,6 +651,10 @@
     }
   }
 
+  // What the overlay asks for once its own way out has played — the cover is
+  // back in its tile by the time this runs, which is why the overlay owns the
+  // timing of it and this owns nothing but the state.
+  //
   // Closing hands the keyboard back to the tile the reader actually reached,
   // which after a walk is not the one they opened. After the flush, because the
   // overlay's own pane holds focus until it is gone.
@@ -656,12 +665,11 @@
     if (at !== null) sheetView?.focusTile(at);
   }
 
-  // The second press: a frame inside the open overlay. It closes on the way
-  // out, because the reveal was the thing it was opened to do — and closes the
-  // same way Escape does, so the reader comes back from Explorer to the tile
-  // they left rather than to the one they started at.
+  // The second press: a frame inside the open overlay. The overlay closes
+  // itself on the way out, because the reveal was the thing it was opened to do
+  // — and closes the same way Escape closes it, so the reader comes back from
+  // Explorer to the tile they left rather than to the one they started at.
   function revealFrame(frame) {
-    closeOverlay();
     guard(() => api.revealPhoto(frame.id));
   }
 
@@ -847,6 +855,7 @@
 {#if opened}
   <Overlay
     frames={opened.frames}
+    cover={opened.cover}
     origin={opened.origin}
     back={canStepBack}
     forward={canStepOn}
