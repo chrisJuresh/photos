@@ -35,11 +35,13 @@ one; the word exists because "the tiles of a tile" reads as nonsense.
 _Avoid_: slide, item, member
 
 **Cover**:
-The single member of a stack the grid draws when the stack is closed — the sharpest
-frame of its middle-exposure third. Chosen from the members present in the current
-view, never fixed in advance — so narrowing the view can change which frame a stack
-draws without changing what the stack holds. It is the first frame of its stack only
-about a quarter of the time, which is why the overlay marks which one it was.
+The single member of a stack the grid draws when the stack is closed — the member with the
+most people in it, and among the members tied at the top the sharpest frame of its
+middle-exposure third. It is the frame that shows *who* is in the stack. Chosen from the
+members present in the current view, never fixed in advance — so narrowing the view can change
+which frame a stack draws without changing what the stack holds, and can change who the cover
+shows and not only how it is exposed. It is the first frame of its stack only about a quarter
+of the time, which is why the overlay marks which one it was.
 _Avoid_: representative (that word is taken — see below), thumbnail, hero, key photo
 
 **Deck**:
@@ -85,19 +87,37 @@ _Avoid_: cover, primary
 ### What gets grouped, and by what
 
 **Stack**:
-The same photograph, taken more than once — frames verified to show the same picture,
-within one stretch of shooting. This is what an exposure bracket becomes, and what the
-same picture fired five times over with a handheld reposition between presses becomes.
-Membership is a property of the photographs, so it holds however the view is narrowed.
-A tile whose date came from the filesystem rather than from EXIF never joins one: a copy
-date is not when the photograph was taken.
+The photographs of one subject you only need to see one of. This is what an exposure bracket
+becomes, and what the same subject shot from several angles across one stretch of shooting
+becomes: the composition need not match, and the subject may move between frames. What
+separates two stacks is the subject and not the framing — a landscape and the same landscape
+with a friend standing in it are two, while that friend two steps along and differently
+framed is one. Membership is a property of the photographs, so it holds however the view is
+narrowed. A tile whose date came from the filesystem rather than from EXIF never joins one: a
+copy date is not when the photograph was taken.
 
 A stack's **name** is its earliest member's sha256 — decided by the membership pass,
 stored, and carried to the client as a tile's `k`. It is the handle on a stack that the
 view cannot move, where the cover can and the ids are reassigned by every rebuild. It is
 total: a frame that shot alone is a stack of one named by itself, and with stacking off a
 tile stands for itself and its own hash is its name.
-_Avoid_: group, cluster, burst, series, similarity stack; and for the name: id, key, hash
+_Avoid_: group, cluster, burst, series, similarity stack, "the same photograph taken more
+than once" (that was the old rule, and `docs/adr/0003` records why the reader replaced it);
+and for the name: id, key, hash
+
+**Person**:
+One human, as face clustering finds them — a cluster of faces the pass decided are the same
+individual, with no name attached. A frame's **people** are the persons whose faces were
+confidently read in it; a face that could not be read is not a person and simply does not
+count.
+_Avoid_: face, identity, subject, individual
+
+**Stranger**:
+A person the reader has marked as one — somebody who appears in their photographs without
+having been photographed. A stranger never counts towards a frame's people, so a tourist
+walking through the back of a burst cannot break it. Marked once per person and not per
+appearance.
+_Avoid_: bystander, background person, extra
 
 **Match**:
 How strongly two frames agree that they are the same picture — the count of distinctive
@@ -106,6 +126,9 @@ and a handheld reposition, and collapses when the camera turns to face something
 Computed once, per pair, and stored; **strictness** is the reader's threshold on it, and
 **linkage** is how many members of a stack a frame has to clear it against. Both were
 settled from the reader's own labels — see `docs/adr/0003`, "What the labels settled".
+It is the evidence stacking is built on rather than the whole of the rule: who is in the
+frames sits on top of it and can veto a stack the Match proposed, never propose one —
+see `docs/adr/0004`.
 _Avoid_: similarity, score, distance, confidence
 
 **Fingerprint**:
