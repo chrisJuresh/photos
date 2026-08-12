@@ -121,7 +121,13 @@ rather than after. It is grid-only: `/api/triage/*` is untouched and
 a triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
 not and with stacking off as well: a tile with no siblings is drawn as the one frame it
 stands for, and revealing in Explorer is the second press, on the frame. Triage is the
-exception and still reveals on the first. **The cover is the frame that moves**: it flies
+exception and still reveals on the first. **A reveal opens every file of the tile**, not
+only the representative: 13,840 of the 24,518 tiles are a RAW beside a JPEG, and the
+build rule picks the JPEG in all but 140 of them, so the RAW was the half a click could
+not reach. Explorer's `/select,` takes one path per invocation and there is no command
+line for a tab, so a pair is two windows; every member resolves before any of them
+spawns, so a refused path opens nothing rather than half a pair. Triage reveals one path
+still, its subject being a path rather than a group. **The cover is the frame that moves**: it flies
 out of the tile's own rect into its place among the frames and back into it on the way out,
 which is how a reader who clicked one picture finds it again in a sheet of fifty — the cover
 is the first frame of its stack only about a quarter of the time. The others arrive where

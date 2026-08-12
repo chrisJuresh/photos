@@ -74,8 +74,10 @@ from a stack and never breaks one in two.
 _Avoid_: selection, result set, page
 
 **Representative**:
-The one file of a tile whose bytes are served and revealed. A property of the tile,
-decided at build time, unrelated to stacking.
+The one file of a tile whose bytes are served. A property of the tile, decided at
+build time, unrelated to stacking. It is no longer the one file *revealed*: a
+reveal opens every member, so a RAW+JPEG pair is two Explorer windows and which
+of the two the build rule picked stops mattering.
 _Avoid_: cover, primary
 
 ### What gets grouped, and by what
