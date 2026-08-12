@@ -655,7 +655,8 @@ def test_a_stacked_page_returns_one_tile_per_stack(stacked):
     assert len(body["photos"]) == len(groups) == 38
     assert sum(photo["n"] for photo in body["photos"]) == len(stacked.rows)
     assert all(
-        set(photo) == {"id", "s", "w", "h", "th", "n"} | ({"m"} if photo["n"] > 1 else set())
+        set(photo) == {"id", "s", "w", "h", "th", "n", "k"}
+        | ({"m"} if photo["n"] > 1 else set())
         for photo in body["photos"]
     )
 
@@ -952,6 +953,69 @@ def test_a_filter_shrinks_a_stack_and_never_splits_it(stacked):
     for photo in narrow["photos"]:
         shrunk = {frame["id"] for frame in photo.get("m", [{"id": photo["id"]}])}
         assert any(shrunk <= members for members in frames.values()), photo["id"]
+
+
+def expected_names(rows) -> dict[str, str]:
+    """Each named set's stored name: its earliest member's sha256, off the plan.
+
+    `expected_stacks` already holds the members in capture order, so the name is
+    the first of them — one rule for both kinds of stack. `synthetic.store_membership`
+    names a stack after the first of the sequence it is handed, and the mtime-dated
+    frames membership never placed are named by themselves, which is what the
+    endpoint's `coalesce(sm.stack, f.sha256)` says with no row to read.
+    """
+    sha = {row[0]: row[1] for row in rows}
+    return {
+        stack: sha[members[0]] for stack, members in expected_stacks(rows).items()
+    }
+
+
+def test_a_stacked_page_names_the_stack_each_cover_stands_for(stacked):
+    """`k` is `stack_member`'s own name — the earliest member's sha256 — and it is
+    not the cover's hash. The cover is the sharpest frame of the middle-exposure
+    third and is resolved per query; the name is a property of the photographs, and
+    so is the thing a reader's selection can still point at after a filter change.
+    """
+    sha = {row[0]: row[1] for row in stacked.rows}
+    names = expected_names(stacked.rows)
+    stack_of = {cover: stack for stack, cover in expected_covers(stacked.rows).items()}
+    body = get_json(stacked.port, "/api/photos?limit=1000&stack=on")
+
+    for photo in body["photos"]:
+        assert photo["k"] == names[stack_of[photo["id"]]]
+    # One row per name, or a name could not stand for a tile.
+    assert len({photo["k"] for photo in body["photos"]}) == len(body["photos"])
+    # And the corpus really does draw stacks as a frame that is not their name,
+    # which is the case an id-keyed selection got wrong.
+    assert [
+        stack
+        for stack, cover in expected_covers(stacked.rows).items()
+        if sha[cover] != names[stack]
+    ]
+
+
+def test_a_stacks_name_does_not_move_with_the_view(stacked):
+    """A sort reorders the stacks and can change which frame each is drawn as; a
+    filter shrinks them. Neither renames one, so a set of names picked under one
+    view still names the same photographs under the next."""
+    whole = get_json(stacked.port, "/api/photos?limit=1000&stack=on")
+    frames = {
+        photo["k"]: {frame["id"] for frame in photo.get("m", [{"id": photo["id"]}])}
+        for photo in whole["photos"]
+    }
+
+    for sort in sorted(SORTS):
+        other = get_json(stacked.port, f"/api/photos?limit=1000&stack=on&sort={sort}")
+        assert {photo["k"] for photo in other["photos"]} == set(frames)
+        for photo in other["photos"]:
+            here = {frame["id"] for frame in photo.get("m", [{"id": photo["id"]}])}
+            assert here == frames[photo["k"]], (sort, photo["k"])
+
+    narrow = get_json(stacked.port, "/api/photos?limit=1000&stack=on&orient=portrait")
+    assert {photo["k"] for photo in narrow["photos"]} <= set(frames)
+    for photo in narrow["photos"]:
+        here = {frame["id"] for frame in photo.get("m", [{"id": photo["id"]}])}
+        assert here <= frames[photo["k"]], photo["k"]
 
 
 def test_a_stacked_page_carries_both_of_the_count_panes_numbers(stacked):

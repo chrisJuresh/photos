@@ -127,11 +127,24 @@ Three things fall out:
 - **A hand-picked set survives a filter or sort change**, and is cleared only by the
   knobs that regroup.
 
-  > **Not built.** A mark is keyed on the cover that stood for a stack, and narrowing the
-  > view can change which frame that is, so a set carried across a filter could point at a
-  > tile the page no longer draws. Carrying it waits on the grid naming a stack to the
-  > client rather than pointing at its cover; the marked set is still cleared by any change
-  > to the query.
+  > **Built, once the grid had a name to hand over.** A stacked page carries `k` per tile
+  > — `stack_member`'s own name, the earliest member's sha256 — and a pick is keyed on
+  > that rather than on the cover that stood for the stack. The name is a property of the
+  > photographs and the cover is a property of the view, so a filter and a sort now leave a
+  > set alone, and what each pick *holds* is re-read from the pages of the new view as they
+  > arrive: a narrowed stack stays selected holding less. With stacking off there is no `k`
+  > and a tile's own hash is its name, which is right rather than a fallback — a tile stands
+  > for itself there, so two frames of one stack must not share a handle. What still empties
+  > a set is a change of grouping: the toggle and the two knobs, which is the change the
+  > Stacks panel warns about first.
+  >
+  > One thing the client cannot do from the pages alone: a pick the new view never shows
+  > keeps what it last held, because the sheet pages as the reader scrolls and "further
+  > down this view" is indistinguishable from "not in this view" until the view runs out.
+  > Dropping the second would drop the first with it, which is the surviving this was for,
+  > so both stand and both are corrected by the page that reaches them. Telling them apart
+  > would take an endpoint that answers *what does this stack hold now*, and that is not
+  > worth a round trip for a count.
 - **`rebuild.py` gains a step**: Apply to grid must refresh the assignment after triage
   rewrites `photo`.
 

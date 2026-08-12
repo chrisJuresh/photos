@@ -33,17 +33,31 @@ def stack(key, ids):
 @needs_node
 def test_a_tile_carries_the_whole_stack():
     """`m` is the page's own answer to what a stack holds, so a cover selects
-    every member. The key stays the cover's id — that is what the tile is drawn as and
-    what the tickbox has to be looked up by."""
-    item = {"id": 1240, "m": [{"id": 1240}, {"id": 1241}, {"id": 1242}]}
-    assert call(SELECT, "stackOf", item) == {"key": 1240, "ids": [1240, 1241, 1242]}
+    every member. The key is the stack's name and not the cover's id: the cover is
+    resolved per query, so a pick keyed on one could not survive a filter."""
+    item = {"id": 1240, "s": "cc", "k": "aa", "m": [{"id": 1240}, {"id": 1241}, {"id": 1242}]}
+    assert call(SELECT, "stackOf", item) == {"key": "aa", "ids": [1240, 1241, 1242]}
 
 
 @needs_node
 def test_a_tile_with_no_members_stands_for_itself():
     """A stack of one and every tile with stacking off arrive without `m`, and a
     tile already carries an id — the same rule the overlay opens by."""
-    assert call(SELECT, "stackOf", {"id": 77}) == {"key": 77, "ids": [77]}
+    assert call(SELECT, "stackOf", {"id": 77, "s": "bb", "k": "bb"}) == {
+        "key": "bb",
+        "ids": [77],
+    }
+
+
+@needs_node
+def test_a_tile_with_no_name_is_named_by_its_own_hash():
+    """Stacking off: the payload carries no `k` at all, because there a tile
+    stands for itself and two frames of one stack are two tiles that must not
+    share a handle. One rule for both settings of a switch the page does not
+    mention, exactly as `m` is read."""
+    assert call(SELECT, "nameOf", {"id": 77, "s": "bb"}) == "bb"
+    assert call(SELECT, "stackOf", {"id": 77, "s": "bb"}) == {"key": "bb", "ids": [77]}
+    assert call(SELECT, "nameOf", {"id": 77, "s": "bb", "k": "aa"}) == "aa"
 
 
 @needs_node
@@ -57,14 +71,13 @@ def test_selecting_appends_and_deselecting_removes():
 
 @needs_node
 def test_the_selected_set_keeps_the_order_it_was_picked_in():
-    """An array and not an object keyed by id: JS iterates integer-like keys in
-    ascending numeric order, which would silently reorder a report away from
-    what was on screen. Selecting newest-first and reading it back has to give
-    the order the reader clicked in."""
+    """An array and not a collection keyed by name: the report claims the order
+    the reader clicked in, and reading it back out of a set or a map would recover
+    the sheet's order instead — which is the one thing it is not claiming."""
     selected = []
-    for key in (9000, 12, 4400):
-        selected = call(SELECT, "toggle", selected, stack(key, [key]))
-    assert [entry["key"] for entry in selected] == [9000, 12, 4400]
+    for key in ("ee", "aa", "cc"):
+        selected = call(SELECT, "toggle", selected, stack(key, [1]))
+    assert [entry["key"] for entry in selected] == ["ee", "aa", "cc"]
 
 
 @needs_node
@@ -81,6 +94,75 @@ def test_the_tally_is_stacks_and_the_photographs_in_them():
     selected = [stack(1, [1, 2, 3]), stack(9, [9]), stack(20, [20, 21])]
     assert call(SELECT, "tally", selected) == {"stacks": 3, "photos": 6}
     assert call(SELECT, "tally", []) == {"stacks": 0, "photos": 0}
+
+
+# --------------------------------------------------------------- the view moves
+
+
+@needs_node
+def test_a_narrowed_view_leaves_a_stack_selected_holding_less():
+    """The ticket's own case. The filter removed a frame from a stack the reader
+    had picked; the pick stands, because the name it is keyed on is a property of
+    the photographs, and what it holds is re-read from the page that arrived."""
+    before = [stack("aa", [1, 2, 3]), stack("bb", [9])]
+    after = call(SELECT, "refresh", before, [stack("aa", [1, 3]), stack("cc", [40])])
+    assert after == [stack("aa", [1, 3]), stack("bb", [9])]
+
+
+@needs_node
+def test_a_page_that_moved_nothing_leaves_the_set_alone():
+    """Every page of the view flows through this. A page holding none of the picks
+    — which is most of them — and a page holding one that has not changed both
+    leave the set exactly as it was."""
+    before = [stack("aa", [1, 2])]
+    assert call(SELECT, "refresh", before, []) == before
+    assert call(SELECT, "refresh", before, [stack("cc", [7])]) == before
+    assert call(SELECT, "refresh", before, [stack("aa", [1, 2])]) == before
+
+
+@needs_node
+def test_a_stack_the_new_view_has_not_reached_keeps_what_it_held():
+    """The sheet pages as the reader scrolls, so a pick further down the new view
+    has not arrived yet. Dropping it would lose a pick to a scroll position;
+    holding it is the honest reading, and the page that reaches it corrects it."""
+    before = [stack("aa", [1, 2, 3])]
+    assert call(SELECT, "refresh", before, [stack("zz", [50])]) == before
+
+
+@needs_node
+def test_a_sort_that_reorders_a_stacks_frames_moves_what_the_pick_holds():
+    """`m` is the page's own order and the report claims it, so the ids follow the
+    sort. Newest-first draws a burst the other way round from oldest-first, and the
+    clipboard has to say which one was on screen."""
+    before = [stack("aa", [1, 2, 3])]
+    assert call(SELECT, "refresh", before, [stack("aa", [3, 2, 1])]) == [
+        stack("aa", [3, 2, 1])
+    ]
+
+
+@needs_node
+def test_a_widened_view_gives_a_stack_its_frames_back():
+    before = [stack("aa", [1])]
+    assert call(SELECT, "refresh", before, [stack("aa", [1, 2, 3])]) == [
+        stack("aa", [1, 2, 3])
+    ]
+
+
+@needs_node
+def test_the_grouping_is_the_mode_and_the_knobs_and_nothing_else():
+    """What empties a selection. A filter or a sort changes the view and the marks
+    still name stacks the grid still groups; the toggle and the two knobs change
+    the grouping, and then they do not."""
+    assert call(SELECT, "grouping", query()["stacking"]) == "on"
+    assert call(SELECT, "grouping", query(on=False)["stacking"]) == "off"
+    assert (
+        call(SELECT, "grouping", query(strictness=40, linkage="complete")["stacking"])
+        == "on strictness=40 linkage=complete"
+    )
+    # The sort and the filters are not in it, which is the whole point.
+    assert call(SELECT, "grouping", query(sort="oldest", filters={"camera": ["X100V"]})[
+        "stacking"
+    ]) == call(SELECT, "grouping", query()["stacking"])
 
 
 # ------------------------------------------------------------------ the sweep

@@ -7,20 +7,77 @@
 // they were grouped under. The grouping is the claim; a list of ids without it
 // is half the evidence, and without the window it costs a round trip to ask.
 //
+// A pick is keyed on the stack's *name* and not on the cover that stands for it,
+// which is what lets a set survive a filter or a sort: the name is a property of
+// the photographs, the cover is a property of the view. What empties a set is
+// `grouping` changing — the same string the report's conditions line carries.
+//
 // Pure functions over plain arrays and objects, so `tests/test_client_select.py`
 // drives them through the node adapter rather than through a browser.
 
 /**
- * What one selected tile stands for: the stack's key and every photograph in it.
+ * The name of what a tile stands for.
+ *
+ * `k` is the stack's stored name — the earliest member's sha256, decided by
+ * `photolib.membership` — and it is the one handle on a stack that a change of
+ * view cannot move: the cover is resolved per query and the ids are reassigned
+ * by every rebuild. It is absent while stacking is off, where a tile stands for
+ * itself and its own hash is its name, so one rule covers both settings of the
+ * switch exactly as `App.svelte`'s `framesOf` does.
+ */
+export function nameOf(item) {
+  return item.k ?? item.s;
+}
+
+/**
+ * What one selected tile stands for: the stack's name and every photograph in it.
  *
  * `m` is the page's own answer to what a stack holds, and it is absent on a
  * stack of one and on every tile while stacking is off — the same shape
- * `App.svelte`'s `activate` opens the overlay from. The key is the cover's id
- * because that is what the tile is drawn as, and so what a recycled tile has to
- * look its tickbox up by.
+ * `App.svelte`'s `activate` opens the overlay from.
  */
 export function stackOf(item) {
-  return { key: item.id, ids: (item.m ?? [item]).map((frame) => frame.id) };
+  return { key: nameOf(item), ids: (item.m ?? [item]).map((frame) => frame.id) };
+}
+
+/**
+ * The selected set, with each entry's ids taken from the view as it now stands.
+ *
+ * A name outlives a filter change; the photographs behind it do not, because a
+ * filter removes frames from a stack. So a selection carried across one is still
+ * the reader's picks, and what each pick *holds* is re-read from the page that
+ * arrives — which is what keeps the count and the report describing the view
+ * their conditions line names.
+ *
+ * A pick the new view has not shown keeps what it last held: the sheet pages as
+ * the reader scrolls, so "further down this view" and "not in this view at all"
+ * look identical until the view is exhausted, and dropping the second would take
+ * the first with it — which is the surviving this exists for. Both are corrected
+ * by the page that reaches them, and neither is invented.
+ *
+ * Order counts as a change, because `m` is the page's own order and the report
+ * claims it: a sort that draws a stack's frames the other way round really has
+ * moved what the pick holds.
+ *
+ * The same array back when nothing moved, because the sheet re-binds every
+ * mounted tile whenever this identity changes and a page that touched no
+ * selected stack is most of them.
+ */
+export function refresh(selected, stacks) {
+  const fresh = new Map(stacks.map((stack) => [stack.key, stack.ids]));
+  let moved = false;
+  const next = selected.map((entry) => {
+    const ids = fresh.get(entry.key);
+    if (ids === undefined || sameFrames(entry.ids, ids)) return entry;
+    moved = true;
+    return { key: entry.key, ids };
+  });
+  return moved ? next : selected;
+}
+
+/** The same photographs in the same order — both halves of what a pick holds. */
+function sameFrames(ids, others) {
+  return ids.length === others.length && ids.every((id, at) => id === others[at]);
 }
 
 /**
@@ -28,9 +85,10 @@ export function stackOf(item) {
  * every time: `$state` does not proxy deeply enough for a mutation to repaint
  * the tickboxes, and reassignment is what makes them redraw.
  *
- * An array and not an object keyed by id, because JS iterates integer-like keys
- * in ascending numeric order — which would quietly reorder a report away from
- * the order the reader clicked in, and the order is part of what they saw.
+ * An array and not a set or a map keyed by name: the order the reader clicked in
+ * is part of what they saw, and the report says so — a collection that recovered
+ * that order from anything but the clicks would be recovering the sheet's order,
+ * which is the one thing the report is not claiming.
  */
 export function toggle(selected, stack) {
   const without = selected.filter((entry) => entry.key !== stack.key);
@@ -80,21 +138,36 @@ export function tally(selected) {
  * not reach this either.
  */
 export function conditions(query) {
-  // The setting rides with the mode, and only while stacking is on: which
-  // assignment the grid was reading is what makes a set of groups mean anything,
-  // and a reader who never moved a knob was looking at the default, which the two
-  // nulls say more honestly than a number copied out of the server would.
-  const stack = query.stacking.on
-    ? "on" +
-      (query.stacking.strictness === null && query.stacking.linkage === null
-        ? ""
-        : ` strictness=${query.stacking.strictness} linkage=${query.stacking.linkage}`)
-    : "off";
   const filters = Object.entries(query.filters)
     .filter(([, values]) => values.length > 0)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([name, values]) => name + ":" + values.join("|"));
-  return `stack=${stack} sort=${query.sort} filters=${filters.length ? filters.join(",") : "none"}`;
+  return `stack=${grouping(query.stacking)} sort=${query.sort} filters=${filters.length ? filters.join(",") : "none"}`;
+}
+
+/**
+ * Which grouping is on screen, as one string.
+ *
+ * The setting rides with the mode, and only while stacking is on: which
+ * assignment the grid was reading is what makes a set of groups mean anything,
+ * and a reader who never moved a knob was looking at the default, which the two
+ * nulls say more honestly than a number copied out of the server would.
+ *
+ * This is also what empties a selection. A filter or a sort changes the *view*
+ * and the picks still name stacks the grid still groups; the toggle and the two
+ * knobs change the *grouping*, and after one of those the stacks the picks named
+ * do not exist. So the two questions — what was on screen, and whether a pick
+ * still means anything — are one string rather than two lists of knobs kept in
+ * step.
+ */
+export function grouping(stacking) {
+  if (!stacking.on) return "off";
+  return (
+    "on" +
+    (stacking.strictness === null && stacking.linkage === null
+      ? ""
+      : ` strictness=${stacking.strictness} linkage=${stacking.linkage}`)
+  );
 }
 
 /** The conditions line, then the selected ids grouped as the grid grouped them. */
