@@ -25,7 +25,7 @@ import sqlite3
 import numpy as np
 import pytest
 
-from harness import calibrate, screen
+from harness import calibrate, label, screen
 from photolib import candidates
 from photolib.fingerprints import DIM, MODEL, VERSION, to_blob
 from photolib.matches import METHOD
@@ -153,8 +153,14 @@ def test_the_reached_count_is_the_matched_pairs_plus_the_ones_recovered() -> Non
 # --- which pairs are asked about ----------------------------------------------
 
 
-def answer(members, *, surrounding=(), evicted=(), included=()) -> dict:
-    """One row of `labels.sqlite3`, in the shape `label.answers` hands it over."""
+def answer(members, *, surrounding=(), evicted=(), included=(), round=label.ROUND) -> dict:
+    """One row of `labels.sqlite3`, in the shape `label.answers` hands it over.
+
+    The round is in it because `calibrate.case` reads it: this report pools the
+    rounds where a calibration keeps them apart, so which round an answer came from
+    changes nothing here -- but a row of that table carries one, and a helper that
+    left it out would be describing a shape the labels file cannot hold.
+    """
     return {
         "members": list(members),
         "camera": "Lumix",
@@ -162,6 +168,7 @@ def answer(members, *, surrounding=(), evicted=(), included=()) -> dict:
         "evicted": list(evicted),
         "included": list(included),
         "surrounding": list(surrounding),
+        "round": round,
     }
 
 
