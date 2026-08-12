@@ -61,8 +61,8 @@ recommendation for `docs/adr/0003-stack-on-verified-match.md`, which a person
 writes down. The one thing it can put in the labels file is the round-one stamp
 `harness.label._carry_over` would have written anyway, because it opens that file
 through the same `store`: reading answers whose round is not recorded yet is what
-would otherwise be impossible. It goes with the rest of `harness/` when the grid
-ticket lands.
+would otherwise be impossible. It stays here as long as the harness does, which is
+for good: every round of labelling wants replaying, not only the first two.
 """
 
 from __future__ import annotations

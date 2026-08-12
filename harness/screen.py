@@ -38,9 +38,10 @@ records for the pass as it ran, so both include the per-frame decode a pass pays
 whether it matches one pair off a frame or twenty; loosening the screen mostly
 adds pairs to frames already being described, so the time is an upper bound.
 
-It goes with the rest of `harness/` when the grid ticket lands. Its output is
-ADR 0003's "What is still deliberately not settled here", which a person writes
-down.
+It stays here as long as the harness does, which is for good: the screen is priced
+against the labels, so a later round of them is a reason to price it again. Its
+output is ADR 0003's "What is still deliberately not settled here", which a person
+writes down.
 """
 
 from __future__ import annotations
