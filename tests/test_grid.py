@@ -1576,6 +1576,90 @@ def test_reveal_spawns_the_right_command_for_space_and_comma_paths(revealable):
         assert '"/select,' not in command
 
 
+def selected(spawns) -> list[str]:
+    """The paths `/select,` named, in the order Explorer was asked for them."""
+    return [command.partition('/select,"')[2][:-1] for command, _ in spawns]
+
+
+@pytest.fixture
+def paired(make_grid):
+    """Photo 1 is a RAW beside a JPEG; photo 2 is a tile that stands alone.
+
+    `synthetic.corpus` writes no `photo_member` rows at all, which is the
+    pre-007 shape and the reason every other reveal test here still reveals one
+    file. This fixture is the case the pairing was built for, assembled the way
+    `archive.pipeline.group` assembles one: both members recorded, the
+    representative among them, and the JPEG picked as the representative — which
+    is the direction 13,700 of the real corpus's 13,840 pairs fall.
+    """
+    grid = make_grid(count=4)
+    conn = sqlite3.connect(grid.roots.catalog_db)
+    rep = conn.execute("SELECT rep_sha256 FROM photo WHERE id = 1").fetchone()[0]
+    lone = conn.execute("SELECT rep_sha256 FROM photo WHERE id = 2").fetchone()[0]
+    raw = "0" * 63 + "f"
+    conn.execute(
+        "INSERT INTO file (sha256, size, ext, kind, vault_relpath, state, feature_ver) "
+        "VALUES (?, 1, '.rw2', 'raw_image', 'pair.rw2', 'published', 'test')",
+        (raw,),
+    )
+    for sha, name in ((rep, "pair.jpg"), (lone, "lone.jpg")):
+        conn.execute("UPDATE file SET vault_relpath = ? WHERE sha256 = ?", (name, sha))
+    conn.executemany(
+        "INSERT INTO photo_member (sha256, photo_id) VALUES (?, ?)",
+        ((rep, 1), (raw, 1), (lone, 2)),
+    )
+    conn.commit()
+    conn.close()
+    for name in ("pair.jpg", "pair.rw2", "lone.jpg"):
+        (grid.roots.vault_root / name).write_bytes(b"bytes")
+    return grid
+
+
+def test_a_pair_reveals_both_of_its_files_representative_first(paired):
+    """A tile is a group, so revealing it reveals the RAW as well as the JPEG.
+
+    `/select,` takes one path per invocation and Explorer offers no command line
+    for a tab, so a pair is two windows. The order is the tile's own: the
+    representative, then the rest.
+    """
+    status, _, _ = reveal_post(paired, b'{"id": 1}')
+    assert status == 204
+    assert selected(paired.spawns) == [
+        str(paired.roots.reveal_root / "pair.jpg"),
+        str(paired.roots.reveal_root / "pair.rw2"),
+    ]
+
+
+def test_a_tile_that_stands_alone_reveals_one_file(paired):
+    """Recorded membership does not by itself mean a second window.
+
+    10,678 of the real corpus's 24,518 tiles hold exactly one file, so this is
+    the common case and not an edge of it.
+    """
+    status, _, _ = reveal_post(paired, b'{"id": 2}')
+    assert status == 204
+    assert selected(paired.spawns) == [str(paired.roots.reveal_root / "lone.jpg")]
+
+
+def test_an_escaping_sibling_refuses_the_whole_reveal(paired):
+    """Every member resolves before any of them spawns, so nothing half-opens.
+
+    The representative here is perfectly revealable. Spawning it and then
+    refusing the sibling would leave one window open beside a 403, which is a
+    worse answer than either of them alone.
+    """
+    conn = sqlite3.connect(paired.roots.catalog_db)
+    (paired.roots.vault_root.parent / "outside.txt").write_bytes(b"secret")
+    conn.execute("UPDATE file SET vault_relpath = ? WHERE ext = '.rw2'", (r"ab\..\..\outside.txt",))
+    conn.commit()
+    conn.close()
+
+    status, _, body = reveal_post(paired, b'{"id": 1}')
+    assert status == 403
+    assert paired.spawns == []
+    assert b"outside" not in body and b"C:" not in body
+
+
 def test_reveal_requires_post(grid):
     for method in ("GET", "PUT", "DELETE", "OPTIONS"):
         status, _, _ = http_request(grid.port, method, "/api/reveal")

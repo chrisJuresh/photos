@@ -7,7 +7,7 @@
     GET  /api/facets                                      what can be filtered by
     GET  /t/<sha256>.webp                                 a thumbnail, immutable
     GET  /d/<sha256>.webp                                 a 1536px substrate, ditto
-    POST /api/reveal {"id": N} | {"origin": N}            select it in Explorer
+    POST /api/reveal {"id": N} | {"origin": N}            select its files in Explorer
     GET  /api/triage/*                                    the survey, read-only
     POST /api/triage/*                                    the only writes there are
     GET  /api/triage/rebuild                              how the last one went
@@ -508,6 +508,39 @@ def reveal_relpath(conn: sqlite3.Connection, photo_id: int) -> tuple | None:
         "JOIN file AS f ON f.sha256 = p.rep_sha256 WHERE p.id = ?",
         (photo_id,),
     ).fetchone()
+
+
+def reveal_siblings(conn: sqlite3.Connection, photo_id: int) -> list[str]:
+    """The stored object paths of the tile's other members, in a stable order.
+
+    A tile is a group of files rather than a file — `migrations/007_photo_groups.sql`
+    — and on this corpus a group of two is always one RAW beside one JPEG.
+    `archive.pipeline.group.representative` picks the JPEG for 13,700 of the
+    13,840 pairs and the RAW for the 140 DNG ones, whose real geometry survived
+    adoption where a `.rw2`'s did not; that function's own docstring names
+    "which file `/api/reveal` opens" as what its rule decides. So the sibling is
+    the half of the pair the reader cannot otherwise reach, in whichever
+    direction the rule fell, and revealing both is what makes the direction stop
+    mattering.
+
+    Kept out of `reveal_relpath` rather than folded into it. That function
+    answers with a row or None so that "no such photo" stays distinguishable
+    from "a photo whose path was never recorded", and a list cannot carry both.
+    The representative is still read from `photo.rep_sha256` and never from
+    `photo_member`, so a photo with no member rows reveals exactly what it
+    revealed before — the two are one file in 10,678 tiles, and the membership
+    invariant is 007's to keep rather than this handler's to depend on.
+    """
+    return [
+        row[0]
+        for row in conn.execute(
+            "SELECT f.vault_relpath FROM photo AS p "
+            "JOIN photo_member AS m ON m.photo_id = p.id AND m.sha256 <> p.rep_sha256 "
+            "JOIN file AS f ON f.sha256 = m.sha256 "
+            "WHERE p.id = ? ORDER BY f.sha256",
+            (photo_id,),
+        )
+    ]
 
 
 def origin_source_path(conn: sqlite3.Connection, origin_id: int) -> tuple | None:
@@ -1032,7 +1065,12 @@ class GridHandler(BaseHTTPRequestHandler):
                 if row is None:
                     self._fail(404, key)
                     return
-                target = reveal_module.resolve_absolute(row[0], roots.photos_root)
+                # One path, because a triage subject is a path and not a group:
+                # its RAW sibling, if it has one, is a second `origin` row and a
+                # tile it is not yet part of. Pairing there is a lookup on disk
+                # by (directory, stem) rather than a join, and this handler does
+                # not go looking for one.
+                targets = [reveal_module.resolve_absolute(row[0], roots.photos_root)]
             else:
                 row = reveal_relpath(conn, identifier)
                 if row is None:
@@ -1041,13 +1079,24 @@ class GridHandler(BaseHTTPRequestHandler):
                 if not row[0]:
                     self._fail(409, "path")
                     return
-                target = reveal_module.resolve(row[0], roots.vault_root, roots.reveal_root)
+                # The representative first, then the rest of the tile — the JPEG
+                # and the RAW beside it. Every one of them resolves before any of
+                # them spawns, so a refusal leaves no window open rather than
+                # half a pair; Windows decides which of the two ends up in front,
+                # and `/select,` takes one path per invocation, so a pair is two
+                # windows. They are two windows and not two tabs because Explorer
+                # exposes no command line for a tab.
+                targets = [
+                    reveal_module.resolve(relpath, roots.vault_root, roots.reveal_root)
+                    for relpath in (row[0], *reveal_siblings(conn, identifier))
+                ]
         except reveal_module.RevealRefused:
             # The reason is in the server log. The client gets a field name.
             self._fail(403, "path")
             return
         try:
-            reveal_module.reveal(target, spawn=self.server.spawn)
+            for target in targets:
+                reveal_module.reveal(target, spawn=self.server.spawn)
         except (reveal_module.RevealRefused, OSError):
             self._fail(500, "spawn")
             return
