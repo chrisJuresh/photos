@@ -188,23 +188,32 @@ subset, and disagreement in the grey band is expected rather than fitted to.
 Two rounds of about thirty sets: the first calibrates the threshold, the second — drawn
 after re-running with the first round's answers — checks the work.
 
+> **Judged, and the harness is gone.** Both rounds were labelled on 2026-08-10 and the
+> harness was deleted whole on 2026-08-12 (ticket 44), scaffolding removed once it had
+> answered. The three sections below are what it returned and are now the record: the
+> setting itself lives in `photolib/membership.py` as `STRICTNESS` and `DEFAULT_LINKAGE`,
+> and `python -m photolib.membership` is what writes the grouping the grid reads.
+>
+> **The labels themselves were not deleted.** They stay in the `labels.sqlite3` beside the
+> catalog on the NVMe — never in git — so a figure here is re-derivable from the answers
+> that produced it rather than only by labelling again. What has gone is the screen that
+> collected them and the report that replayed them, not the evidence.
+
 ## What the labels settled
 
 **Strictness 20, linkage "matches most members".** Recorded 2026-08-10 from round one of
-the labelling harness — thirty sets, every one answered with certainty, replayed by
-`harness/calibrate.py` — and confirmed the same day by round two, which is the last
-section here. The command that returns this setting is:
-
-```bash
-python -m harness.calibrate --linkage complete,majority
-```
+the labelling harness — thirty sets, every one answered with certainty, replayed against
+complete and majority linkage by the harness's calibration report — and confirmed the same
+day by round two, which is the last section here. The setting reached the grid as
+`photolib.membership.STRICTNESS` and `DEFAULT_LINKAGE`, and the walk the report replayed the
+labels against is `photolib.membership.link`, which it read rather than copied.
 
 ### What the labels are, and what they are not
 
 Thirty answers, 5,368 labelled pairs over 25 runs — 3,712 pairs the reader kept together
 and 1,656 they pushed apart. **Every comparison is scoped to the frames that were on
 screen when the answer was given.** A label says *the frames I was shown are right* and
-never *this stack is complete*; the harness's view is widened by the reader but never
+never *this stack is complete*; the harness's view was widened by the reader but never
 reaches the whole run, so scoring outside that scope would measure the width of the window
 rather than the threshold, and would push this section towards a stricter setting than the
 labels justify.
@@ -243,8 +252,8 @@ sweep, where a setting stacks almost nothing and is therefore almost never wrong
 Both counts are reported because they answer different questions. A pair is the unit the
 threshold works in and the unit "two unrelated photographs in one stack" is about, but it
 weights a long burst quadratically; a case is one vote each and is coarse for the same
-reason. `python -m harness.calibrate` prints the whole sweep, the frontier, and the
-labelled cases every setting gets wrong.
+reason. The report printed the whole sweep, the frontier, and the labelled cases every
+setting got wrong; the four rows above are the ones this decision turns on.
 
 ### Complete linkage does need softening — the answer is yes
 
@@ -265,7 +274,7 @@ join it: a tie is not most, and precision breaks ties.
 
 ### What was measured and not adopted
 
-`python -m harness.calibrate` over all three rules returns **neighbour linkage at
+Scored over all three rules, round one's labels return **neighbour linkage at
 strictness 25** — 95.1% precision, 44.7% recall, the best recall of anything clearing the
 report's 95% precision floor. It is not the default, for a reason in the evidence rather
 than in taste: **the runs where a chain does its work carry no frames the reader pushed
@@ -286,12 +295,8 @@ called a member**. The 3600s window's value is untouched by this round.
 
 **The default stands: strictness 20 with "matches most members".** Recorded 2026-08-10
 from round two of the labelling harness — thirty more sets, drawn at that setting, every
-one answered with certainty. The command is the same one round one's setting is recorded
-from, now reading a labels file that holds both rounds and scoring the second apart:
-
-```bash
-python -m harness.calibrate --linkage complete,majority
-```
+one answered with certainty. It is the same report round one's setting is recorded from,
+reading a labels file that holds both rounds and scoring the second apart.
 
 Round two is a check and never evidence. The setting is not re-chosen on its labels: the
 report picks from the earliest round and replays every later one against that pick, so an
@@ -351,8 +356,8 @@ cases: 01d7b54b (9, strongest at 176), 6bf2663b (12, at 125), 4288780d (1, at 10
 misses are the shape round one already described — pairs the geometry agrees nothing about,
 which no strictness reaches: Panasonic DMC-GX80 464c7018 x25 (25 missed, weakest at 0
 points), samsung SM-A528B 86f3f49e x9 (19 at 0), Apple iPhone 7 Plus 5ab519c7 x6 (13 at 0),
-samsung SM-A528B d4385b8e x8 (8 at 0). `python -m harness.calibrate` prints every rule's
-wrong cases on this round, not only the chosen rule's.
+samsung SM-A528B d4385b8e x8 (8 at 0). The report named every rule's wrong cases on this
+round and not only the chosen rule's, which is why the chain's are listed above beside them.
 
 ### The fence, checked a second time
 
@@ -366,9 +371,9 @@ losing frames, and its value is unchanged.
 Whether the embedding screen can be tightened enough to skip geometry on most pairs. The
 labels say the live question is the opposite one: at 0.40 the screen costs 5.2% of the pairs
 the reader kept together, and that is a floor on recall no strictness can lift. Loosening it
-was the change worth measuring, and `python -m harness.screen` has now measured it — over
-the 60 answers in the labels file, against the stored cosines, pricing each value's pass
-from the rates the last one recorded rather than by running anything.
+was the change worth measuring, and it has been measured — over the 60 answers in the labels
+file, against the stored cosines, pricing each value's pass from the rates the last one
+recorded rather than by running anything.
 
 | screen | surviving candidates | fresh pairs to match | match time | catalog | kept pairs reached |
 |---|---|---|---|---|---|

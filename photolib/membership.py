@@ -2,10 +2,10 @@
 
 `docs/adr/0003-stack-on-verified-match.md` decides a stack by a verified pairwise
 match, fenced by the clock. `photolib.candidates` enumerated the pairs the fence
-admits and screened them, `photolib.matches` gave every survivor a Match, and
-`harness.calibrate` settled what to do with those counts: **strictness 20 with
-"matches most members"**. This module is the reading -- one row per tile saying
-which stack it is in, at the setting that decided it.
+admits and screened them, `photolib.matches` gave every survivor a Match, and a
+labelling harness -- scaffolding, since deleted -- settled what to do with those
+counts: **strictness 20 with "matches most members"**. This module is the reading
+-- one row per tile saying which stack it is in, at the setting that decided it.
 
 **Membership is stored rather than derived per query because it is a property of
 the photographs and not of the view.** `photolib.browse` joins this table at
@@ -16,11 +16,11 @@ which is ADR 0003's load-bearing consequence. Until this pass has run there is
 nothing to join, and the grid draws every tile as its own stack.
 
 **The walk is the one the labels were replayed against.** `link` and the three
-rules under `LINKAGE` live here and `harness.label` imports them, which is the
-whole of the argument that ADR 0003's "What the labels settled" describes what the
-grid will draw rather than something adjacent to it: the rule is one rule and not
-two copies that agree today. They are on this side of the seam because the harness
-is deleted when the grid ticket lands and the arrow between them points one way.
+rules under `LINKAGE` live here, and the report that scored them read them from here
+rather than holding a copy, which is the whole of the argument that ADR 0003's "What
+the labels settled" describes what the grid draws rather than something adjacent to
+it: the rule was one rule and not two that agreed on the day. That the walk is on
+this side of the seam is why the harness could be deleted without moving it.
 
 **The setting is part of the key and never a column beside it**, the relationship
 008's vectors and 010's Matches already have with the model and the method that
@@ -95,8 +95,9 @@ class MembershipRefused(RuntimeError):
 
 Points = dict[tuple[str, str], int]
 # Whether a frame joins the stack in hand: the linkage rule, as a value. `link`
-# takes one so that a report can replay the labels against every rule ADR 0003
-# left open without a second copy of the walk.
+# takes one because every rule ADR 0003 left open is a population this pass can
+# write, and because the report that replayed the labels against all three read
+# them from here rather than keeping a second copy of the walk.
 Joins = Callable[[Sequence[str], str, Points, int], bool]
 
 
@@ -119,9 +120,9 @@ def match(points: Points, a: str, b: str) -> int:
 def complete(holding: Sequence[str], frame: str, points: Points, strictness: int) -> bool:
     """ADR 0003's linkage: a frame joins only if it agrees with all of the stack.
 
-    Named rather than inlined because `harness.calibrate` replays the labels
-    against this rule and against the softer ones, and the rule it calls complete
-    linkage has to be this one and not a second copy of it.
+    Named rather than inlined because the calibration report replayed the labels
+    against this rule and against the softer ones, and the rule it called complete
+    linkage had to be this one and not a second copy of it.
     """
     return all(match(points, member, frame) >= strictness for member in holding)
 
@@ -166,9 +167,8 @@ def link(
 
     The defaults are the settled setting and not ADR 0003's opening argument, so a
     caller that says nothing gets the rule the labels chose rather than the one they
-    overruled. Every caller that draws or replays a round passes the round's own rule
-    anyway: `harness.label` passes what its sets are cut with and `harness.calibrate`
-    passes each of `LINKAGE` in turn.
+    overruled. `--linkage` is how a caller asks for one of the others, which writes
+    a population beside this one rather than over it.
 
     The walk is forward and greedy whichever rule is in force, as the window grouping
     `photolib.browse` used to do was: a frame the walk consumed early can agree with

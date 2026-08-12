@@ -12,9 +12,6 @@ repository root is the thing that runs: the grid and triage website, and the sch
   `migrate`, `triage` and `reveal` from `photolib`; the arrow never points the other way.
 - `archive/v1/` is the previous implementation, kept as **read-only reference**. Read it
   freely; do not edit it, refactor it, or fix its bugs.
-- `harness/` is the labelling harness, **scaffolding with a stated end of life**: it settles
-  the strictness threshold and is deleted whole once the grid ticket lands. Same one-way
-  arrow as `archive/pipeline/`.
 - **`Open Photo Vault.cmd`** at the root is the double-click launcher for the website.
 
 ## Hard rules
@@ -181,8 +178,11 @@ ceiling is a build-time commitment, because it decides how many candidates exist
 3,634,381 at 3600s against 2,193,828 at 900s and 307,750 at 60s, and `--counts` prints that
 table without writing anything. The screen is the cosine of the two fingerprints, **stored per
 candidate rather than reduced to a yes-or-no**, because the fingerprint's own threshold is what
-ADR 0003 leaves unsettled and a number chosen later must be a re-read of these rows rather than
-another pass — it is not the reader's *strictness*, which is a threshold on the Match. A
+ADR 0003 left unsettled and a number chosen later had to be a re-read of these rows rather than
+another pass. Those rows are what priced it: ADR 0003's "What is still deliberately not settled
+here" reads the stored cosines against the labels and recommends leaving the screen at 0.40,
+loosening being affordable and buying a ceiling on recall rather than a delivery. It is not the
+reader's *strictness*, which is a threshold on the Match. A
 screened-out candidate is recorded as one, so that "never plausibly the same picture" stays
 distinguishable from "checked properly and disagreed"; that verdict is the one derived value in
 the table, and moving the screen constant is refused rather than silently answered at the old
@@ -207,8 +207,9 @@ reposition is very nearly a rotation about the camera's own centre, and a transf
 explains more explains unrelated frames too. Its named failure is a bracket end blown out
 past having any texture left: no keypoints, so a Match of zero, which ADR 0003 accepts as one
 true stack drawn as two. **The count is stored and no verdict is derived from it**, because
-*strictness* is the reader's threshold on the Match and ADR 0003 leaves its value for the
-labelling harness — a pair with no row was not checked, not checked and found wanting.
+*strictness* is the reader's threshold on the Match and its value was settled afterwards by
+labelling, not by this pass — a pair with no row was not checked, not checked and found
+wanting.
 Frames are read from the substrate tree at 1024px on the long edge, and fan-outs are walked
 in capture order so a frame is described once rather than once per pair. It reads the
 substrates and the catalog, both on the NVMe, never opens `G:`, and does not attach
@@ -223,131 +224,15 @@ against a median of 5 beyond two minutes.
 python -m photolib.matches
 ```
 
-To judge those Matches — the **labelling harness** ADR 0003 says strictness will be settled
-by. It shows one candidate stack at a time with the frame before and after it, which is what
-lets one screen answer both of the reader's complaints: *does this stack hold something that
-does not belong*, and *is it missing something that should be here*. Space accepts the stack
-as drawn, clicking a member says it does not belong, clicking a neighbour says it should have
-been included — each click is recorded as it is made — and `u` records **not sure**, which is
-an answer rather than a skip; dragging across several frames marks them together and records
-once. The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the run is on screen.
-`k` widens the view when the answer turns on what is past the edge, **with no ceiling** — one
-frame each side is enough for 46% of candidate stacks but only 27% of the least decisive ones,
-and every ceiling picked for it so far has been hit, so the whole run rides with the set. That
-is 3,808 frames and about 316 KB over a round's thirty sets. `g` shows the whole run and `0`
-comes back. The frames shrink to a floor and then the box scrolls, rather than the view
-stopping. **The frame past each end of the run is drawn too**, dotted and always — the fence
-rules it out of the stack, so it is there as the reader's check that the run ended because the
-shooting ended and that the clock is telling the truth; a frame 23 hours away that is plainly
-the same photograph is a wrong timestamp, and nothing else on the screen could show that. **What an
-answer says is bounded by what was on screen for it**, which is stored per answer and is the
-column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
-that the stack is complete. Answers go to a `labels.sqlite3` of its own beside the catalog,
-**never `state.sqlite3`**, and it is not a migrated database because a disposable table has no
-business in the shipped schema. Frames come from the substrate tree. Its one test is the
-sampling.
-
-**One run is one of ADR 0003's two rounds of thirty, and which round it is decides which sets
-are dealt.** `--strictness`, `--linkage`, `--sets` and `--round` say so, and their defaults are
-round two: strictness 20 with *matches most members*, which is what round one settled rather
-than what the ADR argued from. Round one ranked its sets by how little the Match committed to
-them; round two leads on **the chain** — how many frames single linkage would drag across a
-boundary the settled rule drew, either side of the stack and counted over every member rather
-than the first, which is where a pan or a walk between subjects shows up — and breaks ties on
-that margin. Measured over this catalog: 20 of round two's 30 sets have a chain to price, one
-of them dragging 48 frames, at margins up to 244 points where the least-decisive ranking would
-never have looked. That population is the one round one holds none of and the
-single question standing between neighbour linkage and the default; the reader is not told which
-sets those are, because that would prime the rejection the round exists to observe. Both rounds
-are still dealt out a camera at a time and in the same deterministic order, **a set an earlier
-round answered is not asked again**, and the counter counts the round in hand. Round one's
-existing answers carry over as round one with nothing re-labelled.
-
-```bash
-python -m harness.label --open
-```
-
-To turn those answers into the two numbers the grid inherits — the **calibration report**.
-It replays every label against a sweep of strictness values and all three linkage rules,
-and says how well each setting reproduces what the reader actually said. **Precision and
-recall are reported apart and never blended**, because they are not equally important: the
-binding constraint is precision — *never open a stack and see two unrelated photographs* —
-and recall is best-effort under it, so precision is a floor a setting clears before its
-recall counts rather than a ranking. Ordering on precision alone returns the corner of the
-sweep, where a setting stacks almost nothing and is therefore almost never wrong.
-**Every comparison is scoped to the frames that were on screen when the answer was
-given** — the `surrounding` column — because a label says *the frames I was shown are
-right* and never *this stack is complete*; a strictness that pulls in a frame the reader
-never saw is not contradicting them, and scoring it would measure the width of the
-harness's window. The frame past the end of the run is separated out for the same reason
-in reverse: no strictness reaches it, so what the reader said about it is evidence about
-the 3600s fence. Confident labels are scored apart from the not-sure ones, and every
-setting **names the labelled cases it gets wrong** rather than only counting them.
-**The rounds are scored apart and never pooled**: the earliest round is the evidence a
-setting is chosen from, every later one is replayed against that choice without voting on
-it — pooling them would let the check recommend the thing it is checking — and round two's
-own section prices the chain at the chosen strictness, which is the comparison round one's
-labels could not make, naming the cases **every** rule gets wrong there and not only the
-chosen rule's. `--precision` moves the floor and `--linkage` narrows which rules are
-in the running, so a decision to set one aside is a command rather than an argument made
-afterwards. It reads
-the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate and never touches
-`G:`; it writes no label and no report, and the only thing it can put in the labels file is
-the round-one stamp the harness would have written anyway. The ceiling is not a knob: it is the fence the Match rows
-were computed behind, so cutting the runs anywhere else would replay the labels over pairs
-that were never checked.
-
-```bash
-python -m harness.calibrate
-```
-
-Its output is `docs/adr/0003-stack-on-verified-match.md`'s "What the labels settled" and
-"What round two settled", and **the bare run above is not the command that returns what the
-ADR recorded.** Over all three rules it recommends *neighbour* linkage at 25 — the best
-recall clearing the floor on round one — and the ADR declines it, now with round two's
-measurement rather than round one's argument: on the sets drawn where a chain crosses a
-boundary, neighbour scores 88.8% precision at strictness 20 and 92.1% at 25, both under the
-floor. The recorded default is strictness 20 with *matches most members*, confirmed by that
-round at 96.5% precision, and this is the run that returns it:
-
-```bash
-python -m harness.calibrate --linkage complete,majority
-```
-
-To price the **fingerprint screen** — the other thing ADR 0003 left open, and the one the
-labels turned round: at 0.40 the screen costs 5.2% of the pairs the reader kept together,
-and the question is whether to loosen it. This is the measurement and never the pass. It
-splits why each kept pair carries no Match row, because the two causes have different fixes
-— the screen rejected it, or the derivative tree is missing a substrate — and it prices what
-each screen value would ask for, estimated from the rates `photolib.matches` already
-recorded rather than by running anything. Every value is answered from the stored cosine and
-never from `verdict`, which is frozen at 0.40; the refusal guarding that constant is
-borrowed whole rather than weakened. **A pair is counted once**, where `harness.calibrate`
-counts it once per answer: the rounds partition a run differently and their sets overlap, so
-60 answers' worth of kept pairs is 4,427 mentions of 3,727 pairs. It reads the catalog and
-`labels.sqlite3`, both on the NVMe, opens no substrate, never touches `G:`, and holds both
-connections read-only, so it writes nothing at all; the numbers are counts rather than
-timings, but it shares the NVMe with the catalog and the substrates, so take it when nothing
-else is measuring against that drive. There are no arguments and the sweep is not a knob.
-Measured: all 192 of the unreached pairs are the screen's, none is a hole in the tree, and
-buying every one of them back means a screen of 0.087, 1.77M fresh pairs, 1h42m and 356 MB.
-Its output is ADR 0003's "What is still deliberately not settled here", which recommends
-leaving the screen where it is.
-
-```bash
-python -m harness.screen
-```
-
 To read those Matches as **membership** — one row per tile saying which stack it is in,
 at the setting the labels settled. It is stored rather than derived per query because
 membership is a property of the photographs and not of the view, and **this table is what
 the grid groups on**: `photolib/browse.py` joins it at `browse.STACK_SETTING`, so a filter
 can only remove frames from a stack. Until a pass has run the grid draws every tile as its
-own stack, whatever the toggle says. The walk is
-the one `harness.calibrate` replayed the labels against, imported from here rather than
-copied, so ADR 0003's numbers describe what the grid draws and not something adjacent
-to it; `harness/label.py` re-exports it and keeps working. A stack is named by its earliest
-member's sha256 and never by an id, and that is not the **cover**, which is resolved per
+own stack, whatever the toggle says. The setting is **strictness 20 with *matches most
+members***, which ADR 0003's "What the labels settled" is the record of, and the walk that
+settled it is this module's rather than a copy of it, so those numbers describe what the grid
+draws and not something adjacent to it. A stack is named by its earliest member's sha256 and never by an id, and that is not the **cover**, which is resolved per
 query. **The strictness, the linkage and the window are part of the key**, the relationship
 the Match rows already have with the method that produced them, so moving one adds a
 population rather than overwriting one and `--strictness`/`--linkage` are how a caller says

@@ -6,9 +6,9 @@ is under test is what a known set of Matches becomes, which is the reading and n
 the geometry. `tests/test_matches.py` is where the number itself is asserted over
 pictures. Nothing here opens a path from config.toml.
 
-The rule the pass walks with is the one `harness.calibrate` replayed the reader's
-labels against, which is asserted rather than assumed: `test_the_rule_is_the_one_
-the_labels_were_replayed_against`.
+The setting the pass walks with is the one the reader's labels settled, which is
+asserted rather than assumed: `test_the_recorded_setting_is_the_one_the_labels_
+settled`.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-from harness import label
 from photolib import browse, candidates, fingerprints, matches, membership
 from photolib.config import Config
 from photolib.membership import (
@@ -425,15 +424,6 @@ def test_a_setting_that_has_never_run_owes_every_tile(corpus: Stacks) -> None:
 
 
 # --- the rule ------------------------------------------------------------------
-
-
-def test_the_rule_is_the_one_the_labels_were_replayed_against(corpus: Stacks) -> None:
-    """Load-bearing, and the reason `link` lives in `photolib` rather than in the
-    harness: ADR 0003's "What the labels settled" describes what this pass draws only
-    if the walk is the same walk. Not a second copy of it -- the same object.
-    """
-    assert label.LINKAGE is membership.LINKAGE
-    assert label.link is membership.link
 
 
 def test_the_recorded_setting_is_the_one_the_labels_settled() -> None:

@@ -9,11 +9,11 @@
 --
 -- `points` is stored as the count and never as a yes-or-no, for 009's reason and
 -- more sharply: the reader's *strictness* is defined in CONTEXT.md as a threshold
--- on the Match, ADR 0003 leaves its value unsettled, and a knob is only free if
+-- on the Match, ADR 0003 left its value unsettled, and a knob is only free if
 -- moving it is a re-read of these rows rather than another pass. So this table
 -- carries no derived verdict at all -- 009 has one because its `screen` decides
--- which pairs reach this stage, and nothing downstream of here needs deciding
--- before the labelling harness has run.
+-- which pairs reach this stage, and nothing downstream of here needed deciding
+-- before the labels had settled the threshold.
 --
 -- A pair with no row was not checked, which happens two ways and neither is a
 -- zero: the screen rejected it, or a substrate it needed is missing. Zero means

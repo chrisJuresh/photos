@@ -9,9 +9,9 @@
 -- ones. That is 3.63M pairs over this catalog at the committed 3600s ceiling.
 --
 -- `screen` is stored per pair rather than reduced to a yes-or-no, because the
--- fingerprint's own threshold is what ADR 0003 leaves unsettled: the labelling
--- harness chooses it, and a number chosen later has to be a re-read of these rows
--- rather than another pass. It is not the reader's *strictness*, which CONTEXT.md
+-- fingerprint's own threshold is what ADR 0003 left unsettled: the labels priced it
+-- afterwards, and a number chosen later had to be a re-read of these rows rather
+-- than another pass. It is not the reader's *strictness*, which CONTEXT.md
 -- defines as a threshold on the Match and never on the fingerprint.
 --
 -- `verdict` is what keeps "never plausibly the same picture" distinguishable from

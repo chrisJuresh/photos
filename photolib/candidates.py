@@ -29,10 +29,11 @@ table and the check on this enumeration. `--counts` prints it.
 
 The screen is a cosine between two L2-normalised fingerprints, so it is a dot
 product. It is **stored per candidate rather than reduced to a yes-or-no**, because
-the fingerprint's own threshold is the thing ADR 0003 leaves unsettled -- the
-labelling harness is what will choose it -- and a chosen number has to be a re-read
-of these rows rather than another pass. It is not the reader's **strictness**, which
-`CONTEXT.md` defines as a threshold on the Match and never on the fingerprint.
+the fingerprint's own threshold is the thing ADR 0003 left unsettled -- the labels
+priced it afterwards, from these rows rather than from another pass, and the ADR's
+"What is still deliberately not settled here" is where that landed. It is not the
+reader's **strictness**, which `CONTEXT.md` defines as a threshold on the Match and
+never on the fingerprint.
 
 A frame with no fingerprint cannot be screened and its pairs get no row. Two
 populations arrive here without one, and they are different facts: a **video**, which
@@ -96,11 +97,12 @@ STACKABLE = f"substr(f.taken_src, 1, 5) = 'exif:' AND {SECONDS} IS NOT NULL"
 # leaves 367,526.
 #
 # It is set loose on purpose. High recall is what the fingerprint is for and the
-# precision comes from the stage after it, and ADR 0003 leaves "whether the
-# embedding screen can be tightened enough to skip geometry on most pairs" for the
-# labelling harness to settle. Every cosine is stored, so a number chosen later is a
-# query over these rows -- and moving this constant is checked rather than assumed:
-# see `refuse_if_rethresholded`.
+# precision comes from the stage after it. ADR 0003 left "whether the embedding
+# screen can be tightened enough to skip geometry on most pairs" open, and the labels
+# answered it against tightening and recommended leaving this value here. Every
+# cosine is stored, which is what let that question be a query over these rows rather
+# than another pass -- and moving this constant is checked rather than assumed: see
+# `refuse_if_rethresholded`.
 SCREEN = 0.40
 
 BATCH = 100_000  # pairs per transaction, rounded up to a whole fan-out
