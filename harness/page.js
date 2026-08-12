@@ -43,7 +43,7 @@ const VERDICTS = {
 // three, and one keystroke each — see `KEYS` — because a reason that cost a sentence
 // would stop being given. `REASONS` in label.py is the same three under the names the
 // column stores, which are the keys here.
-const SAID = {
+const WORDS = {
   people: "different people",
   moment: "a different moment",
   close: "not close enough",
@@ -111,7 +111,7 @@ function paint(button, marked) {
   button.querySelector(".caption").textContent = marked
     ? role === "member"
       ? reason
-        ? SAID[reason]
+        ? WORDS[reason]
         : "does not belong"
       : "should be included"
     : role === "neighbour"
@@ -481,7 +481,7 @@ const KEYS = {
   h: () => step(-1),
   ArrowRight: () => forward(),
   ArrowLeft: () => step(-1),
-  // Why the frames pushed out do not belong, one press each. See `SAID` for the
+  // Why the frames pushed out do not belong, one press each. See `WORDS` for the
   // words and `why` for which frames a press answers for.
   p: () => why("people"),
   m: () => why("moment"),

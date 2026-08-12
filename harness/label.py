@@ -1,11 +1,13 @@
 """The screen where twelve anecdotes become a few hundred judgements.
 
 **This is a standing tool.** It was written as scaffolding for the two rounds
-`docs/adr/0003-stack-on-verified-match.md` asks for, and it outlived them: the
-setting those rounds settled turns out to be wrong for the reader, the objective
-they were scored against turns out to be wrong too, and recalibrating against the
-reader's taste is plainly a recurring need rather than a one-off. So it keeps a
-permanent home here. It is still not part of the shipped website -- nothing in
+`docs/adr/0003-stack-on-verified-match.md` asks for, and it outlived them: the reader
+has since said that the setting those rounds settled is wrong for them, and that the
+objective it was scored against is wrong too. What replaces either is not decided
+here and is not decided in this module -- ADR 0003 records what the labels settled
+and the ticket that recalibrates amends it. What this directory now knows is that
+collecting the reader's taste is a recurring need rather than a one-off, so it keeps
+a permanent home here. It is still not part of the shipped website -- nothing in
 `photolib/` imports it and no route of `photolib.grid` reaches it, the same
 one-way arrow `archive/pipeline/` has -- but the arrow is the whole of the
 separation, and a later reader should not delete this directory on the reasoning
@@ -69,8 +71,12 @@ and the substrates, both on the NVMe, and never opens `G:`.
 
     python -m harness.label --open
 
-Stopping it loses nothing: every answer is committed as it is given, and an answer
-already given comes back with its set so it can be revised rather than repeated.
+Stopping it loses nothing: every answer is committed as it is given. **Revising one
+is a move back through the sitting in hand** -- every set dealt tonight comes back
+with what the reader said about it, and `h` is how they reach it. A new sitting deals
+fresh sets rather than yesterday's over again, which is the trade `already` makes in
+`main`: dealing forty answered sets before the first new one is the wrong way to
+spend an evening, and a misclick is revised in the moment it is made.
 """
 
 from __future__ import annotations
@@ -586,7 +592,19 @@ def spread(
 # How many frames of a run go into one indexed lookup. The runs this fence admits
 # reach 1,435 frames and SQLite bounds how many parameters a statement may carry, so
 # the query is chunked -- a real limit at a real boundary, and not a precaution.
-LOOKUP = 500
+BATCH = 500
+
+# How many runs one draw will cut before answering with the sets it has. It is the
+# bound that keeps a request short: without it, the first draw that wants a band the
+# catalog barely holds would search every remaining run before answering.
+#
+# 60 because a populated band needs nothing like it and the worst case is still
+# quick. Measured over this catalog: the first draw found all three bands in the first
+# run it cut, twelve draws cut nineteen runs between them, and the one draw that had
+# to cut fifteen of those took 0.058s -- so 60 is about a fifth of a second at the
+# outside, against 1,223 runs unbounded. A band the search has not reached by then is
+# not declared empty; `Sitting.draw` says what happens instead.
+SEARCH = 60
 
 
 def _walk_order(runs: Sequence[Run]) -> list[Run]:
@@ -632,9 +650,22 @@ class Sitting:
     candidate is a pair with no Match here.
 
     What is read per draw is one run's Match rows, on the primary key of
-    `pair_match`, for as many runs as the band whose turn it is takes to find. The
-    3.6M-row table is never loaded whole, which is the difference between a draw the
-    reader waits for and one they do not.
+    `pair_match`, for as many runs as the band whose turn it is takes to find --
+    `SEARCH` of them at the outside. The 3.6M-row table is never loaded whole, which
+    is the difference between a draw the reader waits for and one they do not.
+
+    **This is cutting runs inside a request, and hard rule 4 is about media work.**
+    The rule names ranking and grouping among the things that belong in a background
+    process, and the reason it does is the failure `archive/v1-docs/invariants.md`
+    records: a *website* handler that decoded, hashed or regrouped the library made
+    the page hang and took the database's write lock with it. None of that is here. A
+    draw opens no photograph, hashes nothing, copies nothing and never touches `G:`;
+    it reads integers off an index, over a read-only connection, with `state.sqlite3`
+    not even attached, and it is bounded -- measured at 13ms for the first set and
+    under a millisecond after it. The escape the rule offers, "enqueue a job", has
+    nothing to offer a single reader at a keyboard whose next set *is* the answer to
+    the keystroke they just pressed: a job would be a queue with one item in it and a
+    page waiting on it. So the draw stays in the request, and it stays small.
 
     `already` is the frames every earlier answer was about, and it is dropped before
     anything is banded -- so a run the reader has judged is never searched twice. It
@@ -646,11 +677,14 @@ class Sitting:
     order: list[Run]  # every run, in `_walk_order`'s order
     ends: dict[str, tuple[Near | None, Near | None]]  # by a run's first frame
     already: Collection[str]
-    strictness: int = STRICTNESS
-    linkage: str = DEFAULT_LINKAGE
-    method: str = matches.METHOD
-    version: str = matches.VERSION
-    context: int | None = CONTEXT
+    # The setting the sets are drawn at and the method they are read under. Required
+    # rather than defaulted, because `sitting` states those defaults and two
+    # statements of one default are one drift away from disagreeing.
+    strictness: int
+    linkage: str
+    method: str
+    version: str
+    context: int | None
     at: int = 0  # how far through `order` the search has got
     # The sets cut so far and not yet dealt, and the ones dealt. Both grow with the
     # sitting and neither is generated ahead of it.
@@ -670,15 +704,25 @@ class Sitting:
         chooses between them, because otherwise the choice would be made over
         whichever bands the search happened to reach first and `SHARES` would
         describe the walk rather than the round.
+
+        Searched for, but only `SEARCH` runs' worth per draw: **no single request
+        pays for the whole catalog.** A band the search has not reached yet is left
+        to the next draw rather than declared empty -- the cursor keeps its place, so
+        the work is spread across draws instead of repeated -- and the weave answers
+        from what is cut. That makes the shares approximate while a band is rare and
+        exact once it is found, which is the right way round: the reader waiting is
+        worse than a proportion arriving late.
         """
-        while short := self._short():
-            if self._search():
-                continue
-            # The runs are done, so a band with nothing cut has nothing at all. Said
-            # once, because `dry` empties `_short` and the search is never repeated.
-            for name in sorted(short):
-                self.dry.add(name)
-                print(f"the {name} band is exhausted -- drawing from the others")
+        searched = 0
+        while (short := self._short()) and searched < SEARCH:
+            if not self._search():
+                # The runs are done, so a band with nothing cut has nothing at all.
+                # Said once, because `dry` empties `_short` for good.
+                for name in sorted(short):
+                    self.dry.add(name)
+                    print(f"the {name} band is exhausted -- drawing from the others")
+                break
+            searched += 1
         picked = spread(self.pool, 1, drawn=self.drawn)
         if not picked:
             return None
@@ -720,8 +764,8 @@ class Sitting:
         pair with no evidence, as `match` reads it.
         """
         found: Points = {}
-        for start in range(0, len(shas), LOOKUP):
-            batch = shas[start : start + LOOKUP]
+        for start in range(0, len(shas), BATCH):
+            batch = shas[start : start + BATCH]
             found.update(
                 {
                     (early, late): count
@@ -1161,13 +1205,12 @@ class LabelServer(ThreadingHTTPServer):
         linkage: str = DEFAULT_LINKAGE,
     ):
         self.drawing = drawing
-        # The sets this sitting has been dealt, which is the sampler's own list: a
-        # set is dealt by being drawn, and going back to revise one is going back
-        # through this. Nothing further ahead of it exists.
-        self.asked = drawing.drawn
-        # Whether the catalog has been asked for a set and had none left. Held
-        # rather than re-derived, because finding out costs a search of every run
-        # the reader has not answered about.
+        # The sets this sitting has been dealt, which is the sampler's own list and
+        # not a copy of it: a set is dealt by being drawn, and going back to revise
+        # one is going back through this. Nothing ahead of it exists.
+        self.dealt = drawing.drawn
+        # Whether the catalog has been asked for a set and had none left. Held rather
+        # than re-derived, because finding out costs a search of the runs.
         self.spent = False
         self.labels = labels
         self.substrate_root = substrate_root
@@ -1205,15 +1248,22 @@ class LabelServer(ThreadingHTTPServer):
         appends to the list every other request reads.
         """
         with self._lock:
-            if self.drawing.draw() is None:
-                self.spent = True
-            return self._payload()
+            return self._deal()
 
     def payload(self) -> dict:
+        """The sitting, dealing its first set if it has none.
+
+        So opening the page is the first request and there is nothing behind it to
+        wait for -- see `Sitting`, which is where "nothing before it is asked for"
+        is arranged.
+        """
         with self._lock:
-            if not self.asked and self.drawing.draw() is None:
-                self.spent = True
-            return self._payload()
+            return self._deal() if not self.dealt else self._payload()
+
+    def _deal(self) -> dict:
+        if self.drawing.draw() is None:
+            self.spent = True
+        return self._payload()
 
     def _payload(self) -> dict:
         """Everything this sitting has been dealt, with what the reader said about it.
@@ -1250,7 +1300,7 @@ class LabelServer(ThreadingHTTPServer):
             # thing that would prime the reader -- being told a set is one no
             # strictness reaches is being told what to say about it -- and round two
             # withheld which sets were its chain cases for the same reason.
-            for question in self.asked
+            for question in self.dealt
         ]
         return {
             "sets": sets,
@@ -1258,10 +1308,11 @@ class LabelServer(ThreadingHTTPServer):
             "round": self.round,
             "strictness": self.strictness,
             "linkage": self.linkage,
-            # How many answers the reader has given this round, which is the whole of
-            # the counter now: there is no round size, so there is no number of sets
-            # left to be useful, and a count of what they have done is what says
-            # roughly where they are.
+            # How many answers the reader has given this round -- every answer in it
+            # and not only tonight's, because the round is the population a report
+            # scores and "roughly where am I" is a question about that. It is the
+            # whole of the counter now: there is no round size, so there is no number
+            # of sets left to be useful.
             "given": len(given),
             # Whether asking for another set is worth doing. False only once the
             # catalog has actually been asked and had nothing left.
@@ -1384,7 +1435,7 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._json(400, {"error": "members"})
             return
         question = next(
-            (q for q in self.server.asked if list(q.members) == members), None
+            (q for q in self.server.dealt if list(q.members) == members), None
         )
         if question is None:
             self._json(404, {"error": "members"})
