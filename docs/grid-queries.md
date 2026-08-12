@@ -18,7 +18,7 @@ which replaced the 1.07 s per-kind count. The client hardcodes no dimension name
 **adding a filter is a change to `browse.py` alone.**
 
 Facet counts are **unconditional** — what the library holds, not what the current
-selection holds — because cross-filtering them would cost one count per dimension per
+view holds — because cross-filtering them would cost one count per dimension per
 click, and a menu that renumbers itself as you tick through it is worse at the one job
 it has.
 
@@ -26,14 +26,14 @@ it has.
 
 **Every filter leaves the default sort on the `photo_sort` index**, so a filtered page
 is 9–15 ms: 100–152 ms for `root` and `grade`, which carry a subquery, and ~430 ms in
-the worst case, which is a selection narrow enough that the index has to be walked to
+the worst case, which is a view narrow enough that the index has to be walked to
 its end to fill one page. An alternate ordering cannot use the index and pays
 230–290 ms to sort 24,536 rows. That is the honest price of "largest first" against
 this schema and it is charged only when such a sort is chosen.
 
 **`total` is 230–400 ms whatever the filter**, because a count visits every tile. It is
 therefore memoised per filter set on the frozen `Query` object and never recomputed per
-page — see `GridServer.total`. Two requests that mean the same selection are the same
+page — see `GridServer.total`. Two requests that mean the same view are the same
 key however the query string was spelled.
 
 A test asserts the index property for every filter, and another asserts that each facet
@@ -62,23 +62,23 @@ tile is its own stack and the mode is a no-op, which is the honest reading of an
 that does not exist rather than a fall back to the clock. `python -m photolib.membership`
 is the command.
 
-Measured over the real catalog with membership in place — the default stills selection,
+Measured over the real catalog with membership in place — the default stills view,
 24,306 tiles:
 
 | | stacks | of more than one | largest | stacks of one |
 |---|---|---|---|---|
-| whole selection | 9,338 | 4,138 | 96 | 5,200 |
+| whole view | 9,338 | 4,138 | 96 | 5,200 |
 | `orient=landscape` | 2,165 | 756 | 48 | 1,409 |
 
 **A filter shrinks a stack and never splits it, checked over the whole corpus.** Every
 stack under `orient=landscape`, `ext=.jpg`, `grade=best` and `year=2023` is a subset of a
-stack of the unfiltered selection — 0 splits in all four. That is what stored membership
+stack of the unfiltered view — 0 splits in all four. That is what stored membership
 buys, and it is why this section no longer has a table of windows in it.
 
-**One pass per selection, then a page is a slice.** The assignment visits every selected
-tile and is memoised per selection and sort — see `GridServer.assignment`:
+**One pass per view, then a page is a slice.** The assignment visits every tile the view
+holds and is memoised per view and sort — see `GridServer.assignment`:
 
-| selection | assignment | 500-cover page | 200-cover page |
+| view | assignment | 500-cover page | 200-cover page |
 |---|---|---|---|
 | `newest` | 630 ms | 56 ms (1,579 frames) | 19 ms |
 | `oldest` | 660 ms | 23 ms (757 frames) | 7 ms |
@@ -100,7 +100,7 @@ size, as it was.
 
 **Both of the count pane's numbers come out of that one pass.** `stacks` is the
 assignment's length rather than a count of its own, which is how two readings of one
-selection are kept from disagreeing; `total` still counts tiles, and its memo drops the
+view are kept from disagreeing; `total` still counts tiles, and its memo drops the
 stacking mode because grouping tiles does not change how many there are. The badge on the
 Stacks pill is the first number, the pane beside it reads `<photos> photos` in both modes,
 and a reader who has not turned stacking on pays for no pass at all.

@@ -53,7 +53,7 @@ const BEHIND = 1;
 const AHEAD = 2;
 
 // How far the pointer travels before a press is a drag rather than a click. A
-// hand that means to mark one tile still moves a pixel or two on the way down,
+// hand that means to select one tile still moves a pixel or two on the way down,
 // and a marquee that fired on those would replace select mode's single click
 // with a one-tile sweep that says the same thing less clearly.
 const SWEEP_MIN = 4;
@@ -446,8 +446,8 @@ export function createSheet(canvas, sentinel, options) {
   // A press on the canvas rubber-bands a box over the tiles it crosses. It lives
   // here rather than above the sheet because this file holds `rows`, `items` and
   // `width`, which is the whole of the geometry the box is tested against.
-  // Nothing here knows what a mark is — the seams hand up the tiles the box
-  // covers and the caller decides what to do about them.
+  // Nothing here knows what being selected is — the seams hand up the tiles the
+  // box covers and the caller decides what to do about them.
   //
   // Coordinates are the canvas's own throughout, so a wheel-scroll mid-drag
   // extends the box over content rather than dragging it over the window: the
@@ -458,8 +458,8 @@ export function createSheet(canvas, sentinel, options) {
   let sweepFrame = 0;
   let band = null;
   // A finished drag leaves a click behind it, on whichever element the press and
-  // the release have in common. It is not a mark, and it is the one click select
-  // mode must not act on.
+  // the release have in common. It selects nothing, and it is the one click
+  // select mode must not act on.
   let sweptClick = false;
 
   // The pointer, in canvas coordinates. Read per event rather than cached: the

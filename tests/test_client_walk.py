@@ -2,7 +2,7 @@
 
 Stepping is tile to tile, so the whole of it is arithmetic over two numbers the
 sheet already reports. Asserted here rather than through the browser because the
-cases that matter are the ends of the selection: the first tile, the last one,
+cases that matter are the ends of the view: the first tile, the last one,
 and the last one *read* while more is still coming — which a browser test would
 have to manufacture a paging boundary to reach.
 """
@@ -30,13 +30,13 @@ def test_stepping_back_lands_on_the_previous_tile():
 
 @needs_node
 def test_the_first_tile_has_nothing_before_it():
-    """The true start of the selection, whether or not the rest has been read."""
+    """The true start of the view, whether or not the rest has been read."""
     assert step(0, -1, 500, False) is None
     assert step(0, -1, 500, True) is None
 
 
 @needs_node
-def test_the_last_tile_of_an_exhausted_selection_has_nothing_after_it():
+def test_the_last_tile_of_an_exhausted_view_has_nothing_after_it():
     """`exhausted` is what makes the last loaded tile the last tile there is."""
     assert step(499, 1, 500, True) is None
 
@@ -49,13 +49,13 @@ def test_stepping_past_the_last_loaded_tile_still_lands():
 
 
 @needs_node
-def test_a_selection_of_one_has_no_step_in_either_direction():
+def test_a_view_of_one_has_no_step_in_either_direction():
     assert step(0, -1, 1, True) is None
     assert step(0, 1, 1, True) is None
 
 
 @needs_node
-def test_an_empty_selection_steps_nowhere():
+def test_an_empty_view_steps_nowhere():
     """Nothing can be open over an empty sheet, but the arithmetic still has to
     answer rather than hand back an index into nothing."""
     assert step(0, 1, 0, True) is None

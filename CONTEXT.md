@@ -58,7 +58,7 @@ selected set is evidence: it is what the Copy button puts on the clipboard, as t
 grouped the way the grid grouped them. Selecting a cover selects its whole stack, and a
 selection is metadata that never becomes a file operation. It survives scrolling and a
 resize, and is emptied by anything that changes the answer — the toggle, the filters and
-the sort. Only the toggle regroups, so in principle a filter could keep it; a mark is
+the sort. Only the toggle regroups, so in principle a filter could keep it; a selection is
 nonetheless keyed on the *cover* that stood for a stack, and narrowing the view can change
 which frame that is, so carrying one waits on the grid naming a stack rather than pointing
 at its cover.

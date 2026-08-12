@@ -18,7 +18,7 @@
     // saved rule changes what every one of them holds.
     version = 0,
     excludedDirs = [],
-    selected = null,
+    picked = null,
     busy = false,
     onload,
     onpick,
@@ -122,7 +122,7 @@
 
 <div class="tree">
   {#each rows as row (row.key)}
-    <div class="row" class:picked={selected === row.key} class:gone={row.excluded}>
+    <div class="row" class:picked={picked === row.key} class:gone={row.excluded}>
       <span class="indent" style:width="{Math.min(row.depth, MAX_INDENT) * 11}px"></span>
 
       {#if row.deeper}

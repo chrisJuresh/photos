@@ -12,7 +12,7 @@ Two properties are load-bearing and both are about cost:
   * every filter leaves the default sort on the `photo_sort` index, so a filtered
     page terminates early instead of sorting the library. Measured: 9-15 ms for a
     page under most filters, 100-152 ms for the two that carry a subquery
-    (`root`, `grade`), and ~430 ms in the worst case, which is a selection narrow
+    (`root`, `grade`), and ~430 ms in the worst case, which is a view narrow
     enough that the index has to be walked to its end to fill one page.
   * `total` costs a full count -- 230-400 ms, because it has to visit every tile
     whatever the filter is -- so it is memoised per filter set by the caller and
@@ -32,7 +32,7 @@ frames from a stack, where the run this used to cut would break in two.
 `docs/adr/0003-stack-on-verified-match.md` is the decision and
 `docs/adr/0001-stack-on-capture-time-not-phash.md` the measurements it stands on.
 
-One pass per selection, in the ordering the reader is looking at, and the caller
+One pass per view, in the ordering the reader is looking at, and the caller
 memoises it; a page is then a slice of it, which is what keeps a whole stack on one
 page for every sort rather than only for the two that used to stream. Which member
 a stack is *drawn* as is `cover`, and it is a different question from where the
@@ -166,7 +166,7 @@ _CURSOR_REAL = re.compile(r"^-?[0-9]{1,19}(\.[0-9]{1,10})?(e[+-]?[0-9]{1,3})?$")
 
 
 def parse_sort(values: list[str]) -> str:
-    """The selected sort's name. Unknown is a 400, not a silent fall back to the
+    """The requested sort's name. Unknown is a 400, not a silent fall back to the
     default -- an ordering nobody asked for looks like a bug in the client."""
     if not values:
         return DEFAULT_SORT
@@ -180,7 +180,7 @@ def parse_cursor(sort: Sort, before: list[str], before_id: list[str]):
     """The keyset cursor, or None for the first page.
 
     Both halves or neither: a half cursor has no defensible interpretation. The
-    key half is validated against the *selected* sort, so a numeric cursor
+    key half is validated against the *requested* sort, so a numeric cursor
     cannot be handed to a timestamp ordering -- SQLite would compare an integer
     against text by storage class and page through nothing.
     """
@@ -210,7 +210,7 @@ def parse_cursor(sort: Sort, before: list[str], before_id: list[str]):
 # The categorical dimensions whose vocabulary is fixed here rather than read from
 # the corpus, each mapping one token to one SQL term. Anything not in the mapping
 # is a 400 naming the dimension: these are enumerations, so an unknown token is a
-# malformed request rather than a selection that happens to match nothing.
+# malformed request rather than a view that happens to match nothing.
 #
 # Byte and quality bands are ranges over a continuum, cut where the measured
 # distribution actually has structure -- the quality bands are the p25/p50/p90 of
@@ -303,7 +303,10 @@ def parse_stack(values: list[str]) -> bool:
 
 @dataclass(frozen=True)
 class Query:
-    """A validated selection. Hashable, so the caller can memoise a count on it."""
+    """A validated view -- what the filters and the sort put on screen.
+
+    Hashable, so the caller can memoise a count on it.
+    """
 
     kinds: tuple[str, ...]
     enums: tuple[tuple[str, tuple[str, ...]], ...]
@@ -319,10 +322,10 @@ class Query:
         return SORTS[self.sort]
 
     def unstacked(self) -> Query:
-        """The same selection with stacking off.
+        """The same view with stacking off.
 
         `total` counts tiles and the grouping cannot change how many there are, so
-        both modes of one selection share one count rather than paying 230-400 ms
+        both modes of one view share one count rather than paying 230-400 ms
         each time the toggle moves.
         """
         return self if not self.stack else replace(self, stack=False)
@@ -345,21 +348,21 @@ def _tokens(field: str, values: list[str], *, split: bool) -> tuple[str, ...]:
 
 
 def parse(params: dict[str, list[str]], *, kinds: tuple[str, ...]) -> Query:
-    """The whole selection, validated. `kinds` comes from the existing parser."""
+    """The whole view, validated. `kinds` comes from the existing parser."""
     enums = []
     for field, vocabulary in ENUMS.items():
-        selected = _tokens(field, params.get(field, []), split=True)
-        if not selected:
+        tokens = _tokens(field, params.get(field, []), split=True)
+        if not tokens:
             continue
-        if any(token not in vocabulary for token in selected):
+        if any(token not in vocabulary for token in tokens):
             raise BadFilter(field)
-        enums.append((field, tuple(sorted(selected))))
+        enums.append((field, tuple(sorted(tokens))))
 
     columns = []
     for field in COLUMNS:
-        selected = _tokens(field, params.get(field, []), split=False)
-        if selected:
-            columns.append((field, tuple(sorted(selected))))
+        tokens = _tokens(field, params.get(field, []), split=False)
+        if tokens:
+            columns.append((field, tuple(sorted(tokens))))
 
     years = _tokens("year", params.get("year", []), split=True)
     if any(not _YEAR.match(value) for value in years):
@@ -400,18 +403,18 @@ def where(query: Query) -> tuple[list[str], list]:
     terms: list[str] = [f"f.kind IN ({_placeholders(len(query.kinds))})"]
     params: list = list(query.kinds)
 
-    for field, selected in query.enums:
+    for field, tokens in query.enums:
         vocabulary = ENUMS[field]
-        terms.append(" OR ".join(f"({vocabulary[token]})" for token in selected))
+        terms.append(" OR ".join(f"({vocabulary[token]})" for token in tokens))
 
-    for field, selected in query.columns:
+    for field, tokens in query.columns:
         column = COLUMNS[field]
-        values = [value for value in selected if not (value == "" and field in NULLABLE)]
+        values = [value for value in tokens if not (value == "" and field in NULLABLE)]
         parts = []
         if values:
             parts.append(f"{column} IN ({_placeholders(len(values))})")
             params += values
-        if len(values) != len(selected):
+        if len(values) != len(tokens):
             parts.append(f"{column} IS NULL")
         terms.append(" OR ".join(parts))
 
@@ -446,7 +449,7 @@ def where(query: Query) -> tuple[list[str], list]:
 # the paging silently.
 KEY = 5
 
-# Which stack each selected tile is in, at `STACK_SETTING`, generated from that
+# Which stack each tile in the view is in, at `STACK_SETTING`, generated from that
 # mapping so the five placeholders are in its own order. A LEFT JOIN because a tile
 # the filesystem dated carries no row -- a copy date is not when the photograph was
 # taken, so it can be nobody's neighbour -- and such a tile is a stack of one named
@@ -485,7 +488,7 @@ def page_sql(query: Query, cursor) -> tuple[str, list]:
 
 
 def count_sql(query: Query) -> tuple[str, list]:
-    """How many tiles the whole selection has. 230-400 ms; memoise it."""
+    """How many tiles the whole view has. 230-400 ms; memoise it."""
     terms, params = where(query)
     return (
         "SELECT count(*) FROM photo AS p JOIN file AS f ON f.sha256 = p.rep_sha256 "
@@ -495,7 +498,7 @@ def count_sql(query: Query) -> tuple[str, list]:
 
 
 def assignment_sql(query: Query) -> tuple[str, list]:
-    """Every selected tile as `(id, sort key, stack)`, in the page's own order.
+    """Every tile in the view as `(id, sort key, stack)`, in the page's own order.
 
     One read of the stored assignment, not a grouping of it: the walk that decided
     membership ran offline in `photolib.membership`, so this is a join and the only
@@ -504,8 +507,8 @@ def assignment_sql(query: Query) -> tuple[str, list]:
     ordering, so a page is a slice of this rather than a keyset read, which is what
     returns a stack whole on one page whatever the sort.
 
-    Memoise it per selection: it visits every selected tile, and it is the same
-    answer for every page of one selection.
+    Memoise it per view: it visits every tile the view holds, and it is the same
+    answer for every page of one view.
 
     The setting binds before the filter's own values, because the join is written
     before the WHERE.
@@ -735,7 +738,7 @@ def facets(conn) -> dict:
     figures it served are the `kind` dimension below.
 
     The counts are unconditional -- what the whole library holds, not what the
-    current selection holds. Cross-filtering them would cost one count per
+    current view holds. Cross-filtering them would cost one count per
     dimension per keystroke, and a menu that renumbers itself as you tick
     through it is worse at the one job it has, which is telling you what is
     there before you go looking.

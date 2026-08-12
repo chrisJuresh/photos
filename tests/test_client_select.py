@@ -1,11 +1,11 @@
-"""The select mode's two pure parts: the mark/unmark reducer and the share
+"""The select mode's two pure parts: the select/deselect reducer and the share
 string.
 
 Both are pure functions of plain data so they can be asserted here rather than
 through the browser, which is the whole reason the node adapter exists. The
 share string is the one the reader pastes into a bug report, so its shape is a
 contract with a human being: a conditions line that says which grouping was on
-screen, and the marked ids grouped the way the grid grouped them.
+screen, and the selected ids grouped the way the grid grouped them.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ def stack(key, ids):
 
 @needs_node
 def test_a_tile_carries_the_whole_stack():
-    """`m` is the page's own answer to what a stack holds, so a cover marks every
-    member. The key stays the cover's id — that is what the tile is drawn as and
+    """`m` is the page's own answer to what a stack holds, so a cover selects
+    every member. The key stays the cover's id — that is what the tile is drawn as and
     what the tickbox has to be looked up by."""
     item = {"id": 1240, "m": [{"id": 1240}, {"id": 1241}, {"id": 1242}]}
     assert call(SELECT, "stackOf", item) == {"key": 1240, "ids": [1240, 1241, 1242]}
@@ -43,24 +43,24 @@ def test_a_tile_with_no_members_stands_for_itself():
 
 
 @needs_node
-def test_marking_appends_and_unmarking_removes():
-    marks = call(SELECT, "toggle", [], stack(1, [1, 2]))
-    assert marks == [stack(1, [1, 2])]
-    marks = call(SELECT, "toggle", marks, stack(9, [9]))
-    assert marks == [stack(1, [1, 2]), stack(9, [9])]
-    assert call(SELECT, "toggle", marks, stack(1, [1, 2])) == [stack(9, [9])]
+def test_selecting_appends_and_deselecting_removes():
+    selected = call(SELECT, "toggle", [], stack(1, [1, 2]))
+    assert selected == [stack(1, [1, 2])]
+    selected = call(SELECT, "toggle", selected, stack(9, [9]))
+    assert selected == [stack(1, [1, 2]), stack(9, [9])]
+    assert call(SELECT, "toggle", selected, stack(1, [1, 2])) == [stack(9, [9])]
 
 
 @needs_node
-def test_the_marked_set_keeps_the_order_it_was_marked_in():
+def test_the_selected_set_keeps_the_order_it_was_picked_in():
     """An array and not an object keyed by id: JS iterates integer-like keys in
     ascending numeric order, which would silently reorder a report away from
-    what was on screen. Marking newest-first and reading it back has to give the
-    order the reader clicked in."""
-    marks = []
+    what was on screen. Selecting newest-first and reading it back has to give
+    the order the reader clicked in."""
+    selected = []
     for key in (9000, 12, 4400):
-        marks = call(SELECT, "toggle", marks, stack(key, [key]))
-    assert [entry["key"] for entry in marks] == [9000, 12, 4400]
+        selected = call(SELECT, "toggle", selected, stack(key, [key]))
+    assert [entry["key"] for entry in selected] == [9000, 12, 4400]
 
 
 @needs_node
@@ -74,8 +74,8 @@ def test_the_reducer_does_not_touch_what_it_was_given():
 
 @needs_node
 def test_the_tally_is_stacks_and_the_photographs_in_them():
-    marks = [stack(1, [1, 2, 3]), stack(9, [9]), stack(20, [20, 21])]
-    assert call(SELECT, "tally", marks) == {"stacks": 3, "photos": 6}
+    selected = [stack(1, [1, 2, 3]), stack(9, [9]), stack(20, [20, 21])]
+    assert call(SELECT, "tally", selected) == {"stacks": 3, "photos": 6}
     assert call(SELECT, "tally", []) == {"stacks": 0, "photos": 0}
 
 
@@ -87,12 +87,12 @@ def test_a_sweep_appends_what_it_caught_in_sheet_order():
     """The marquee and shift-click both land here. The order is the order the
     tiles are drawn in, which is the grid's current sort — the same claim a
     click-by-click report makes about the order the reader worked in."""
-    marks = call(SELECT, "sweep", [], [stack(3, [3]), stack(7, [7, 8])], True)
-    assert marks == [stack(3, [3]), stack(7, [7, 8])]
+    selected = call(SELECT, "sweep", [], [stack(3, [3]), stack(7, [7, 8])], True)
+    assert selected == [stack(3, [3]), stack(7, [7, 8])]
 
 
 @needs_node
-def test_a_sweep_over_something_already_marked_marks_it_once():
+def test_a_sweep_over_something_already_selected_takes_it_once():
     """Two drags overlapping, or a shift-click back across a range: the second
     one must not put a second copy of a stack in the report."""
     before = [stack(3, [3]), stack(9, [9])]
@@ -101,7 +101,7 @@ def test_a_sweep_over_something_already_marked_marks_it_once():
 
 
 @needs_node
-def test_an_unmarking_sweep_takes_only_what_it_swept():
+def test_a_deselecting_sweep_takes_only_what_it_swept():
     before = [stack(3, [3]), stack(9, [9]), stack(12, [12])]
     assert call(SELECT, "sweep", before, [stack(9, [9])], False) == [
         stack(3, [3]),
@@ -110,7 +110,7 @@ def test_an_unmarking_sweep_takes_only_what_it_swept():
 
 
 @needs_node
-def test_a_sweep_never_clears_marks_outside_the_box():
+def test_a_sweep_never_clears_picks_outside_the_box():
     """This is not a file manager. The reader sweeps several separate runs
     scattered down the sheet to send in one message, so a drag that destroyed
     the previous sweep would be exactly wrong — clearing is the button."""
@@ -147,8 +147,8 @@ def test_the_sweep_does_not_touch_what_it_was_given():
 @needs_node
 def test_the_share_string_is_the_conditions_then_the_groups():
     """The example in the ticket, exactly."""
-    marks = [stack(1234, [1234, 1235, 1236]), stack(1240, [1240]), stack(1251, [1251, 1252])]
-    assert call(SELECT, "shareText", query(), marks) == (
+    selected = [stack(1234, [1234, 1235, 1236]), stack(1240, [1240]), stack(1251, [1251, 1252])]
+    assert call(SELECT, "shareText", query(), selected) == (
         "stack=on sort=newest filters=none\n"
         "[1234,1235,1236],[1240],[1251,1252]"
     )
@@ -171,7 +171,7 @@ def test_the_sort_is_whatever_the_query_carries():
 
 @needs_node
 def test_the_active_filters_are_named_with_their_values():
-    """Dimensions in name order, so two reports of the same selection are the
+    """Dimensions in name order, so two reports of the same view are the
     same string. Empty dimensions are the ones nobody touched and do not reach
     the query, so they do not reach this either."""
     line = call(

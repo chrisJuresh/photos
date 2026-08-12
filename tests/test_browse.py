@@ -130,7 +130,7 @@ def catalog(tmp_path_factory) -> sqlite3.Connection:
 ALL_KINDS = ("image", "raw_image", "video")
 
 
-def selection(**params) -> browse.Query:
+def view(**params) -> browse.Query:
     """A `browse.Query` from the query-string form the client would send.
 
     `kind` is passed through as-is rather than through `parse_kinds`, so a test
@@ -212,7 +212,7 @@ def counted(conn, query: browse.Query) -> int:
     ids=lambda value: str(value),
 )
 def test_each_filter_selects_exactly(catalog, params, expected):
-    query = selection(**params)
+    query = view(**params)
     assert ids(catalog, query) == expected
     assert counted(catalog, query) == len(expected)
 
@@ -220,9 +220,9 @@ def test_each_filter_selects_exactly(catalog, params, expected):
 def test_a_tile_with_no_origin_row_is_reachable(catalog):
     """Tile 4 has no `origin` row. It must still be in the unfiltered answer, and
     must not be swept in by a `root` filter it has no evidence for."""
-    assert 4 in ids(catalog, selection())
+    assert 4 in ids(catalog, view())
     for root in ("sd card", "backup", "old"):
-        assert 4 not in ids(catalog, selection(root=root))
+        assert 4 not in ids(catalog, view(root=root))
 
 
 def test_kind_image_still_means_still_photography(catalog):
@@ -259,7 +259,7 @@ def test_each_sort_orders_exactly(catalog, name, expected):
     """Every tile, in order, for each ordering. Ties break on `p.id` in the same
     direction as the key, which is what makes the ordering total -- and total is
     what a keyset cursor needs to be able to resume."""
-    assert ids(catalog, selection(sort=name)) == expected
+    assert ids(catalog, view(sort=name)) == expected
 
 
 @pytest.mark.parametrize("name", sorted(browse.SORTS))
@@ -270,7 +270,7 @@ def test_each_sort_pages_to_exhaustion_without_gap_or_repeat(catalog, name):
     every tie, which is where a cursor that cannot distinguish two equal keys
     either repeats a row for ever or skips the rest of the tie.
     """
-    query = selection(sort=name)
+    query = view(sort=name)
     sort = query.ordering
     seen: list[int] = []
     cursor = None
@@ -297,7 +297,7 @@ def test_every_option_counts_the_same_two_ways(catalog):
     """Each option's count, from the facet pass, equals what selecting it yields.
 
     This is the one that has to hold. The counts come from Python reading rows
-    and the selection comes from SQL reading the same rows, so a band edge, a
+    and the view comes from SQL reading the same rows, so a band edge, a
     NULL, or an empty string treated differently by one of them shows up here and
     nowhere else until somebody notices the header lying.
     """
@@ -308,7 +308,7 @@ def test_every_option_counts_the_same_two_ways(catalog):
         if name in ("kind", "month"):
             continue  # neither is a plain count -- both are covered below
         for option in dimension["options"]:
-            query = selection(**{name: option["value"]})
+            query = view(**{name: option["value"]})
             assert option["count"] == counted(catalog, query), (name, option)
             checked += 1
     assert checked >= 40  # every option of thirteen dimensions, not a lucky few
@@ -320,8 +320,8 @@ def test_the_facet_total_is_every_tile(catalog):
     assert facets["kinds"] == {"image": 6, "raw_image": 1, "video": 1}
     # And the per-kind counts are what selecting that kind alone yields, once
     # `image`'s expansion is accounted for.
-    assert counted(catalog, selection(kind=["raw_image"])) == facets["kinds"]["raw_image"]
-    assert counted(catalog, selection(kind=["image", "raw_image"])) == (
+    assert counted(catalog, view(kind=["raw_image"])) == facets["kinds"]["raw_image"]
+    assert counted(catalog, view(kind=["image", "raw_image"])) == (
         facets["kinds"]["image"] + facets["kinds"]["raw_image"]
     )
 
@@ -432,7 +432,7 @@ def test_an_undated_tile_is_not_offered_as_a_year(catalog, tmp_path):
 )
 def test_a_malformed_filter_is_refused_by_name(params, field):
     with pytest.raises(browse.BadFilter) as raised:
-        selection(**params)
+        view(**params)
     assert raised.value.field == field
 
 
@@ -441,13 +441,13 @@ def test_an_unknown_value_of_a_free_vocabulary_selects_nothing(catalog):
     there is no list to check it against and nothing to refuse. It selects
     nothing, which is the truthful answer."""
     for params in ({"camera": "Hasselblad"}, {"lens": "Noctilux"}, {"ext": ".tiff"}):
-        assert ids(catalog, selection(**params)) == []
+        assert ids(catalog, view(**params)) == []
 
 
 def test_no_filter_value_reaches_the_sql_text(catalog):
     """Every value is bound. The enum terms are looked up by key in a dict, so
     the only way a token becomes SQL is by being written into `ENUMS`."""
-    query = selection(camera="Cam'; DROP TABLE photo --", ext="'", root="\\", year="2025")
+    query = view(camera="Cam'; DROP TABLE photo --", ext="'", root="\\", year="2025")
     sql, params = browse.page_sql(query, None)
     assert "DROP" not in sql
     assert "Cam" not in sql
@@ -573,9 +573,9 @@ def test_a_stack_is_the_frames_membership_placed_together(bursts):
     """The grouping on screen is the stored one, frame for frame. Every tile is in
     exactly one stack, which is the property that makes a stack count a grid
     length, and a tile no assignment holds is a stack of one."""
-    stacks = grouped(bursts, selection(stack="on"))
+    stacks = grouped(bursts, view(stack="on"))
     assert len(stacks) == STACKS
-    assert stack_sets(bursts, selection(stack="on")) == {
+    assert stack_sets(bursts, view(stack="on")) == {
         frozenset(members) for members in PLACED.values()
     } | {frozenset({alone}) for alone in UNPLACED}
     assert sorted(photo_id for stack in stacks for photo_id in stack) == [
@@ -587,7 +587,7 @@ def test_a_second_body_shooting_through_a_bracket_is_its_own_stack(bursts):
     """Cam B's two frames land inside Cam A's bracket in capture order, and the
     two stacks stay two. Interleaved in the ordering is not interleaved in the
     grouping: a stack is a set of frames and never a stretch of the page."""
-    stacks = stack_sets(bursts, selection(stack="on"))
+    stacks = stack_sets(bursts, view(stack="on"))
     assert frozenset({101, 103, 106, 107}) in stacks
     assert frozenset({102, 104}) in stacks
 
@@ -597,7 +597,7 @@ def test_the_clock_no_longer_decides_what_is_one_stack(bursts):
     every window the slider used to offer made them one. This is the complaint
     ADR 0003 exists for: unrelated frames arriving in one stack, at gaps under
     any window a reader would set."""
-    stacks = stack_sets(bursts, selection(stack="on"))
+    stacks = stack_sets(bursts, view(stack="on"))
     assert frozenset({115}) in stacks
     assert frozenset({116}) in stacks
 
@@ -611,7 +611,7 @@ def test_a_tile_the_filesystem_dated_is_a_stack_of_one(bursts):
     105 sits chronologically inside Cam A's bracket, from Cam A, so it is also the
     proof that an unplaced tile does not split the stack it sits inside.
     """
-    stacks = stack_sets(bursts, selection(stack="on"))
+    stacks = stack_sets(bursts, view(stack="on"))
     for alone in UNPLACED:
         assert frozenset({alone}) in stacks
     assert frozenset({101, 103, 106, 107}) in stacks
@@ -621,7 +621,7 @@ def test_two_frames_from_an_unnamed_camera_can_share_a_stack(bursts):
     """`camera` is NULL for a body that recorded no name, and the walk read the
     two of them as the same photograph. Nothing about the grouping needs the
     camera to have a name, because nothing here groups by camera."""
-    stacks = stack_sets(bursts, selection(stack="on"))
+    stacks = stack_sets(bursts, view(stack="on"))
     assert frozenset({110, 111}) in stacks
     assert frozenset({112}) in stacks
 
@@ -636,10 +636,10 @@ def test_a_filter_shrinks_a_stack_and_never_splits_it(bursts):
     splits" means, asserted over the filters rather than only for the one that
     demonstrates it.
     """
-    whole = stack_sets(bursts, selection(stack="on"))
+    whole = stack_sets(bursts, view(stack="on"))
     assert frozenset({101, 103, 106, 107}) in whole
 
-    filtered = stack_sets(bursts, selection(stack="on", ext=".jpg"))
+    filtered = stack_sets(bursts, view(stack="on", ext=".jpg"))
     assert frozenset({101, 103, 107}) in filtered
     # The bracket is still one stack, so removing a member removed a tile and no
     # stack: one fewer frame on screen, the same number of stacks.
@@ -647,7 +647,7 @@ def test_a_filter_shrinks_a_stack_and_never_splits_it(bursts):
 
     for narrowing in ({"ext": ".jpg"}, {"camera": "Cam A"}, {"orient": "landscape"},
                       {"ext": [".jpg", ".png"]}, {"dated": "exif"}):
-        for stack in stack_sets(bursts, selection(stack="on", **narrowing)):
+        for stack in stack_sets(bursts, view(stack="on", **narrowing)):
             assert any(stack <= every for every in whole), narrowing
 
 
@@ -655,8 +655,8 @@ def test_a_filter_shrinks_a_stack_and_never_splits_it(bursts):
 def test_every_sort_groups_the_same_tiles(bursts, name):
     """Membership is a property of the photographs, so it cannot depend on what
     the page is ordered by. Only which member is drawn first does."""
-    query = selection(stack="on", sort=name)
-    assert stack_sets(bursts, query) == stack_sets(bursts, selection(stack="on"))
+    query = view(stack="on", sort=name)
+    assert stack_sets(bursts, query) == stack_sets(bursts, view(stack="on"))
     assert len(grouped(bursts, query)) == STACKS
 
 
@@ -664,18 +664,18 @@ def test_the_assignment_lists_a_stacks_members_in_the_pages_order(bursts):
     """`assignment_sql` returns rows in the sort's order, so the first member of
     a stack to appear is where the stack sits: the newest frame on `newest` and
     the oldest on `oldest`."""
-    newest = {stack[0]: stack for stack in grouped(bursts, selection(stack="on"))}
+    newest = {stack[0]: stack for stack in grouped(bursts, view(stack="on"))}
     assert newest[107] == [107, 106, 103, 101]
     oldest = {
-        stack[0]: stack for stack in grouped(bursts, selection(stack="on", sort="oldest"))
+        stack[0]: stack for stack in grouped(bursts, view(stack="on", sort="oldest"))
     }
     assert oldest[101] == [101, 103, 106, 107]
 
 
-def test_a_selection_holding_nothing_has_no_stacks(bursts):
+def test_a_view_holding_nothing_has_no_stacks(bursts):
     """The count pane's first number is the assignment's length, and a count pane
     cannot print NULL."""
-    assert grouped(bursts, selection(stack="on", ext=".nothing")) == []
+    assert grouped(bursts, view(stack="on", ext=".nothing")) == []
 
 
 def test_only_the_assignment_the_grid_names_is_read(bursts, monkeypatch):
@@ -689,7 +689,7 @@ def test_only_the_assignment_the_grid_names_is_read(bursts, monkeypatch):
         "STACK_SETTING",
         {**browse.STACK_SETTING, "strictness": 25, "linkage": "neighbour", "ceiling": 900},
     )
-    stacks = grouped(bursts, selection(stack="on"))
+    stacks = grouped(bursts, view(stack="on"))
     assert len(stacks) == len(BURSTS)
     assert all(len(stack) == 1 for stack in stacks)
 
@@ -698,17 +698,17 @@ def test_stacking_is_a_mode_and_not_a_measurement(bursts):
     """There is no window to send: two requests either stack or do not, so a memo
     keyed on the query has two keys and not eleven -- and dropping the mode makes
     them one, which is what the tile count wants."""
-    assert selection(stack="on") != selection()
-    assert selection(stack="on").stack is True
-    assert selection().stack is False
-    assert selection(stack="on").unstacked() == selection()
-    unstacked = selection()
+    assert view(stack="on") != view()
+    assert view(stack="on").stack is True
+    assert view().stack is False
+    assert view(stack="on").unstacked() == view()
+    unstacked = view()
     assert unstacked.unstacked() is unstacked
 
 
-def test_stacking_does_not_change_which_tiles_are_selected(bursts):
+def test_stacking_does_not_change_which_tiles_are_in_view(bursts):
     """The grouping is over the filtered set and never narrows it."""
-    for query in (selection(), selection(stack="on")):
+    for query in (view(), view(stack="on")):
         assert counted(bursts, query) == len(BURSTS)
         assert sorted(ids(bursts, query)) == [row[0] for row in BURSTS]
 
@@ -720,7 +720,7 @@ def test_a_malformed_stack_value_is_refused_by_name(value):
     """`on` and nothing else. A client still sending seconds is a client that
     thinks it is choosing the grouping, so it is told rather than humoured."""
     with pytest.raises(browse.BadFilter) as raised:
-        selection(stack=value)
+        view(stack=value)
     assert raised.value.field == "stack"
 
 
@@ -729,7 +729,7 @@ def test_no_part_of_the_setting_reaches_the_sql_text(bursts):
     the grouping SQL is one string and the setting is five parameters in front of the
     filter's own -- in the order the join names the columns in, which is why the join
     is generated from the same mapping."""
-    sql, params = browse.assignment_sql(selection(stack="on", ext=".jpg"))
+    sql, params = browse.assignment_sql(view(stack="on", ext=".jpg"))
     assert "stack_member" in sql
     assert sql.count("?") == len(params)
     for column, value in browse.STACK_SETTING.items():
