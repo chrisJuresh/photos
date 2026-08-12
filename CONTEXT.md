@@ -37,13 +37,11 @@ _Avoid_: slide, item, member
 **Cover**:
 The single member of a stack the grid draws when the stack is closed — the member with the
 most people in it, and among the members tied at the top the sharpest frame of its
-middle-exposure third. It is the frame that shows *who* is in the stack, which is the point
-of it rather than a nicety: a stack holds one subject, so the member that contains everybody
-in it is the one worth drawing. Chosen from the members present in the current view, never
-fixed in advance — so narrowing the view can change which frame a stack draws without
-changing what the stack holds, and can change who the cover shows and not only how it is
-exposed. It is the first frame of its stack only about a quarter of the time, which is why
-the overlay marks which one it was.
+middle-exposure third. It is the frame that shows *who* is in the stack. Chosen from the
+members present in the current view, never fixed in advance — so narrowing the view can change
+which frame a stack draws without changing what the stack holds, and can change who the cover
+shows and not only how it is exposed. It is the first frame of its stack only about a quarter
+of the time, which is why the overlay marks which one it was.
 _Avoid_: representative (that word is taken — see below), thumbnail, hero, key photo
 
 **Deck**:

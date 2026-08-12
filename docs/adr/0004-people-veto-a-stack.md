@@ -15,12 +15,16 @@ only ever split, and the member that contains everybody becomes the cover.
 
 ADR 0003's binding number was precision and it bought it with strictness 20. Asked to browse
 the shipped grid the reader reported the opposite complaint — nothing wrongly stacked, and too
-much left apart — which is what moved the floor to 85%. Loosening the dial makes the one
-failure 0003 could not fix about three times worse: a thirteen-frame set the reader kept six
-frames of and evicted seven from carries 50 of 160 wrongly-stacked mentions at strictness 20
-and 54 at strictness 5, with the strongest wrong pair scoring 256 points. No threshold reaches
-it, because the frames are the same scene from the same place and **the difference between the
-ones the reader kept and the ones they evicted is who is in them.**
+much left apart — which is what moved the floor to 85%. Loosening the dial pays for that in
+false merges, roughly two and a half times as many across the labelled population: 160
+wrongly-stacked mentions at strictness 20 against 415 at strictness 5.
+
+**One of them is not the dial's to fix.** A thirteen-frame set the reader kept six frames of
+and evicted seven from carries 50 of those 160 mentions at strictness 20 and 54 at strictness
+5, with the strongest wrong pair scoring 256 points — so nearly a third of the damage at the
+tight setting is one set, and loosening barely touches it. No threshold reaches it, because
+the frames are the same scene from the same place and **the difference between the ones the
+reader kept and the ones they evicted is who is in them.**
 
 This is also what the corrected definition of a stack asks for. A stack is *the photographs of
 one subject you only need to see one of*; the composition need not match and the subject may
@@ -46,7 +50,8 @@ The rule the example actually describes is **nesting**: `{A,B,C,D}` contains `{A
 ## The rule
 
 **Nesting.** A stack needs one member whose people are a superset of every other member's
-people. That member is the stack's cover by construction.
+people. That member holds the most people in the stack, so the cover rule below draws it or
+one of the frames tied with it.
 
 **Subset of the cover, and not a strict chain.** The members need not form a chain of
 containments among themselves; they need only all fit inside one of them. So `{A,B}`, `{A,C}`
@@ -91,9 +96,9 @@ compose instead of fight, and it is why the people pass runs two detectors rathe
 
 **A prominence floor exists and is measured, not picked.** Somebody counts only above some
 share of the frame, or a person forty metres away in the background of one frame of a bracket
-would split it. The value is settled from the reader's own friend-or-stranger answers rather
-than chosen — #54 is that measurement — and until then it is provisional at roughly a tenth of
-the frame's height.
+would split it. The value is settled by a later ticket from the reader's own friend-or-stranger
+answers rather than chosen, and until then it is provisional at roughly a tenth of the frame's
+height.
 
 **A stranger never counts.** A person the reader has marked as a stranger is somebody who
 appears in their photographs without having been photographed, and is excluded from every

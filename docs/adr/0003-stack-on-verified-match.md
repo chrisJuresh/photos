@@ -278,12 +278,10 @@ reason. `python -m harness.calibrate` prints the whole sweep, the frontier, and 
 labelled cases every setting gets wrong.
 
 > **The floor was 95% and is 85%.** Precision remains a floor and not a ranking, and the
-> reasoning above is why. What the value was set at is what "The objective changed" at the end
-> of this document revises, and strictness 20 is what the old value bought: the reader browsed
-> the shipped result, reported seeing no wrongly-stacked photographs at all, and reported that
-> the pre-#29 time-window grouping was better. Both readings say the floor sat far above where
-> they wanted it, and that the recall it was paid for is the complaint. The setting itself does
-> not move here — it is re-chosen from a fresh round of labels under the new floor.
+> reasoning above is why. Only the value moved, and strictness 20 is what the old one bought:
+> "The objective changed" at the end of this document is the revision and the evidence for it.
+> The setting itself does not move there — it is re-chosen from a fresh round of labels under
+> the new floor.
 
 ### Complete linkage does need softening — the answer is yes
 
@@ -528,21 +526,23 @@ these concentration figures — and they must not be quoted against each other.
 
 **The one case no dial reaches.** A thirteen-frame set the reader kept six frames of and
 evicted seven from carries 50 of the 160 wrongly-stacked mentions at strictness 20, with the
-strongest wrong pair scoring 256 points. It is barely better at strictness 5, at 54, because
-the threshold is not what is wrong with it. This is the set "What the labels settled" already
-names as one the geometry cannot tell apart, and it is the case the people rule exists for:
-the difference between the frames the reader kept and the frames they evicted is who is in
-them. [ADR 0004](0004-people-veto-a-stack.md) is judged against it.
+strongest wrong pair scoring 256 points. Loosening the dial to 5 barely moves it, to 54 — it
+gets slightly worse where the population as a whole gets much worse, because the threshold is
+not what is wrong with it. This is the set "What the labels settled" already names as one the
+geometry cannot tell apart, and it is the case the people rule exists for: the difference
+between the frames the reader kept and the frames they evicted is who is in them.
+[ADR 0004](0004-people-veto-a-stack.md) is judged against it.
 
 **The caveat, beside the numbers rather than under them.** Every figure in this section is
 **pairwise and linkage-free** — a threshold applied to pairs, with no walk and no stack — and
 its label scoping is slightly wider than the harness's own, because it does not cut the scope
-at the run boundary. That last difference is why the kept-pair count here is 3,730 where the
-screen sweep above says 3,727. These figures are indicative, they are what the change of
-objective was decided on, and they are not a report about the grid: the ticket that
-recalibrates re-derives them through the harness's report, which reads `membership.link` and
-therefore describes what the grid actually draws.
+at the run boundary. So the kept-pair count here is 3,730 where the screen sweep above says
+3,727 over the same 60 answers; the two are not the same query and are not expected to agree
+to the pair. These figures are indicative, they are what the change of objective was decided
+on, and they are not a report about the grid: the ticket that recalibrates re-derives them
+through the harness's report, which reads `membership.link` and therefore describes what the
+grid actually draws.
 
-They are also reproducible from the two databases and from nothing in this repository — a
-read-only query over `E:\photolib\catalog.sqlite3` and `E:\photolib\labels.sqlite3` — which
-is why they are written down here rather than asserted in a test.
+They are also reproducible from the catalog and the labels file on the NVMe, read-only, and
+from nothing in this repository — which is why they are written down here rather than asserted
+in a test.
