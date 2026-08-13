@@ -444,25 +444,32 @@ open `archive/v1/docs/` when you need the detail behind a finding.
 
 ## Repository etiquette
 
-- Default branch is `main`. Branch before committing.
-- **Commit and push at the end of every request, without being asked.** Once the work is
-  finished and verified, stage it, commit it with a message describing what changed, and push
-  the working branch. Do not wait for permission; do not leave a finished change uncommitted.
-  Never commit media, database, or vault state — rule 5 above still applies, so check
-  `git status` before staging rather than reaching for `git add -A`. If nothing changed, say so
-  and skip the commit.
-- **One writer, one branch, one working tree.** Two writers in this tree share an index and a
+- **Work merges through `development`.** `main` is the default branch on GitHub and the
+  release branch; nothing is PR'd into it directly.
+- **One change, one worktree, one branch, one merged PR. Nothing is ever written in the main
+  checkout** — not a one-line fix, not a typo. A committed `PreToolUse` hook
+  (`.claude/hooks/worktree-guard.py`) denies it, and `/worktree-per-change` is the protocol.
+  There is no contention check to run first: two writers in one tree share an index and a
   `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
-  means anything. **Check before you build, every time** — `list_sessions` for another running
-  session whose `cwd` is this checkout, `git status --porcelain` for work you did not make.
-  Neither: work in place, which is the common case and keeps the diff where the operator is
-  already looking. Either: take a worktree, added with `git worktree add` and then **entered
-  with `EnterWorktree`** so reaching back into this tree is refused rather than merely
-  discouraged. "Pick your tree" in `docs/agents/issue-tracker.md` is the check, and a committed
-  `PreToolUse` hook enforces it — a write to this checkout is denied once another session holds
-  it. Leave the worktree standing until its branch merges, **never stash while another session
-  is live** (`refs/stash` is one stack for the whole repository, worktrees included), and
-  **never restore a `HEAD` you moved by accident** — say what you ran and stop.
+  means anything, and the only rule that reliably prevents that is one with no exception in it.
+
+  ```bash
+  git worktree add .claude/worktrees/<name> -b <short-slug> origin/development
+  ```
+
+  Then **enter it with `EnterWorktree`**, not `cd` — entering is what makes reaching back into
+  the main checkout refused rather than merely discouraged. A bare `EnterWorktree` cuts from
+  `main`, which is the wrong base here.
+- **Land the change at the end of every request, without being asked.** Stage the paths you
+  changed by name (`git status` first — never `git add -A`, and never commit media, database or
+  vault state; rule 5 above still applies), commit, then `git push -u origin HEAD`,
+  `gh pr create --base development --fill`, `gh pr merge --squash`. Do not wait for permission,
+  and do not leave a finished change on a local branch. If nothing changed, say so and skip it.
+- Leave the worktree standing until its PR merges and name the path in your reply. The hook
+  denies further edits in a worktree whose PR has merged: the next change takes a new one.
+- **Never stash** — `refs/stash` is one stack for the whole repository, worktrees included, so
+  a push here renumbers every other tree's entries. Commit instead. And **never restore a
+  `HEAD` you moved by accident** — say what you ran and stop.
 - Reference `archive/v1/` findings by their stable IDs (`F31`, `W05`) when they motivate a decision.
 - `archive/v1/` files are reference material: cite them as `archive/v1/media_vault/db.py:506`.
 
