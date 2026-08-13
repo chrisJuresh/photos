@@ -12,9 +12,10 @@ repository root is the thing that runs: the grid and triage website, and the sch
   `migrate`, `triage` and `reveal` from `photolib`; the arrow never points the other way.
 - `archive/v1/` is the previous implementation, kept as **read-only reference**. Read it
   freely; do not edit it, refactor it, or fix its bugs.
-- `harness/` is the labelling harness, **scaffolding with a stated end of life**: it settles
-  the strictness threshold and is deleted whole once the grid ticket lands. Same one-way
-  arrow as `archive/pipeline/`.
+- `harness/` is the labelling harness and the reports over it — **a standing tool, not
+  scaffolding**. It was written to settle the strictness threshold once and it stays, because
+  recalibrating the grid against the reader's taste turned out to be a recurring need. Same
+  one-way arrow as `archive/pipeline/`: it reads `photolib`, `photolib` never reads it.
 - **`Open Photo Vault.cmd`** at the root is the double-click launcher for the website.
 
 ## Hard rules
@@ -229,18 +230,26 @@ against a median of 5 beyond two minutes.
 python -m photolib.matches
 ```
 
-To judge those Matches — the **labelling harness** ADR 0003 says strictness will be settled
-by. It shows one candidate stack at a time with the frame before and after it, which is what
+To judge those Matches — the **labelling harness**, which is where strictness was settled and
+where it is settled again whenever the grid stops matching the reader's taste. It shows one
+candidate stack at a time with the frame before and after it, which is what
 lets one screen answer both of the reader's complaints: *does this stack hold something that
 does not belong*, and *is it missing something that should be here*. Space accepts the stack
 as drawn, clicking a member says it does not belong, clicking a neighbour says it should have
 been included — each click is recorded as it is made — and `u` records **not sure**, which is
 an answer rather than a skip; dragging across several frames marks them together and records
-once. The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the run is on screen.
+once. **`p`, `m` and `c` say why a frame does not belong** — different people, a different
+moment, just not close enough — and the answer stores that **per frame**, so a set split for
+two reasons reads as such and the reader's instinct that people are the problem becomes a
+count. A press answers for the frames pushed out that have no reason yet, so a drag of three
+and one press covers all three; missing the key blocks nothing, and an answer given before the
+column existed reads as *reasons unknown* rather than as none given. Nothing reads the column
+yet: the ticket that prices the people rule does, and `harness.calibrate` ignores it.
+The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the run is on screen.
 `k` widens the view when the answer turns on what is past the edge, **with no ceiling** — one
 frame each side is enough for 46% of candidate stacks but only 27% of the least decisive ones,
-and every ceiling picked for it so far has been hit, so the whole run rides with the set. That
-is 3,808 frames and about 316 KB over a round's thirty sets. `g` shows the whole run and `0`
+and every ceiling picked for it so far has been hit, so the whole run rides with the set.
+`g` shows the whole run and `0`
 comes back. The frames shrink to a floor and then the box scrolls, rather than the view
 stopping. **The frame past each end of the run is drawn too**, dotted and always — the fence
 rules it out of the stack, so it is there as the reader's check that the run ended because the
@@ -249,25 +258,30 @@ the same photograph is a wrong timestamp, and nothing else on the screen could s
 answer says is bounded by what was on screen for it**, which is stored per answer and is the
 column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
 that the stack is complete. Answers go to a `labels.sqlite3` of its own beside the catalog,
-**never `state.sqlite3`**, and it is not a migrated database because a disposable table has no
-business in the shipped schema. Frames come from the substrate tree. Its one test is the
-sampling.
+**never `state.sqlite3`**, and it is not a migrated database because a table nothing shipped
+reads has no business in the shipped schema. Frames come from the substrate tree.
 
-**One run is one of ADR 0003's two rounds of thirty, and which round it is decides which sets
-are dealt.** `--strictness`, `--linkage`, `--sets` and `--round` say so, and their defaults are
-round two: strictness 20 with *matches most members*, which is what round one settled rather
-than what the ADR argued from. Round one ranked its sets by how little the Match committed to
-them; round two leads on **the chain** — how many frames single linkage would drag across a
-boundary the settled rule drew, either side of the stack and counted over every member rather
-than the first, which is where a pan or a walk between subjects shows up — and breaks ties on
-that margin. Measured over this catalog: 20 of round two's 30 sets have a chain to price, one
-of them dragging 48 frames, at margins up to 244 points where the least-decisive ranking would
-never have looked. That population is the one round one holds none of and the
-single question standing between neighbour linkage and the default; the reader is not told which
-sets those are, because that would prime the rejection the round exists to observe. Both rounds
-are still dealt out a camera at a time and in the same deterministic order, **a set an earlier
-round answered is not asked again**, and the counter counts the round in hand. Round one's
-existing answers carry over as round one with nothing re-labelled.
+**A round is one sitting bounded by the reader stopping**, and `--round` says which one it is —
+3 by default, `--strictness` and `--linkage` still saying what the sets are drawn at. **Nothing
+is generated before the reader asks for it**: the first set arrives with the page, each one
+after it is a query over numbers already in the catalog, and eight sets is a round exactly as
+two hundred is. Rounds one and two drew thirty each from wherever the Match was least decisive
+around the setting — round one on the margin, round two on **the chain**, which is how many
+frames single linkage would drag across a boundary the settled rule drew and is what priced
+neighbour linkage out. Neither sampler could ask whether the line is in the right place at all,
+so round three draws from **three bands** instead: pairs a looser dial would newly merge
+(5–19, 40% of the draw), pairs the shipped setting already merges (20–40, 40% — without them a
+round can only find missing merges and would flatter every loosening), and pairs no strictness
+reaches (under 5 or no Match row, 20% — the evidence for what the answer is if the dial is not).
+A set is banded by the least decisive pair its drawing turns on and never by its strongest, and
+above 40 is decisive and not drawn at all. The bands are **mixed rather than served in blocks**,
+because a round abandoned halfway through would otherwise be a round of one band; a band that
+runs out is said so on the console and never on the page, since telling the reader which band a
+set came from is telling them what to say about it. Sets are still dealt across the cameras and
+in the same deterministic order, **a run an earlier round answered about is not asked about
+again** — by run and not by set, so a stack redrawn a frame wider is not a fresh question — and
+the counter counts the answers given this round. Every earlier round's answers carry over with
+nothing re-labelled.
 
 ```bash
 python -m harness.label --open

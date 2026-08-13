@@ -1,9 +1,10 @@
-// The labelling harness's client. Vanilla, unbundled and deleted with the rest
-// of `harness/` — `ui/` is the website's client and this is not part of it.
+// The labelling harness's client. Vanilla and unbundled — `ui/` is the website's
+// client and this is not part of it, so it carries none of that toolchain.
 //
-// The whole sample arrives in one response, so going back to revise an answer is
-// a local move. Only recording talks to the server, and the response to that is
-// the sample again, which is what keeps the counter honest across a reload.
+// Everything the sitting has been dealt arrives in one response, so going back to
+// revise an answer is a local move. Two things talk to the server: recording an
+// answer, and asking for one more set. Both answer with the sitting again, which is
+// what keeps the counter honest across a reload.
 
 const count = document.getElementById("count");
 const about = document.getElementById("about");
@@ -16,7 +17,7 @@ let at = 0;
 // there is: a set at the end of a run has less, and one they widened earlier
 // should not leave the counter stuck above what the next set can show.
 let wanted = 1;
-const marks = new Map(); // index -> { out: Set, in: Set }
+const marks = new Map(); // index -> { out: Set, in: Set, why: Map }
 
 const beside = (set) => Math.max(set.before.length, set.after.length);
 const showing = (set) => Math.min(wanted, beside(set));
@@ -38,12 +39,25 @@ const VERDICTS = {
   unsure: "not sure",
 };
 
+// Why a frame does not belong, in the reader's own words. Three because they named
+// three, and one keystroke each — see `KEYS` — because a reason that cost a sentence
+// would stop being given. `REASONS` in label.py is the same three under the names the
+// column stores, which are the keys here.
+const WORDS = {
+  people: "different people",
+  moment: "a different moment",
+  close: "not close enough",
+};
+
 function marksFor(index) {
   if (!marks.has(index)) {
     const answer = sample.sets[index].answer;
     marks.set(index, {
       out: new Set(answer ? answer.evicted : []),
       in: new Set(answer ? answer.included : []),
+      // Reasons unknown reads as none given, which is what it is from here: an
+      // answer carried over from an earlier round has nothing to redraw.
+      why: new Map(Object.entries((answer && answer.reasons) || {})),
     });
   }
   return marks.get(index);
@@ -87,12 +101,18 @@ function frame(sha, role, marked, gap, beyond) {
 // A frame's marked state, written straight onto the element. Straight onto it
 // rather than through `draw`, because a drag paints as it goes and redrawing
 // under a held pointer would replace the elements it is dragging over.
+//
+// An evicted frame says why it was evicted the moment the reader says so, because a
+// reason recorded and not shown is a reason they cannot tell they gave.
 function paint(button, marked) {
   const { sha, role, gap, beyond } = button.dataset;
+  const reason = marksFor(at).why.get(sha);
   button.classList.toggle(role === "member" ? "marked-out" : "marked-in", marked);
   button.querySelector(".caption").textContent = marked
     ? role === "member"
-      ? "does not belong"
+      ? reason
+        ? WORDS[reason]
+        : "does not belong"
       : "should be included"
     : role === "neighbour"
       ? `${elapsed(Number(gap))} away${beyond ? " · past the run" : ""}`
@@ -217,7 +237,9 @@ function draw() {
   const answer = set.answer;
   const available = beside(set);
   about.replaceChildren(
-    `set ${at + 1} of ${sample.sets.length} · ${set.members.length} frames · `,
+    // The set's place in the sitting and no total beside it: there is nothing to be
+    // "of" until the reader stops, and a denominator would read as a quota.
+    `set ${at + 1} · ${set.members.length} frames · `,
     strong(set.camera || "unnamed camera"),
     ` · ${set.margin} points from the line of ${sample.strictness}` +
       ` under ${LINKAGES[sample.linkage] || sample.linkage} linkage · `,
@@ -264,19 +286,17 @@ function ended(set, shown) {
   return ` · the run ends ${ends.map(([side, said]) => `${side}: ${said}`).join(", ")}`;
 }
 
-// The count is the round in hand and says so. An earlier round's answers are not
-// in this sample at all -- its sets are not asked again -- so a count over every
-// answer ever given would say "thirty more are useful" to a reader who has just
-// sat down to thirty new ones.
+// The count is the round in hand and says so: how many answers the reader has given
+// this sitting. There is no second number, because there is no round size -- nothing
+// decided up front how many sets tonight holds, so "how many more are useful" has no
+// answer and saying one would invent a target the reader never set.
 function countUp() {
-  const left = Math.max(sample.useful - sample.given, 0);
   count.replaceChildren(
     strong(`round ${sample.round}`),
     " · ",
     strong(`${sample.given}`),
-    sample.given === 1 ? " judgement given · about " : " judgements given · about ",
-    strong(`${left}`),
-    left === 1 ? " more is useful" : " more are useful"
+    sample.given === 1 ? " judgement given" : " judgements given",
+    " · stop whenever you like"
   );
 }
 
@@ -298,6 +318,11 @@ async function send(unsure, advance) {
       evicted: [...mark.out],
       included: [...mark.in],
       unsure,
+      // Always an object and never left off, because this round asks: an empty one
+      // says the reader was asked and pressed nothing, which is a different fact
+      // from the missing column rounds one and two have. Only the frames still
+      // pushed out are in it -- letting go of a frame lets go of its reason.
+      reasons: Object.fromEntries([...mark.why].filter(([sha]) => mark.out.has(sha))),
     }),
   });
   if (!response.ok) {
@@ -306,34 +331,43 @@ async function send(unsure, advance) {
   }
   sample = await response.json();
   marks.delete(at); // the stored answer is the marks now
-  if (advance) step(1, true);
+  if (advance) await forward();
   else draw();
 }
 
-// The next set nobody has answered, wrapping past the end, or -1 when they all
-// are. Wrapping is what keeps the last set from being a dead end: a reader who
-// arrows past a few and then finishes the last one is sent back to the gaps
-// rather than left redrawing the set they just answered.
-function unanswered(from) {
-  const total = sample.sets.length;
-  for (let offset = 0; offset < total; offset += 1) {
-    const index = (from + offset + total) % total;
-    if (!sample.sets[index].answer) return index;
+// One more set, drawn when the reader asks for it and not before. It is the end of
+// the dealt list that asks: nothing is waiting there, so going forward past it is
+// the request.
+async function deal() {
+  said.textContent = "drawing another…";
+  const held = sample.sets.length;
+  const response = await fetch("/api/next", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!response.ok) {
+    said.textContent = `the harness could not draw another set (${response.status})`;
+    return;
   }
-  return -1;
+  sample = await response.json();
+  if (sample.sets.length === held) return finished();
+  at = sample.sets.length - 1;
+  draw();
 }
 
-// Forward past whatever is already answered, so a reader who stops and comes
-// back carries on rather than re-judging. Backwards is always one step, because
-// backwards is how an answer gets revised.
-function step(by, skipAnswered = false) {
-  if (skipAnswered) {
-    const next = unanswered(at + by);
-    if (next < 0) return finished();
-    at = next;
+// Forward is the next set dealt, or a new one off the end. Backwards is always one
+// step, because backwards is how an answer gets revised.
+async function forward() {
+  if (at < sample.sets.length - 1) {
+    at += 1;
     draw();
     return;
   }
+  await deal();
+}
+
+function step(by) {
   at = Math.min(Math.max(at + by, 0), sample.sets.length - 1);
   draw();
 }
@@ -342,7 +376,9 @@ function finished() {
   stage.replaceChildren();
   const done = document.createElement("p");
   done.className = "done";
-  done.textContent = "every set in this sample is answered. Nothing more is useful here.";
+  done.textContent =
+    "the catalog has no set left to ask about: every run either scores past the bands" +
+    " or has already been judged.";
   stage.append(done);
   about.textContent = "";
   said.textContent = "← to go back over any of them";
@@ -376,7 +412,12 @@ function held(role) {
 function setMark(button, marked) {
   const set = held(button.dataset.role);
   if (marked) set.add(button.dataset.sha);
-  else set.delete(button.dataset.sha);
+  else {
+    set.delete(button.dataset.sha);
+    // Letting go of a frame lets go of why it was pushed out. A reason attached to a
+    // frame that is back in the stack is not a fact about anything.
+    marksFor(at).why.delete(button.dataset.sha);
+  }
   paint(button, marked);
 }
 
@@ -436,10 +477,15 @@ stage.addEventListener("click", (event) => {
 const KEYS = {
   " ": () => send(false, true),
   u: () => send(true, true),
-  l: () => step(1),
+  l: () => forward(),
   h: () => step(-1),
-  ArrowRight: () => step(1),
+  ArrowRight: () => forward(),
   ArrowLeft: () => step(-1),
+  // Why the frames pushed out do not belong, one press each. See `WORDS` for the
+  // words and `why` for which frames a press answers for.
+  p: () => why("people"),
+  m: () => why("moment"),
+  c: () => why("close"),
   // Vertical for how much is on screen, horizontal for which set: `k` is up and
   // out to more of the run, `j` is down and back to less of it.
   k: () => widen(1),
@@ -455,12 +501,29 @@ const KEYS = {
   _: () => widen(-1),
 };
 
+// Why the frames pushed out of this stack do not belong. It answers for the ones
+// with no reason yet, so a drag of three and one press covers all three and a fourth
+// frame pushed out afterwards takes its own reason; when they all have one, the press
+// is a correction and answers for all of them. Recorded like a click is, because it
+// is a click's worth of thought and losing it to a stray arrow key would be the same
+// loss.
+function why(reason) {
+  const mark = marksFor(at);
+  if (!mark.out.size) {
+    said.textContent = "nothing is pushed out of this stack yet — click a frame first";
+    return;
+  }
+  const unsaid = [...mark.out].filter((sha) => !mark.why.has(sha));
+  for (const sha of unsaid.length ? unsaid : mark.out) mark.why.set(sha, reason);
+  send(false, false);
+}
+
 document.addEventListener("keydown", (event) => {
   if (!sample) return;
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.key === "Backspace") {
     event.preventDefault();
-    marks.set(at, { out: new Set(), in: new Set() });
+    marks.set(at, { out: new Set(), in: new Set(), why: new Map() });
     send(false, false);
     return;
   }
@@ -505,10 +568,13 @@ function widen(by) {
 }
 
 (async () => {
+  // The first set arrives with this response: the server draws one when the sitting
+  // has none, so opening the page is the first request and there is nothing to wait
+  // for behind it.
   sample = await (await fetch("/api/sets")).json();
   if (!sample.sets.length) {
     count.textContent = "no sets to judge";
     return;
   }
-  step(0, true);
+  step(0);
 })();

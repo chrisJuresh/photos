@@ -1,60 +1,69 @@
 """The screen where twelve anecdotes become a few hundred judgements.
 
-**This is scaffolding with a stated end of life.** `docs/adr/0003-stack-on-verified-match.md`
-leaves the reader's *strictness* -- the threshold on the Match -- unsettled on
-purpose, and says how it will be settled: a labelling harness, thrown away
-afterwards, showing candidate stacks with the frame before and after each one and
-recording merge / split / **not sure**. This is that harness. It is not part of
-the shipped website, nothing in `photolib/` imports it, no route of
-`photolib.grid` reaches it, and it is expected to be deleted whole once the grid
-ticket lands.
+**This is a standing tool.** It was written as scaffolding for the two rounds
+`docs/adr/0003-stack-on-verified-match.md` asks for, and it outlived them: the reader
+has since said that the setting those rounds settled is wrong for them, and that the
+objective it was scored against is wrong too. What replaces either is not decided
+here and is not decided in this module -- ADR 0003 records what the labels settled
+and the ticket that recalibrates amends it. What this directory now knows is that
+collecting the reader's taste is a recurring need rather than a one-off, so it keeps
+a permanent home here. It is still not part of the shipped website -- nothing in
+`photolib/` imports it and no route of `photolib.grid` reaches it, the same
+one-way arrow `archive/pipeline/` has -- but the arrow is the whole of the
+separation, and a later reader should not delete this directory on the reasoning
+this docstring used to carry.
 
 It shows one candidate stack at a time **with its neighbours**, which is what
 lets a single screen answer both of the reader's complaints at once: *does this
 stack hold something that does not belong*, and *is it missing something that
 should be here*. Accepting the stack as drawn is one keystroke, because that is
 the common case and it should cost almost nothing. Clicking a member says it does
-not belong; clicking a neighbour says it should have been included. **Not sure**
-is a first-class answer and not a skip -- the reader has said outright that some
-of these are grey, and a grey area recorded as grey is worth more than a forced
-verdict.
+not belong -- and one more keystroke says **why**, which is the reader's own three
+reasons and the count four tickets downstream turn on; clicking a neighbour says
+it should have been included. **Not sure** is a first-class answer and not a
+skip -- the reader has said outright that some of these are grey, and a grey area
+recorded as grey is worth more than a forced verdict.
 
 Which sets it shows is the point of it, and it is not the same question twice.
-**ADR 0003 asks for two rounds and they are two runs of this module**, saying on
-the command line which round they are:
+**A round is one sitting, bounded by the reader stopping**, and `--round` says
+which one it is:
 
 *Round one* drew at a provisional line, and every set was chosen for how little
 the Match committed to it, so the reader's evening landed where it moved the real
 threshold most. Its answers settled the line: strictness 20 with *matches most
 members*.
 
-*Round two* draws at that settled setting -- `DEFAULT_LINKAGE` is what the labels
-chose, not what the ADR argued from -- and goes looking for the one population
-round one could not price. Round one's five long drags are 79% of the pairs the
-reader kept together and hold not one frame they pushed out, so those labels
-cannot price a *chaining* rule's failure: a chain that walks a whole run into one
-stack scores perfectly on them. So the sets are ranked by how many frames single
-linkage would drag across a boundary the settled rule drew -- see
-`Question.chain` -- which is where a pan or a walk between subjects shows up,
-whichever side of the stack it happens on. The reader is not told which
-sets those are, because telling them would prime the rejection the round exists to
-observe.
+*Round two* drew at that settled setting and went looking for the one population
+round one could not price -- the runs a chain would walk straight through, ranked
+by `Question.chain`. It found neighbour linkage six points under the floor.
 
-Either way the sample is spread over the cameras, so a threshold calibrated on
-the body the operator shoots most does not quietly misbehave on the other four,
-and a set an earlier round already answered is not asked again.
+*Round three* asks whether the line is in the right place at all, which neither of
+the first two samplers could: both drew from wherever the Match was least decisive
+**around** the setting, so neither could show the reader a pair the line already
+merges without argument, and neither could reach a pair no strictness reaches at
+all. So the sets are drawn from **three bands** rather than from one population,
+mixed rather than served in blocks. See `SHARES`.
+
+Every round is spread over the cameras, so a threshold calibrated on the body the
+operator shoots most does not quietly misbehave on the other four, and **a run an
+earlier round has already answered about is not asked about again** -- by run and
+not by set, because a stack redrawn a frame wider is the same evening's work seen
+from a slightly different angle.
+
+**Nothing is generated before the reader asks for it.** There is no pool and no
+round size: the first set arrives on the first request, each one after it is a
+query over numbers already in the catalog, and the reader stops after eight or
+after two hundred as the time they have decides. See `Sitting`.
 
 Answers go to a `labels.sqlite3` of the harness's own, beside the catalog on the
 NVMe. **Never `state.sqlite3`**: that holds irreplaceable triage decisions and has
-its own snapshot and restore machinery, and these labels are disposable
-calibration data that will be re-derived if the descriptor changes. It is not a
-migrated database either, for the same reason -- a disposable table has no
-business in the shipped schema, so this module creates its own and `*.sqlite3` in
-`.gitignore` is what keeps it out of git. The reader's *answers* are the
-exception to all of that disposability, because an evening of them cannot be
-re-derived from anything: when this module changes the shape it writes, it
-carries them forward rather than asking for the file to be moved aside. See
-`_carry_over`.
+its own snapshot and restore machinery, and these labels are one experiment's
+record rather than the vault's. It is not a migrated database either, for the same
+reason -- a table nothing shipped reads has no business in the shipped schema, so
+this module creates its own and `*.sqlite3` in `.gitignore` is what keeps it out of
+git. The reader's answers are the one thing here that cannot be re-derived from
+anything, so when this module changes the shape it writes it carries them forward
+rather than asking for the file to be moved aside. See `_carry_over`.
 
 Frames are served from the same 1536px substrate tree the grid's overlay draws
 from, so what the reader judges is what the grid will draw. It reads the catalog
@@ -62,9 +71,12 @@ and the substrates, both on the NVMe, and never opens `G:`.
 
     python -m harness.label --open
 
-Stopping it loses nothing: every answer is committed as it is given, the sample
-is deterministic, and an answer already given comes back with its set so it can
-be revised rather than repeated.
+Stopping it loses nothing: every answer is committed as it is given. **Revising one
+is a move back through the sitting in hand** -- every set dealt tonight comes back
+with what the reader said about it, and `h` is how they reach it. A new sitting deals
+fresh sets rather than yesterday's over again, which is the trade `already` makes in
+`main`: dealing forty answered sets before the first new one is the wrong way to
+spend an evening, and a misclick is revised in the moment it is made.
 """
 
 from __future__ import annotations
@@ -75,8 +87,8 @@ import re
 import sqlite3
 import sys
 import threading
-from collections.abc import Container, Iterable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Collection, Iterable, Sequence
+from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -85,7 +97,8 @@ from photolib.config import load, substrate_path
 
 # The rule itself, which is not the harness's to own: `photolib.membership`
 # materialises the assignment and this harness judges it, so the walk both of them
-# read has to be one walk and it has to be the one that outlives this directory.
+# read has to be one walk and it has to be the shipped one -- what the reader judges
+# has to be what the grid draws, or a round measures something adjacent to it.
 # Imported by name rather than reached through the module so that `label.link` and
 # `label.LINKAGE` go on meaning what they have always meant here.
 from photolib.membership import (  # noqa: F401 -- re-exported for `harness.calibrate`
@@ -106,8 +119,8 @@ from photolib.membership import (  # noqa: F401 -- re-exported for `harness.cali
 # 20 because that is where the two populations `photolib.matches` measured start
 # to separate: pairs a second or less apart score a median of 283 and 94% of them
 # reach 20 or more, against a median of 5 beyond two minutes. Round one's answers
-# left it where it stood, so for round two the same number is the setting under
-# test rather than a guess, and `--strictness` is how a later round moves it.
+# left it where it stood and `photolib.membership` ships it, so it is the setting
+# under test rather than a guess, and `--strictness` is how a round moves it.
 STRICTNESS = 20
 
 # The rule the sets are cut with. `complete` is what ADR 0003 argued from and
@@ -116,24 +129,55 @@ STRICTNESS = 20
 # recall at once, because 224 of the pairs the reader kept together carry no Match
 # row at all and complete linkage cannot express a burst holding one.
 #
-# It is the default so that a bare run is round two -- ADR 0003 asks the second
-# round to draw at the setting the first one settled -- and `--linkage` is how a
-# round says otherwise.
+# It is the default because a round draws at the setting the grid is shipping --
+# `photolib.membership` writes this rule, so this is what the reader is complaining
+# about when they complain. `--linkage` is how a round says otherwise.
 DEFAULT_LINKAGE = "majority"
 
-# Which round this is. Round one is recorded and its answers are carried forward
-# (see `_carry_over`), so the bare run is the second of ADR 0003's two and there
-# is no third. It rides with every answer because round two's agreement is a
-# *check* on the setting round one chose and must never be pooled into the
-# evidence for it -- `harness.calibrate` is what keeps them apart.
-ROUND = 2
+# Which round this is. **A round is one sitting bounded by the reader stopping**,
+# and not a planned population: rounds one and two were thirty sets each because
+# ADR 0003 asked for that, and what the reader wants now is to label as many as
+# they like and stop when the evening is over. So this is a number that rides with
+# every answer and not a size.
+#
+# It rides with every answer because a later round's agreement is a *check* on the
+# setting an earlier one chose and must never be pooled into the evidence for it --
+# `harness.calibrate` is what keeps them apart, and it reads whatever number is in
+# the column.
+ROUND = 3
 
-# How many sets one round is worth. ADR 0003 asks for two rounds of about thirty,
-# and they are two *runs* of this harness rather than sixty sets in one sitting:
-# the second is "drawn after re-running with the first round's answers", so the
-# line has moved by then and the sample it draws is a different one. `--sets`,
-# `--strictness`, `--linkage` and `--round` are how the second round says so.
-SETS = 30
+# The three populations a round straddles, and the share of the draw each one gets.
+#
+# Rounds one and two both drew from wherever the Match was least decisive *around*
+# the setting in force. That is the right sample for moving a threshold and the
+# wrong one for asking whether the threshold is in the right place: it can only
+# ever show the reader the pairs the dial is already arguing about.
+#
+#   loosen (5-19)      Pairs a looser strictness would newly merge. **This is the
+#                      band that answers the reader's actual question** -- would
+#                      turning the dial down have fixed the complaint -- so it
+#                      takes the largest share there is to take.
+#   merged (20-40)     Pairs the shipped setting already merges. Without it a round
+#                      can only discover *missing* merges and never wrong ones,
+#                      which would flatter every loosening: a sampler that never
+#                      shows what the dial got right cannot measure what it costs.
+#                      So it takes the same share.
+#   unreachable (<5)   No Match row at all, or a Match under five. No strictness
+#                      reaches these, so they cannot price the dial -- they are
+#                      here because if the dial turns out not to be the answer,
+#                      this band is the evidence for what would be. A fifth,
+#                      because it is insurance rather than the question.
+#
+# Above 40 is decisive and is not drawn at all: a pair the Match commits to that
+# hard is not a question, whichever way the reader would answer it.
+#
+# The proportions are here rather than in the draw so that a later session can see
+# they were chosen. They are shares and not counts, because there is no round size
+# to divide up -- see `spread` for the weave that turns them into an order.
+LOOSEN = (5, 19)
+MERGED = (20, 40)
+SHARES = {"loosen": 0.4, "merged": 0.4, "unreachable": 0.2}
+BANDS = tuple(SHARES)
 
 # How many frames either side of a stack the reader may look at, and how many
 # they are shown before asking.
@@ -210,9 +254,21 @@ class Question:
     before: tuple[Near, ...]
     after: tuple[Near, ...]
     margin: int  # points between the weakest evidence and `STRICTNESS`
+    # The Match of the pair this drawing turns on -- the least decisive piece of
+    # evidence `_weakest` found, whichever side of the line it sits. It is the
+    # number `band` reads, so it is what decides which of the three populations
+    # this set is drawn as one of: a stack held together by a pair of 22 is a set
+    # the shipped setting merges, and one whose nearest neighbour scores 12 is a
+    # set a looser dial would newly merge.
+    #
+    # Zero by default, which reads as unreachable, because that is what a pair
+    # with no Match row scores and a set assembled without one has no evidence
+    # behind it either.
+    deciding: int = 0
     # How many frames of the run single linkage would keep with a member of this
     # stack that this stack does not hold, and zero where the two rules agree
-    # about every boundary around it. **This is what round two is for.**
+    # about every boundary around it. **This is what round two was for**, and it is
+    # what `rank` still orders a band's sets by.
     #
     # ADR 0003 declines neighbour linkage on an argument rather than on a
     # measurement, because round one's labels cannot price it: a chain that walks
@@ -250,6 +306,28 @@ class Question:
     # rather than about the threshold.
     outside: tuple[Near | None, Near | None] = (None, None)
 
+    @property
+    def band(self) -> str | None:
+        """Which of the three populations this set is drawn as one of, or None.
+
+        None where the Match commits to the drawing too hard for the set to be a
+        question at all. See `SHARES`.
+        """
+        return band(self.deciding)
+
+    def run(self) -> set[str]:
+        """Every frame of the run this stack sits in, as far as this set carries it.
+
+        Which is the whole run when `context` is None, and that is the default and
+        what the reader gets -- so this is the unit an earlier round's answers are
+        excluded by. See `unanswered`.
+        """
+        return (
+            set(self.members)
+            | {sha for sha, _gap in self.before}
+            | {sha for sha, _gap in self.after}
+        )
+
     def nearest(self) -> tuple[str | None, str | None]:
         """The frame each side of the stack, which is where the margin is decided."""
         return (
@@ -270,13 +348,30 @@ class Question:
         )
 
 
-def _margin(
+def band(points: int) -> str | None:
+    """Which population a Match belongs to, or None where it is not a question.
+
+    A pure function over one stored number, which is what makes the banding
+    assertable without a database or a photograph. See `SHARES` for why the
+    boundaries are where they are; a pair with no Match row arrives here as the
+    zero `match` reads it as, and lands in the band no strictness reaches.
+    """
+    if points < LOOSEN[0]:
+        return "unreachable"
+    if points <= LOOSEN[1]:
+        return "loosen"
+    if points <= MERGED[1]:
+        return "merged"
+    return None
+
+
+def _weakest(
     members: Sequence[str],
     neighbours: Iterable[str | None],
     points: Points,
     strictness: int,
-) -> int:
-    """How far the weakest thing this drawing rests on sits from the line.
+) -> tuple[int, int]:
+    """How far the weakest thing this drawing rests on sits from the line, and its Match.
 
     Two kinds of evidence and they are the reader's two complaints. A pair
     *inside* the stack barely above the line is a frame that may not belong; a
@@ -284,27 +379,41 @@ def _margin(
     a distance from `strictness`, so the least decisive of them is one number.
 
     A neighbour is judged on its weakest pair against the stack, because complete
-    linkage is what it would have had to satisfy. Floored at zero, so a neighbour
-    that agrees with every member and was split off anyway -- which the forward
-    walk can do -- reads as the coin toss it is rather than as a negative.
+    linkage is what it would have had to satisfy. The distance is floored at zero,
+    so a neighbour that agrees with every member and was split off anyway -- which
+    the forward walk can do -- reads as the coin toss it is rather than as a
+    negative.
 
     The two terms are not on the same scale and cannot be: a Match runs upwards
     without a bound, so a member pair can sit hundreds of points above the line,
     while a neighbour can only be `strictness` below it. That asymmetry is the
     truth about the distances and not a skew, and it is invisible to the ordering
     -- it only ever separates sets that are decisive either way.
+
+    The Match beside the distance is the *deciding* pair's, and it is deliberately
+    the least decisive pair's and never the stack's strongest: a burst of forty
+    identical frames scoring 300 apiece, held on to one pair of 12, is a set the
+    dial is arguing about and would otherwise be drawn as decisive. A tie between
+    two equally close pairs takes the lower Match, which is the more conservative
+    of the two bands.
     """
-    weakest = [
-        match(points, early, late) - strictness
+    inside = [
+        (match(points, early, late), 1)
         for index, early in enumerate(members)
         for late in members[index + 1 :]
     ]
-    weakest += [
-        strictness - min(match(points, neighbour, member) for member in members)
+    outside = [
+        (min(match(points, neighbour, member) for member in members), -1)
         for neighbour in neighbours
         if neighbour is not None
     ]
-    return max(min(weakest, default=0), 0)
+    # A member pair counts upwards from the line and a neighbour downwards to it,
+    # which is the whole of the sign.
+    distance, deciding = min(
+        ((sign * (found - strictness), found) for found, sign in inside + outside),
+        default=(0, 0),
+    )
+    return max(distance, 0), deciding
 
 
 def questions(
@@ -328,9 +437,10 @@ def questions(
     its own boundary with its own question.
 
     `joins` is the rule the stacks are cut with and it defaults to the one the
-    labels chose, so a bare call draws round two. The run is cut a second time by
-    single linkage -- never to draw anything, only to fill in `Question.chain`,
-    which is why every member's chain group is looked up and not just the first's.
+    labels chose, so a bare call cuts the runs the way the grid draws them. The run
+    is cut a second time by single linkage -- never to draw anything, only to fill
+    in `Question.chain`, which is why every member's chain group is looked up and
+    not just the first's.
     """
     asked: list[Question] = []
     for camera, run in runs:
@@ -365,30 +475,36 @@ def questions(
                     - set(stack)
                 ),
             )
-            asked.append(
-                replace(
-                    question,
-                    margin=_margin(stack, question.nearest(), points, strictness),
-                )
+            margin, deciding = _weakest(
+                stack, question.nearest(), points, strictness
             )
+            asked.append(replace(question, margin=margin, deciding=deciding))
     return asked
 
 
 def rank(question: Question) -> tuple:
-    """What makes a set worth the reader's time, most first.
+    """What makes a set worth the reader's time **within its band**, most first.
 
-    **The chain leads and the margin breaks its ties**, which is round two's whole
+    **The chain leads and the margin breaks its ties**, which was round two's whole
     change to the sample. Round one ranked on the margin alone and that was right
-    for the question it asked; it cannot ask this one, because the margin is a
+    for the question it asked; it could not ask round two's, because the margin is a
     distance from the line and a chaining rule's failure is not -- a run single
     linkage walks straight through can sit hundreds of points clear of the line at
     every boundary it crosses.
 
-    The margin also flattens under the rule the labels chose. `_margin` floors at
-    zero, and a stack drawn by "matches most members" may hold a pair the Match
+    The margin also flattens under the rule the labels chose. `_weakest` floors it
+    at zero, and a stack drawn by "matches most members" may hold a pair the Match
     rejected outright -- which is the whole point of the softening -- so a great
-    many stacks now sit at zero and a ranking on the margin alone would order them
-    by their shas. Leading on the chain puts a reason back in front of it.
+    many stacks sit at zero and a ranking on the margin alone would order them by
+    their shas. Leading on the chain puts a reason back in front of it.
+
+    **The band is deliberately not a term here.** A ranking that led on the band
+    would sort the whole population into blocks and serve them that way, which is
+    the one thing round three's sample must not do: an hour of nothing but
+    unreachable pairs is an hour the reader spends before seeing the question the
+    round is actually about, and a round abandoned halfway through would be a round
+    of one band. So the band is the outer weave in `spread` and this is the order
+    inside one.
 
     Ties break on the members last, so the order is total and deterministic:
     answers are keyed on the frames, and a reader who stops and comes back has to
@@ -397,77 +513,304 @@ def rank(question: Question) -> tuple:
     return (-question.chain, question.margin, question.members)
 
 
-def unanswered(asked: Sequence[Question], already: Container[str]) -> list[Question]:
-    """The sets `already` does not hold -- what an earlier round has not settled.
+def unanswered(asked: Sequence[Question], already: Collection[str]) -> list[Question]:
+    """The sets whose run holds none of `already` -- what no round has judged yet.
 
-    Keyed on the stack as drawn, so what is dropped is the same *question* and not
-    merely an overlapping one: round two cuts the runs with a different rule, and a
-    stack that has grown a frame since round one answered it is a claim the reader
-    has not seen. `answered_before` is where the keys come from.
+    **By run and not by set.** Keying on the stack as drawn was right while the
+    rounds differed only in which rule cut them, and it is wrong now: a round that
+    draws from a different band redraws the same run with a boundary a frame or two
+    over, so a set key would let a new round re-ask about an evening the reader has
+    already spent. What they said about that run was about those photographs, and
+    asking again from a slightly different angle buys nothing.
 
-    Only earlier rounds, never the round in hand: an answer given in this round
-    comes back with its set so it can be revised, which is what makes walking away
-    mid-round free.
+    `already` is frames, then, and `answered_before` is where they come from. A run
+    is dropped whole the moment any answer has touched any frame in it.
     """
-    return [question for question in asked if key(question.members) not in already]
+    judged = set(already)
+    return [question for question in asked if judged.isdisjoint(question.run())]
 
 
-def spread(asked: Sequence[Question], wanted: int = SETS) -> list[Question]:
-    """The sets worth asking about, taken a camera at a time.
+def spread(
+    asked: Sequence[Question], wanted: int = 1, *, drawn: Sequence[Question] = ()
+) -> list[Question]:
+    """The sets worth asking about: bands woven together, each taken a camera at a time.
 
-    `rank` decides what worth means. Round-robin over the cameras is the other
-    half of the ask: the operator shoots one body far more than the other four, so
-    a straight ranking would hand back an evening of that body alone and calibrate
-    a number that quietly misbehaves everywhere else.
+    Two interleavings over one ranked population, and `rank` decides what worth
+    means inside each cell of it.
 
-    Deterministic -- `rank` is a total order, and the cameras are ordered by their
-    own best set -- because answers are keyed on the frames and a reader who stops
-    and comes back has to be shown the same sets in the same order for the counter
-    to mean anything.
+    **The bands are the outer weave**, in `SHARES`' proportions, so a round straddles
+    the dial rather than sitting on it and the reader does not spend their first hour
+    on one kind of question. The band whose turn it is, is the one whose next set is
+    cheapest against its share -- which lands a draw of ten on four, four and two
+    without any of them needing to know that ten was coming. That matters here more
+    than it would elsewhere: there is no round size, so a rule that divided a total
+    up would have nothing to divide.
 
-    The camera order is the order their best sets appear, which is what filling the
-    queues from the ranked list already leaves behind: a dict remembers the order
-    its keys arrived in. Sorting the cameras separately would mean naming which
-    parts of `rank` decide it, and a fourth term added to `rank` later would
-    silently stop being one of them.
+    **The cameras are the inner one.** The operator shoots one body far more than the
+    other four, so a straight ranking would hand back an evening of that body alone
+    and calibrate a number that quietly misbehaves everywhere else. Within a band the
+    turn goes to the camera that has given the fewest sets so far.
+
+    `drawn` is what this sitting has already been dealt, so a draw of one continues
+    the weave rather than restarting it at the top -- which would hand the same band
+    and the same camera back on every request. Both counters read it, and it is the
+    only state the weave has.
+
+    Deterministic throughout: `rank` is a total order, and both ties -- between two
+    bands equally owed and two cameras equally quiet -- break on the order the ranked
+    list put them in, which is what a dict remembers about the keys it was given.
     """
-    queues: dict[str | None, list[Question]] = {}
+    queues: dict[str | None, dict[str | None, list[Question]]] = {}
     for question in sorted(asked, key=rank):
-        queues.setdefault(question.camera, []).append(question)
-    order = list(queues)
+        # A set above the top of the bands is not a question. See `SHARES`.
+        if question.band is not None:
+            queues.setdefault(question.band, {}).setdefault(question.camera, []).append(
+                question
+            )
 
     picked: list[Question] = []
-    while len(picked) < wanted and any(queues.values()):
-        for camera in order:
-            if queues[camera]:
-                picked.append(queues[camera].pop(0))
-                if len(picked) == wanted:
-                    break
+    dealt = list(drawn)
+    while len(picked) < wanted and queues:
+        taken = [question.band for question in dealt]
+        band = min(
+            queues,
+            key=lambda name: ((taken.count(name) + 1) / SHARES[name], BANDS.index(name)),
+        )
+        cameras = queues[band]
+        quiet = [question.camera for question in dealt if question.band == band]
+        camera = min(cameras, key=lambda name: (quiet.count(name), list(cameras).index(name)))
+
+        picked.append(cameras[camera].pop(0))
+        dealt.append(picked[-1])
+        if not cameras[camera]:
+            del cameras[camera]
+        if not cameras:
+            del queues[band]
     return picked
 
 
-def plan(
+# How many frames of a run go into one indexed lookup. The runs this fence admits
+# reach 1,435 frames and SQLite bounds how many parameters a statement may carry, so
+# the query is chunked -- a real limit at a real boundary, and not a precaution.
+BATCH = 500
+
+# How many runs one draw will cut before answering with the sets it has. It is the
+# bound that keeps a request short: without it, the first draw that wants a band the
+# catalog barely holds would search every remaining run before answering.
+#
+# 60 because a populated band needs nothing like it and the worst case is still
+# quick. Measured over this catalog: the first draw found all three bands in the first
+# run it cut, twelve draws cut nineteen runs between them, and the one draw that had
+# to cut fifteen of those took 0.058s -- so 60 is about a fifth of a second at the
+# outside, against 1,223 runs unbounded. A band the search has not reached by then is
+# not declared empty; `Sitting.draw` says what happens instead.
+SEARCH = 60
+
+
+def _walk_order(runs: Sequence[Run]) -> list[Run]:
+    """Every run, in the order a sitting searches them for sets to ask about.
+
+    A camera at a time in turn, so that the first few runs searched already hold
+    more than one body: the sets are drawn on demand, and a walk that took the
+    cameras in the order the population lists them would hand back an evening of
+    the body the operator shoots most before it reached the others at all.
+
+    Within one camera the order is the *shas'* and not the clock's, for the same
+    reason one step further in: the runs of a camera in capture order are its
+    earliest months first, and a sitting that stopped after thirty sets would have
+    labelled one season. A sha is decided by the bytes, so the order is arbitrary
+    about time and identical on every run of this harness -- which is what a reader
+    who stops and comes back needs it to be.
+    """
+    queues: dict[str | None, list[Run]] = {}
+    for run in sorted(runs, key=lambda run: run[1][0][0]):
+        queues.setdefault(run[0], []).append(run)
+    order: list[Run] = []
+    while any(queues.values()):
+        for queue in queues.values():
+            if queue:
+                order.append(queue.pop(0))
+    return order
+
+
+@dataclass
+class Sitting:
+    """The catalog's own shape, read once, and the sets drawn out of it one at a time.
+
+    **There is no pool and no plan.** The reader asks for a set and gets one; asking
+    again cuts as much of the catalog as answering that request needs and no more.
+    That is what makes a round a sitting rather than a population: nothing has to
+    decide up front how many sets the evening will hold, so eight is a round and two
+    hundred is a round.
+
+    What is read once is the catalog's *structure* -- which tiles there are, how the
+    fence cuts them into runs, and what sits just past each end of a run. That is one
+    query over the population `photolib.candidates` enumerates, so what this asks
+    about is what that pass considered: the same cut, and a pair it never called a
+    candidate is a pair with no Match here.
+
+    What is read per draw is one run's Match rows, on the primary key of
+    `pair_match`, for as many runs as the band whose turn it is takes to find --
+    `SEARCH` of them at the outside. The 3.6M-row table is never loaded whole, which
+    is the difference between a draw the reader waits for and one they do not.
+
+    **This is cutting runs inside a request, and hard rule 4 is about media work.**
+    The rule names ranking and grouping among the things that belong in a background
+    process, and the reason it does is the failure `archive/v1-docs/invariants.md`
+    records: a *website* handler that decoded, hashed or regrouped the library made
+    the page hang and took the database's write lock with it. None of that is here. A
+    draw opens no photograph, hashes nothing, copies nothing and never touches `G:`;
+    it reads integers off an index, over a read-only connection, with `state.sqlite3`
+    not even attached, and it is bounded -- measured at 13ms for the first set and
+    under a millisecond after it. The escape the rule offers, "enqueue a job", has
+    nothing to offer a single reader at a keyboard whose next set *is* the answer to
+    the keystroke they just pressed: a job would be a queue with one item in it and a
+    page waiting on it. So the draw stays in the request, and it stays small.
+
+    `already` is the frames every earlier answer was about, and it is dropped before
+    anything is banded -- so a run the reader has judged is never searched twice. It
+    comes from the labels database, which this class is deliberately not given: the
+    catalog is the only thing it opens.
+    """
+
+    conn: sqlite3.Connection
+    order: list[Run]  # every run, in `_walk_order`'s order
+    ends: dict[str, tuple[Near | None, Near | None]]  # by a run's first frame
+    already: Collection[str]
+    # The setting the sets are drawn at and the method they are read under. Required
+    # rather than defaulted, because `sitting` states those defaults and two
+    # statements of one default are one drift away from disagreeing.
+    strictness: int
+    linkage: str
+    method: str
+    version: str
+    context: int | None
+    at: int = 0  # how far through `order` the search has got
+    # The sets cut so far and not yet dealt, and the ones dealt. Both grow with the
+    # sitting and neither is generated ahead of it.
+    pool: list[Question] = field(default_factory=list)
+    drawn: list[Question] = field(default_factory=list)
+    # The bands the runs have been searched through for, and which held nothing. A
+    # band is reported dry once, to the console and never to the page: which band a
+    # set came from is exactly the thing that would prime the reader, for round two's
+    # reason -- being told a set is one no strictness reaches is being told what to
+    # say about it.
+    dry: set[str] = field(default_factory=set)
+
+    def draw(self) -> Question | None:
+        """One set to judge, or None when the catalog has no question left.
+
+        Every band that still has something to give is searched for before the weave
+        chooses between them, because otherwise the choice would be made over
+        whichever bands the search happened to reach first and `SHARES` would
+        describe the walk rather than the round.
+
+        Searched for, but only `SEARCH` runs' worth per draw: **no single request
+        pays for the whole catalog.** A band the search has not reached yet is left
+        to the next draw rather than declared empty -- the cursor keeps its place, so
+        the work is spread across draws instead of repeated -- and the weave answers
+        from what is cut. That makes the shares approximate while a band is rare and
+        exact once it is found, which is the right way round: the reader waiting is
+        worse than a proportion arriving late.
+        """
+        searched = 0
+        while (short := self._short()) and searched < SEARCH:
+            if not self._search():
+                # The runs are done, so a band with nothing cut has nothing at all.
+                # Said once, because `dry` empties `_short` for good.
+                for name in sorted(short):
+                    self.dry.add(name)
+                    print(f"the {name} band is exhausted -- drawing from the others")
+                break
+            searched += 1
+        picked = spread(self.pool, 1, drawn=self.drawn)
+        if not picked:
+            return None
+        self.pool.remove(picked[0])
+        self.drawn.append(picked[0])
+        return picked[0]
+
+    def _short(self) -> set[str]:
+        """The bands with nothing cut yet that the runs might still be holding."""
+        held = {question.band for question in self.pool}
+        return {name for name in BANDS if name not in held and name not in self.dry}
+
+    def _search(self) -> bool:
+        """Cut the next run into sets. False when there is no run left to cut."""
+        if self.at >= len(self.order):
+            return False
+        camera, run = self.order[self.at]
+        self.at += 1
+        outside = self.ends[run[0][0]]
+        asked = questions(
+            [(camera, run)],
+            self._points([sha256 for sha256, _secs in run]),
+            self.strictness,
+            self.context,
+            LINKAGE[self.linkage],
+        )
+        self.pool.extend(
+            replace(question, outside=outside)
+            for question in unanswered(asked, self.already)
+        )
+        return True
+
+    def _points(self, shas: Sequence[str]) -> Points:
+        """One run's Match rows, off the primary key of `pair_match`.
+
+        Every pair the enumeration made sits inside a run, so the pairs whose earlier
+        frame is one of these frames are exactly this run's -- `candidate_pair` does
+        not have to be read to know which they are, and a pair with no row here is a
+        pair with no evidence, as `match` reads it.
+        """
+        found: Points = {}
+        for start in range(0, len(shas), BATCH):
+            batch = shas[start : start + BATCH]
+            found.update(
+                {
+                    (early, late): count
+                    for early, late, count in self.conn.execute(
+                        "SELECT sha_early, sha_late, points FROM pair_match"
+                        " WHERE method = ? AND version = ? AND sha_early IN"
+                        f" ({', '.join('?' * len(batch))})",
+                        (self.method, self.version, *batch),
+                    )
+                }
+            )
+        return found
+
+
+def read_only(catalog_db: Path) -> sqlite3.Connection:
+    """The catalog, read-only, and usable from the server's request threads.
+
+    `photolib.candidates.catalog(read_only=True)` spelled out rather than called, for
+    one flag it has no reason to carry: a draw happens inside a request thread now,
+    because the reader asking for a set is what reads the catalog. `check_same_thread`
+    is off for `store`'s reason -- there is one reader at one keyboard and every draw
+    goes through `LabelServer`'s lock, which is what the lock is for.
+
+    Everything else about it is that function's, deliberately: the state database has
+    no name here, so "an experiment cannot reach the triage decisions" stays a fact
+    about the code, and `timeout=0` makes a writer holding the catalog a refusal
+    rather than a wait.
+    """
+    return sqlite3.connect(
+        f"{catalog_db.as_uri()}?mode=ro", uri=True, timeout=0, check_same_thread=False
+    )
+
+
+def sitting(
     conn: sqlite3.Connection,
     *,
     strictness: int = STRICTNESS,
     linkage: str = DEFAULT_LINKAGE,
-    wanted: int = SETS,
-    already: Container[str] = frozenset(),
+    already: Collection[str] = frozenset(),
     ceiling: int = candidates.CEILING,
     method: str = matches.METHOD,
     version: str = matches.VERSION,
-) -> list[Question]:
-    """The sets to ask about, read from the catalog and from nothing else.
-
-    The population and the runs are `photolib.candidates`' own, so what this asks
-    about is what that pass enumerated: the frames are cut into runs the same way
-    and a pair it never considered a candidate is a pair with no Match here.
-
-    `already` is what an earlier round settled and is dropped before the sample is
-    taken, so a round of thirty is thirty *new* questions rather than thirty minus
-    what the reader has seen. It comes from the labels database, which this
-    function is deliberately not given: the catalog is the only thing it opens.
-    """
+    context: int | None = CONTEXT,
+) -> Sitting:
+    """A sitting over one catalog: its runs, and where each one ends."""
     frames = candidates.population(conn)
     camera_of = {sha256: camera for camera, _secs, _kind, sha256 in frames}
     taken = {sha256: secs for _camera, secs, _kind, sha256 in frames}
@@ -475,17 +818,6 @@ def plan(
         (camera_of[run[0]], [(sha256, taken[sha256]) for sha256 in run])
         for run in candidates.runs(frames, ceiling)
     ]
-    points: Points = {
-        (early, late): count
-        for early, late, count in conn.execute(
-            "SELECT sha_early, sha_late, points FROM pair_match WHERE method = ? AND version = ?",
-            (method, version),
-        )
-    }
-    asked = spread(
-        unanswered(questions(runs, points, strictness, joins=LINKAGE[linkage]), already),
-        wanted,
-    )
 
     # The frame just past each end of every run. The run is where the context
     # stops, and from inside the harness a run that ended looks exactly like a
@@ -505,10 +837,17 @@ def plan(
             if last + 1 < len(frames) and frames[last + 1][0] == camera
             else None,
         )
-    heads = {sha256: run[0][0] for _camera, run in runs for sha256, _secs in run}
-    return [
-        replace(question, outside=ends[heads[question.members[0]]]) for question in asked
-    ]
+    return Sitting(
+        conn,
+        _walk_order(runs),
+        ends,
+        already,
+        strictness=strictness,
+        linkage=linkage,
+        method=method,
+        version=version,
+        context=context,
+    )
 
 
 # --- what the reader answers --------------------------------------------------
@@ -546,8 +885,24 @@ def key(members: Sequence[str]) -> str:
     return ",".join(members)
 
 
-# Not a migration. A disposable table has no business in the shipped schema, so
-# this is created by the harness that owns it and goes when the harness does.
+# The three reasons a frame can be wrong in a stack, in the reader's own words:
+# **different people**, **a different moment**, and **just not close enough**. They
+# are three because the reader named three, and because one keystroke each is the
+# most a reason can cost before recording it starts competing with labelling at all.
+#
+# The first of them is why the column exists: the reader's instinct is that people
+# are the problem, four tickets downstream turn on whether that is true, and nothing
+# in this table could tell "the wrong people are in it" from "this is a different
+# photograph" until now. So the size of the people problem was unknowable, and it
+# becomes a count.
+#
+# Nothing reads this yet. `harness.calibrate` ignores it on purpose -- a reason is
+# not evidence about a threshold -- and the ticket that prices the people rule is
+# what reads it.
+REASONS = ("people", "moment", "close")
+
+# Not a migration. A table nothing shipped reads has no business in the shipped
+# schema, so this is created by the harness that owns it.
 # `margin` and `camera` ride along with the answer because reading the labels
 # afterwards means asking how the verdicts fell across the grey band and across
 # the bodies, and neither question can be re-derived once the sample has moved.
@@ -559,16 +914,28 @@ def key(members: Sequence[str]) -> str:
 # not contradicting them, and a report that scored it as an error would be
 # measuring the width of this window rather than the threshold.
 #
-# **`round` says which of ADR 0003's two rounds asked**, and it is the column
-# `harness.calibrate` splits on: round one's answers are the evidence the setting
-# was chosen from and round two's are a check on it, so pooling them would let the
-# check vote for the thing it is checking.
+# **`round` says which round asked**, and it is the column `harness.calibrate`
+# splits on: the earliest round's answers are the evidence a setting is chosen from
+# and every later round's are a check on it, so pooling them would let the check vote
+# for the thing it is checking.
 #
-# It is last, and defaulted, because a database written before rounds existed gains
-# it by `ALTER TABLE` -- which can only append -- and the migrated shape and the
-# fresh one should be the same shape. The default is 1 for the same reason: every
-# answer that predates the column is round one's, since round one is all that had
-# run. See `_carry_over`.
+# **`reasons` says why each evicted frame does not belong**, as a JSON object keyed
+# by sha256 -- per frame and never per set, because a stack split for two different
+# reasons is a fact about which frames, and a reason recorded against the set would
+# throw that away. `evicted` keeps its own shape beside it, a plain array, so every
+# answer rounds one and two wrote reads exactly as it always did.
+#
+# It is **nullable, and that is the point**: NULL is *reasons unknown*, which is
+# every answer given before the column existed, and it is not the same fact as an
+# empty object -- which is a reader who was asked and pressed nothing. A count of
+# the people problem that read the first as the second would be counting silence as
+# a denial.
+#
+# Both are last, and `round` is defaulted, because a database written before them
+# gains them by `ALTER TABLE` -- which can only append -- and the migrated shape and
+# the fresh one should be the same shape. `round`'s default is 1 for the same reason
+# the column exists: every answer that predates it is round one's, since round one
+# is all that had run. See `_carry_over`.
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS answer (
   members     TEXT PRIMARY KEY,  -- the stack as drawn, comma-joined. See `key`.
@@ -579,16 +946,19 @@ CREATE TABLE IF NOT EXISTS answer (
   evicted     TEXT NOT NULL,     -- JSON: members the reader said do not belong
   included    TEXT NOT NULL,     -- JSON: neighbours the reader said should be in
   answered_at TEXT NOT NULL DEFAULT (datetime('now')),
-  round       INTEGER NOT NULL DEFAULT 1
+  round       INTEGER NOT NULL DEFAULT 1,
+  reasons     TEXT               -- JSON: sha256 -> one of `REASONS`, or NULL
 )
 """
 
 _ROUND_COLUMN = "ALTER TABLE answer ADD COLUMN round INTEGER NOT NULL DEFAULT 1"
 
+_REASONS_COLUMN = "ALTER TABLE answer ADD COLUMN reasons TEXT"
+
 _RECORD = """
 INSERT OR REPLACE INTO answer
-  (members, camera, surrounding, margin, verdict, evicted, included, round)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  (members, camera, surrounding, margin, verdict, evicted, included, round, reasons)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -603,12 +973,14 @@ def _carry_over(conn: sqlite3.Connection) -> str | None:
     """Bring answers written under an older shape of this table into the current one.
 
     Not a migration framework and not the start of one -- this converts the shapes
-    this harness itself wrote, and goes with the directory. It is here because it
-    is **exact** both times. The oldest table stored `before_sha` and `after_sha`,
-    which is precisely what was on screen when the view was one frame either side.
-    The next one stored no round, and every answer in it is round one's, because
-    round one is all that had run when it was written -- so the reader keeps an
-    evening of answers without re-labelling a set.
+    this harness itself wrote, and it is **exact** every time. The oldest table
+    stored `before_sha` and `after_sha`, which is precisely what was on screen when
+    the view was one frame either side. The next stored no round, and every answer in
+    it is round one's, because round one is all that had run when it was written. The
+    next stored no reasons, and every answer in it has reasons *unknown* rather than
+    absent, which is what a NULL column says on its own -- so the sixty answers
+    rounds one and two hold are still evidence and are still not a denial that people
+    are the problem.
 
     The alternative was refusing and asking the reader to move the file aside,
     which is what this did first. That is the wrong trade: their answers are the
@@ -619,13 +991,20 @@ def _carry_over(conn: sqlite3.Connection) -> str | None:
     if not columns:
         return None
     if "surrounding" in columns:
-        # The current shape but for the round, which every answer already in it
-        # answers by existing: round one is all that had run.
-        if "round" in columns:
+        # The current shape but for the columns appended to it since, each of which
+        # every answer already in the table answers by existing: round one is all
+        # that had run, and nothing asked why.
+        gained = []
+        if "round" not in columns:
+            conn.execute(_ROUND_COLUMN)
+            gained.append("round one")
+        if "reasons" not in columns:
+            conn.execute(_REASONS_COLUMN)
+            gained.append("reasons unknown")
+        if not gained:
             return None
-        conn.execute(_ROUND_COLUMN)
         (stamped,) = conn.execute("SELECT count(*) FROM answer").fetchone()
-        return f"carried {stamped} answer(s) forward as round one"
+        return f"carried {stamped} answer(s) forward as {' and '.join(gained)}"
 
     conn.execute("BEGIN")
     conn.execute("ALTER TABLE answer RENAME TO answer_before_widening")
@@ -688,6 +1067,7 @@ def record(
     included: Sequence[str],
     unsure: bool,
     round: int,
+    reasons: dict[str, str] | None = None,
 ) -> str:
     """File one answer, replacing whatever the reader said about it before.
 
@@ -701,6 +1081,11 @@ def record(
     `round` is the round in hand and is not defaulted, because an answer that did
     not say which round asked it cannot be told from the evidence it is meant to
     be checking.
+
+    `reasons` is why each evicted frame does not belong, keyed by the frame. It
+    defaults to None -- *unknown* -- rather than to an empty object, because that is
+    what a caller that cannot collect them is saying, and the two are different
+    facts. See `SCHEMA`.
     """
     given = verdict(evicted=evicted, included=included, unsure=unsure)
     conn.execute(
@@ -714,6 +1099,7 @@ def record(
             json.dumps(list(evicted)),
             json.dumps(list(included)),
             round,
+            None if reasons is None else json.dumps(reasons),
         ),
     )
     return given
@@ -723,8 +1109,12 @@ def answers(conn: sqlite3.Connection, round: int | None = None) -> dict[str, dic
     """Every answer given, by the stack it was about.
 
     `round` narrows it to one round, which is what the counter the reader is shown
-    is about: "how many more are useful" is a question about the round in hand and
-    not about every evening they have spent here.
+    is about: how much of *this* sitting they have judged, and not how many evenings
+    they have spent here.
+
+    `reasons` comes back None where the column is NULL, which says the answer was
+    given before there was anything to press -- and never `{}`, which says the reader
+    was asked and pressed nothing.
     """
     return {
         row[0]: {
@@ -735,24 +1125,31 @@ def answers(conn: sqlite3.Connection, round: int | None = None) -> dict[str, dic
             "included": json.loads(row[4]),
             "surrounding": json.loads(row[5]),
             "round": row[6],
+            "reasons": None if row[7] is None else json.loads(row[7]),
         }
         for row in conn.execute(
-            "SELECT members, camera, verdict, evicted, included, surrounding, round"
-            " FROM answer WHERE ?1 IS NULL OR round = ?1",
+            "SELECT members, camera, verdict, evicted, included, surrounding, round,"
+            " reasons FROM answer WHERE ?1 IS NULL OR round = ?1",
             (round,),
         )
     }
 
 
 def answered_before(conn: sqlite3.Connection, round: int) -> set[str]:
-    """The stacks an earlier round already settled, as `key` files them.
+    """Every frame an earlier round's answers were about.
+
+    **Frames and not set keys**, because what is not asked about again is the *run*
+    and not the stack as it happened to be drawn -- see `unanswered`. The members of
+    an answered set are enough to name its run: a run is dropped whole the moment any
+    frame of it turns up here, and every member sits in the run the set was cut from.
 
     Earlier and not merely other, which is the difference between not asking a
     question twice and not letting the reader revise the answer they just gave.
     """
     return {
-        row[0]
+        sha256
         for row in conn.execute("SELECT members FROM answer WHERE round < ?", (round,))
+        for sha256 in row[0].split(",")
     }
 
 
@@ -771,11 +1168,10 @@ SUBSTRATE_ROUTE = re.compile(r"^/d/([0-9a-f]{64})\.webp$")
 
 MAX_ANSWER_BODY = 8 * 1024
 
-# Copied from `photolib.grid` rather than imported from it, and this is the one
-# place that is the right way round: importing would leave the shipped server
-# holding a name this directory uses, and deleting `harness/` has to leave
-# nothing behind. The copy is small, it is checked against the original whenever
-# either moves, and the whole of it goes at once.
+# Copied from `photolib.grid` rather than imported from it, because the arrow this
+# package keeps points one way and a shared constant is a shared name: the shipped
+# server must not hold anything this directory reaches for. The copy is small and is
+# checked against the original whenever either moves.
 SECURITY_HEADERS = (
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "no-referrer"),
@@ -800,7 +1196,7 @@ class LabelServer(ThreadingHTTPServer):
         self,
         address,
         handler,
-        asked: list[Question],
+        drawing: Sitting,
         labels,
         substrate_root,
         *,
@@ -808,7 +1204,14 @@ class LabelServer(ThreadingHTTPServer):
         strictness: int = STRICTNESS,
         linkage: str = DEFAULT_LINKAGE,
     ):
-        self.asked = asked
+        self.drawing = drawing
+        # The sets this sitting has been dealt, which is the sampler's own list and
+        # not a copy of it: a set is dealt by being drawn, and going back to revise
+        # one is going back through this. Nothing ahead of it exists.
+        self.dealt = drawing.drawn
+        # Whether the catalog has been asked for a set and had none left. Held rather
+        # than re-derived, because finding out costs a search of the runs.
+        self.spent = False
         self.labels = labels
         self.substrate_root = substrate_root
         # The round in hand and the setting it is drawn at. Held here rather than
@@ -838,21 +1241,40 @@ class LabelServer(ThreadingHTTPServer):
             record(self.labels, question, round=self.round, **marks)
             return self._payload()
 
-    def payload(self) -> dict:
+    def deal(self) -> dict:
+        """Draw one more set, and hand back the sitting with it on the end.
+
+        Under the same lock as a write, because the draw reads the catalog and
+        appends to the list every other request reads.
+        """
         with self._lock:
-            return self._payload()
+            return self._deal()
+
+    def payload(self) -> dict:
+        """The sitting, dealing its first set if it has none.
+
+        So opening the page is the first request and there is nothing behind it to
+        wait for -- see `Sitting`, which is where "nothing before it is asked for"
+        is arranged.
+        """
+        with self._lock:
+            return self._deal() if not self.dealt else self._payload()
+
+    def _deal(self) -> dict:
+        if self.drawing.draw() is None:
+            self.spent = True
+        return self._payload()
 
     def _payload(self) -> dict:
-        """The whole sample, with whatever the reader has already said about it.
+        """Everything this sitting has been dealt, with what the reader said about it.
 
-        All of it at once: thirty sets of shas is a few tens of kilobytes, and
-        sending it whole is what makes going back to revise an answer a local
-        move rather than a round trip.
+        All of it at once rather than the set in hand: going back to revise an answer
+        is then a local move, and the sets are shas -- a long evening of them is a few
+        tens of kilobytes.
 
-        The answers are this round's, so the counter counts the round in hand. An
-        earlier round's answers are not in the sample anyway -- `unanswered` drops
-        their sets before it is taken -- and saying so here as well is what keeps
-        "how many more are useful" a question about this sitting.
+        The answers are this round's, so the counter counts the round in hand rather
+        than every evening the reader has spent here. An earlier round's are not
+        drawable anyway: `unanswered` drops their runs before anything is banded.
         """
         given = answers(self.labels, self.round)
         sets = [
@@ -874,7 +1296,11 @@ class LabelServer(ThreadingHTTPServer):
                 "margin": question.margin,
                 "answer": given.get(key(question.members)),
             }
-            for question in self.asked
+            # Which band each set came from is deliberately not here. It is the one
+            # thing that would prime the reader -- being told a set is one no
+            # strictness reaches is being told what to say about it -- and round two
+            # withheld which sets were its chain cases for the same reason.
+            for question in self.dealt
         ]
         return {
             "sets": sets,
@@ -882,10 +1308,15 @@ class LabelServer(ThreadingHTTPServer):
             "round": self.round,
             "strictness": self.strictness,
             "linkage": self.linkage,
-            "given": sum(1 for entry in sets if entry["answer"] is not None),
-            # What is left to judge is what is left in the sample, which is
-            # ADR 0003's round of thirty unless the catalog held fewer.
-            "useful": len(sets),
+            # How many answers the reader has given this round -- every answer in it
+            # and not only tonight's, because the round is the population a report
+            # scores and "roughly where am I" is a question about that. It is the
+            # whole of the counter now: there is no round size, so there is no number
+            # of sets left to be useful.
+            "given": len(given),
+            # Whether asking for another set is worth doing. False only once the
+            # catalog has actually been asked and had nothing left.
+            "more": not self.spent,
         }
 
 
@@ -941,11 +1372,19 @@ class LabelHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._json(403, {"error": "host"})
             return
-        if self.path.partition("?")[0] != "/api/answer":
+        path = self.path.partition("?")[0]
+        if path == "/api/next":
+            # A POST although it asks for something, because it moves the sitting on:
+            # the set it draws is dealt, and the same origin gauntlet an answer goes
+            # through is what should stand in front of that.
+            if self._json_body() is None:
+                return
+            self._json(200, self.server.deal())
+        elif path == "/api/answer":
+            self._answer()
+        else:
             self.close_connection = True
             self._respond(404)
-            return
-        self._answer()
 
     def _static(self, route: str) -> None:
         name, content_type = STATIC_ROUTES[route]
@@ -996,7 +1435,7 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._json(400, {"error": "members"})
             return
         question = next(
-            (q for q in self.server.asked if list(q.members) == members), None
+            (q for q in self.server.dealt if list(q.members) == members), None
         )
         if question is None:
             self._json(404, {"error": "members"})
@@ -1025,6 +1464,21 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._json(400, {"error": "unsure"})
             return
 
+        # Why each evicted frame does not belong, and only ever about a frame the
+        # reader actually pushed out: a reason against a frame that is still in the
+        # stack is not a fact about anything. Absent is *unknown* and an empty object
+        # is *asked and nothing pressed*, so the difference survives the boundary --
+        # a client that does not collect reasons stays as readable as rounds one and
+        # two are.
+        reasons = payload.get("reasons")
+        if reasons is not None and (
+            not isinstance(reasons, dict)
+            or set(reasons) - set(marks["evicted"])
+            or set(reasons.values()) - set(REASONS)
+        ):
+            self._json(400, {"error": "reasons"})
+            return
+
         self._json(
             200,
             self.server.judge(
@@ -1033,6 +1487,7 @@ class LabelHandler(BaseHTTPRequestHandler):
                 evicted=marks["evicted"],
                 included=marks["included"],
                 unsure=unsure,
+                reasons=reasons,
             ),
         )
 
@@ -1086,12 +1541,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--open", action="store_true", help="open a browser once bound")
     parser.add_argument(
-        "--sets",
-        type=int,
-        default=SETS,
-        help="how many sets one round samples (default 30, ADR 0003's round)",
-    )
-    parser.add_argument(
         "--strictness",
         type=int,
         default=STRICTNESS,
@@ -1109,8 +1558,8 @@ def main(argv: list[str] | None = None) -> int:
         "--round",
         type=int,
         default=ROUND,
-        help="which of ADR 0003's rounds this is (default %(default)s); an answer"
-        " carries it, and a set an earlier round settled is not asked again",
+        help="which round this sitting is (default %(default)s); an answer carries"
+        " it, and a run an earlier round answered about is not asked about again",
     )
     args = parser.parse_args(argv)
     # The round is a number off a command line and it indexes the answers already
@@ -1122,35 +1571,28 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load()
     labels_db = config.catalog_db.parent / LABELS
-    # Opened before the catalog, because what an earlier round already settled is
-    # dropped before the sample is taken rather than after it.
+    # Opened before the catalog, because the runs earlier rounds answered about are
+    # dropped before anything is cut rather than after it.
     labels = store(labels_db)
     settled = answered_before(labels, args.round)
-    conn = candidates.catalog(config.catalog_db, read_only=True)
-    try:
-        asked = plan(
-            conn,
-            strictness=args.strictness,
-            linkage=args.linkage,
-            wanted=args.sets,
-            already=settled,
-        )
-    finally:
-        conn.close()
-    if not asked:
-        labels.close()
-        print(
-            f"nothing to judge: no candidate stack at strictness {args.strictness} under"
-            f" {args.linkage} linkage that an earlier round has not already answered"
-            f" ({len(settled)} of those). Run python -m photolib.matches first if the"
-            " Match rows are missing."
-        )
-        return 1
+    given = answers(labels, args.round)
+    # This round's own answers count too, and by run exactly as the earlier rounds
+    # do. A sitting resumed tomorrow should deal fresh sets rather than yesterday's
+    # over again; the ones dealt yesterday were answered, and revising an answer is
+    # a move back through the sitting in hand.
+    already = settled | {sha256 for entry in given.values() for sha256 in entry["members"]}
+    conn = read_only(config.catalog_db)
+    drawing = sitting(
+        conn,
+        strictness=args.strictness,
+        linkage=args.linkage,
+        already=already,
+    )
 
     server = LabelServer(
         ("127.0.0.1", args.port),
         LabelHandler,
-        asked,
+        drawing,
         labels,
         config.substrate_root,
         round=args.round,
@@ -1158,32 +1600,24 @@ def main(argv: list[str] | None = None) -> int:
         linkage=args.linkage,
     )
     url = f"http://127.0.0.1:{server.server_address[1]}/"
-    cameras = sorted({question.camera or "(unnamed)" for question in asked})
-    chained = sum(1 for question in asked if question.chain)
-    print(f"labelling harness on {url}  -- disposable, see the module docstring")
-    print(f"  round           {args.round} of ADR 0003's two")
+    print(f"labelling harness on {url}")
+    print(f"  round           {args.round}, one sitting -- stop whenever you like")
     print(
         f"  setting         strictness {args.strictness}, {args.linkage} linkage,"
         f" {matches.METHOD}"
     )
     print(
-        f"  sets            {len(asked)} sampled, {chained} of them where a chain"
-        " crosses a boundary this rule drew"
+        f"  sets            drawn one at a time from {len(drawing.order)} runs, in"
+        f" bands of {', '.join(f'{name} {share:.0%}' for name, share in SHARES.items())}"
     )
-    widest = max((max(len(q.before), len(q.after)) for q in asked), default=0)
     print(
-        f"  context         {SHOWN} frame each side, widened with k up to the whole "
-        f"run -- {widest} at the most here"
+        f"  context         {SHOWN} frame each side, widened with k up to the whole run"
     )
-    print(f"  cameras         {', '.join(cameras)}")
-    # The extremes and not the ends of the list: the sample is ordered by the chain
-    # first now, so the first set is no longer the least decisive one.
-    margins = [question.margin for question in asked]
-    print(f"  margins         {min(margins)} to {max(margins)} points from the line")
-    print(f"  already settled {len(settled)} sets, by an earlier round, and not asked again")
+    print(f"  cameras         {len({camera for camera, _run in drawing.order})} bodies")
+    print(f"  already judged  {len(already)} frames, and their runs are not asked about")
     print(f"  labels          {labels_db}")
     print(f"  substrates      {config.substrate_root}")
-    print(f"  answers given   {len(answers(labels, args.round))} in this round")
+    print(f"  answers given   {len(given)} in this round")
     if args.open:
         import webbrowser
 
@@ -1195,6 +1629,10 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         server.server_close()
         labels.close()
+        # Held open for the life of the server, because a draw reads it: the catalog
+        # is what the next set comes out of, and there is no next set until the reader
+        # asks for one. Read-only throughout -- see `candidates.catalog`.
+        conn.close()
     return 0
 
 
