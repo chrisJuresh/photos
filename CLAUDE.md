@@ -463,10 +463,17 @@ open `archive/v1/docs/` when you need the detail behind a finding.
 - **Land the change at the end of every request, without being asked.** Stage the paths you
   changed by name (`git status` first — never `git add -A`, and never commit media, database or
   vault state; rule 5 above still applies), commit, then `git push -u origin HEAD`,
-  `gh pr create --base development --fill`, `gh pr merge --squash`. Do not wait for permission,
-  and do not leave a finished change on a local branch. If nothing changed, say so and skip it.
+  `gh pr create --base development --fill`, `gh pr merge --squash --delete-branch`. Do not
+  wait for permission, and do not leave a finished change on a local branch. If nothing
+  changed, say so and skip it.
 - Leave the worktree standing until its PR merges and name the path in your reply. The hook
   denies further edits in a worktree whose PR has merged: the next change takes a new one.
+- **Once it has merged, take all three down** — remote branch (`--delete-branch` above),
+  worktree (`ExitWorktree`, `action: "remove"`), then the local branch, in that order. A
+  merged branch left standing is a live push target after the PR that reviewed it has closed.
+  **Confirm the merge against GitHub, not git**: `--squash` keeps no ancestry, so
+  `git branch -d`, `--merged` and `merge-base --is-ancestor` read every merged branch here as
+  unmerged. `gh pr view <n> --json state --jq .state` for `MERGED`, then `git branch -D`.
 - **Never stash** — `refs/stash` is one stack for the whole repository, worktrees included, so
   a push here renumbers every other tree's entries. Commit instead. And **never restore a
   `HEAD` you moved by accident** — say what you ran and stop.
