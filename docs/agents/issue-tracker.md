@@ -62,11 +62,22 @@ walked through `gh`.
    the integration branch is denied writes for the same reason the main checkout is.
 6. **Build it,** to the ticket's acceptance criteria and no further. A criterion that turns out
    to be wrong is a comment on the issue and a stop, not a quiet re-scope.
-7. **Land it.** At the end, unasked, and all four steps: stage the paths you changed by name
+7. **Land it.** At the end, unasked, and all of it: stage the paths you changed by name
    (`git status`, never `git add -A`), commit, `git push -u origin HEAD`,
-   `gh pr create --base development --fill`, `gh pr merge --squash`. Committing is not
-   delivering and neither is pushing — a branch nobody merged is a ticket nobody can close.
-   The worktree is spent once its PR merges; the next ticket takes a new one.
+   `gh pr create --base development --fill`, `gh pr merge --squash --delete-branch`.
+   Committing is not delivering and neither is pushing — a branch nobody merged is a ticket
+   nobody can close. The worktree is spent once its PR merges; the next ticket takes a new one.
+
+   `--delete-branch` is not tidiness. After the PR closes, the branch is a live push target
+   no review will look at again, and a commit pushed there looks like ordinary work while
+   reaching `development` never. Take the worktree down with it — `ExitWorktree`
+   (`action: "remove"`) first, since it is holding the branch — then the local branch.
+
+   **Confirm the merge against GitHub, not against git.** Everything merges with `--squash`,
+   which replays the diff as one new commit and keeps no ancestry, so `git branch -d`,
+   `git branch --merged` and `git merge-base --is-ancestor` all read a merged branch as
+   unmerged. That is every branch here, not an edge case. Ask
+   `gh pr view <n> --json state --jq .state` for `MERGED`, then `git branch -D <branch>`.
 8. **Close it.** `gh issue close <n> --comment "..."` naming the branch and what a reader can
    now see. Closing is what unblocks the dependents: GitHub counts open blockers only, so a
    closed ticket drops its dependents' `blocked_by` on its own. Nothing else needs editing —
