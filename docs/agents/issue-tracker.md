@@ -73,6 +73,17 @@ walked through `gh`.
    reaching `development` never. Take the worktree down with it — `ExitWorktree`
    (`action: "remove"`) first, since it is holding the branch — then the local branch.
 
+   **Check that `--delete-branch` actually did it.** `gh` deletes the local branch first and
+   the remote second, and abandons the remote when the local one fails — which it does
+   whenever a worktree still holds the branch, so every ticket. It reports only `failed to
+   delete local branch` and leaves standing exactly the branch it was asked to remove:
+
+   ```bash
+   git fetch origin --prune
+   git branch -r
+   git push origin --delete <branch>   # if it is still listed
+   ```
+
    **Confirm the merge against GitHub, not against git.** Everything merges with `--squash`,
    which replays the diff as one new commit and keeps no ancestry, so `git branch -d`,
    `git branch --merged` and `git merge-base --is-ancestor` all read a merged branch as
