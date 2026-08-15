@@ -46,20 +46,9 @@ walked through `gh`.
    one and stop, rather than building against a blocker's unwritten half.
 3. **Claim it.** `gh issue edit <n> --add-assignee @me`. First write of the session, so an
    abandoned session still shows who was in it.
-4. **Pick your tree.** A worktree is for a *second concurrent writer*, not for every ticket.
-   Whether one is here is a question with an answer rather than a guess: `list_sessions`
-   reports every other session's `cwd` and whether it `isRunning`, and `git status` reports
-   the disk.
-
-   | signal | verdict |
-   |---|---|
-   | another session with `isRunning: true` whose `cwd` is this checkout | worktree |
-   | `git status --porcelain` shows work you did not make | worktree |
-   | neither | **work in place** |
-
-   Working in place is the common case and the right one when it is true — the operator has
-   this directory open, and a diff in a worktree is a diff nobody is looking at. When the
-   answer is worktree, take one off the base step 5 picks:
+4. **Take your worktree.** Every ticket gets one — there is no contention check, because
+   there is no case where the answer is "work in the main checkout". Nothing is written
+   there, and a `PreToolUse` hook denies it.
 
    ```bash
    git worktree add .claude/worktrees/<n> -b <n>-<short-slug> <base>
@@ -68,14 +57,38 @@ walked through `gh`.
    Then **enter it with `EnterWorktree`**, not with `cd` — the difference is enforcement, and
    "Entering versus cd-ing" below is why it matters.
 5. **Branch off the right base.** `<base>` is the ticket's blocker where step 2 found one that
-   is closed but not yet merged to `main`; otherwise `main`. Never branch off "the current
-   branch" — with a shared `HEAD` that is whatever another session last checked out, which is
-   how a ticket ends up carrying an unrelated ticket's commits. Never build on `main` itself.
+   is closed but not yet merged to `development`; otherwise `origin/development`. Never branch
+   off "the current branch", and never build on `development` itself — a worktree sitting on
+   the integration branch is denied writes for the same reason the main checkout is.
 6. **Build it,** to the ticket's acceptance criteria and no further. A criterion that turns out
    to be wrong is a comment on the issue and a stop, not a quiet re-scope.
-7. **Commit and push** under the etiquette in CLAUDE.md — at the end, unasked, checking
-   `git status` rather than `git add -A`. In a worktree of your own that listing is yours
-   alone; in a shared tree it is not, so stage the paths you changed by name.
+7. **Land it.** At the end, unasked, and all of it: stage the paths you changed by name
+   (`git status`, never `git add -A`), commit, `git push -u origin HEAD`,
+   `gh pr create --base development --fill`, `gh pr merge --squash --delete-branch`.
+   Committing is not delivering and neither is pushing — a branch nobody merged is a ticket
+   nobody can close. The worktree is spent once its PR merges; the next ticket takes a new one.
+
+   `--delete-branch` is not tidiness. After the PR closes, the branch is a live push target
+   no review will look at again, and a commit pushed there looks like ordinary work while
+   reaching `development` never. Take the worktree down with it — `ExitWorktree`
+   (`action: "remove"`) first, since it is holding the branch — then the local branch.
+
+   **Check that `--delete-branch` actually did it.** `gh` deletes the local branch first and
+   the remote second, and abandons the remote when the local one fails — which it does
+   whenever a worktree still holds the branch, so every ticket. It reports only `failed to
+   delete local branch` and leaves standing exactly the branch it was asked to remove:
+
+   ```bash
+   git fetch origin --prune
+   git branch -r
+   git push origin --delete <branch>   # if it is still listed
+   ```
+
+   **Confirm the merge against GitHub, not against git.** Everything merges with `--squash`,
+   which replays the diff as one new commit and keeps no ancestry, so `git branch -d`,
+   `git branch --merged` and `git merge-base --is-ancestor` all read a merged branch as
+   unmerged. That is every branch here, not an edge case. Ask
+   `gh pr view <n> --json state --jq .state` for `MERGED`, then `git branch -D <branch>`.
 8. **Close it.** `gh issue close <n> --comment "..."` naming the branch and what a reader can
    now see. Closing is what unblocks the dependents: GitHub counts open blockers only, so a
    closed ticket drops its dependents' `blocked_by` on its own. Nothing else needs editing —
@@ -105,43 +118,42 @@ of this section is what surrounds it.
 This page's rules were written on 2026-08-08 and broken the same evening by three sessions that
 had them available and did not read them. So they are enforced as well as written:
 `.claude/settings.json` is committed, and its `PreToolUse` hook runs
-[`.claude/hooks/concurrent_writer_guard.py`](../../.claude/hooks/concurrent_writer_guard.py),
-which denies a write to the **main checkout** once another session has claimed it and tells you
-to take a worktree.
+[`.claude/hooks/worktree-guard.py`](../../.claude/hooks/worktree-guard.py).
 
-It does not guess. A session claims the tree it works in the first time it actually writes, so
-an idle session and a read-only agent never claim anything, and a lone writer is never blocked.
-A claim stays live while **either** its last write or its transcript file is within twenty
-minutes — the transcript is the better signal of the two, because it moves on every turn, so a
-session that has spent twenty minutes reading still holds its tree where a last-write-only
-signal would hand it away mid-task. `SessionEnd` drops the claim outright, so a session that
-exits cleanly frees the tree at once rather than at the end of a timeout, and `SessionStart`
-says who is already writing here, so a second session can take a worktree before it collides
-rather than after. It fails **open** on anything it cannot read — no repo, no git, an
-unparseable payload — because blocking the only writer over state it merely failed to read is
-the worse error. `PHOTOS_ALLOW_SHARED_CHECKOUT=1` turns it off when it is wrong.
+That guard used to reason about who was in the tree — a claim registry, a liveness window,
+a denial once a *second* writer showed up. It no longer asks. **Every write to the main
+checkout is denied, always**, along with every git call that writes history there. There is
+no contention check because there is no contended case: one writer in the main checkout is
+one writer whose diff nobody reviewed and whose branch the next session's `git switch` moves
+the floor under. The registry was machinery for a question that should not have been asked.
 
-One thing it judges **repository-wide rather than per tree**: `git stash`. The stack is shared
-by every worktree, so a push from a worktree is denied while any other session is live anywhere
-in the repository, which is the rule the `refs/stash` bullet below has always asserted. Reading
-the stack — `git stash list`, `git stash show` — is not a push and is never denied.
+What it denies, in full: file edits anywhere in the main checkout; `git add`/`commit`/
+`switch`/`checkout`/`reset`/`rebase`/`merge`/`clean`/`rm`/`mv` and friends there; edits in a
+worktree that is sitting on `development`; edits in a worktree whose PR has already merged,
+because a merged branch that grows a commit reaches nobody; and `git stash` everywhere. A
+`Stop` hook refuses to end a session holding uncommitted or unpushed work, twice at most, so
+"land it" in step 7 is not something anyone has to remember. It fails **open** on anything it
+cannot read — no repo, no git, an unparseable payload — because blocking the only writer over
+state it merely failed to read is the worse error. `CLAUDE_WORKTREE_GATE=off` turns it off
+when it is wrong; `=warn` reports without denying.
 
-Two limits worth knowing. **Committing from a worktree wants `git -C` with the path spelled
-out**: the guard reads a git call's target off `-C` and otherwise assumes the session's
-directory, and the parse is textual, so `cd ../photos-6 && git commit` and `git -C "$W" commit`
-are both judged against the main checkout. And it only sees Claude's own tool calls — a person
-in an editor writes without ever running it, which is why `git status` stays in step 4's table.
+Two limits worth knowing. **A git call's `-C` target is read textually and never expanded**,
+so `git -C "$W" commit` is judged against the session's own tree; spell the path out when you
+mean another one. And it only sees Claude's own tool calls — a person in an editor writes
+without ever running it, and nothing here should stop them.
 
-Step 4's two signals are not redundant, and neither is a check on its own. `list_sessions` sees
-Claude sessions and nothing else; `git status` sees the disk and cannot say who dirtied it.
-Together they cover the case each one misses — a person in an editor, a plain `claude` CLI
-session, a session that is here but has not written yet.
-
-They share one hole, which this repo has already fallen into. A session that `cd`s into a
-worktree goes on reporting the main checkout as its `cwd`, because only entering re-registers
-it. When two sessions had moved out of this tree and a third asked who was still in it, both
-movers were still listed here. So the rule below is not only about enforcement: entering rather
-than `cd`-ing is also what keeps the first signal true for everybody else.
+`/worktree-per-change` is the protocol in full, and
+`.claude/worktree-per-change.json` is where `development` is named as the branch everything
+merges into. **It also records where the committed hook came from** — the upstream commit it
+was copied at, and a hash of the file — because a committed guard is a fork the moment the
+skill moves, and a stale one is the one kind of broken that still looks like it works: it
+denies confidently and prints a remedy that no longer fits. Its own tests are no help, having
+been copied at the same time and being equally old. `tests/test_worktree_guard.py` holds the
+copy to that record, so a hook edited in place, or a resync that forgot to write itself down,
+fails there rather than in the middle of someone's ticket. Whether *upstream* has moved is the
+other half of the question and is not asked here, because it needs a clone this suite has no
+business fetching. Resync by re-running the skill's installer, which writes both halves at the
+one moment they are both true — see "Installing it" in `/worktree-per-change`.
 
 ### Entering versus cd-ing
 
@@ -156,7 +168,8 @@ whose working directory resolves there, and a git redirect into it via `git -C`,
 Create the worktree with git, because the base matters here, then enter that path.
 `claude --worktree <name>` does both in one step but branches from the default branch —
 `worktree.baseRef` chooses only between that and the local `HEAD`, never a named branch — and
-that is the wrong base for any ticket with a blocker. A path under `.claude/worktrees/` is
+the default branch is `main`, which is not what anything merges into. It is the wrong base for
+every ticket here, and doubly wrong for one with a blocker. A path under `.claude/worktrees/` is
 entered without a prompt; anywhere else asks first, since entering moves the session's working
 directory, write access and project config along with it.
 
@@ -190,16 +203,16 @@ It stands until the branch merges.
 Sweep the merged ones at the *start* of a session instead, when nothing is in flight:
 
 ```bash
-git branch --merged main --format='%(refname:short)|%(worktreepath)'
+git branch --merged development --format='%(refname:short)|%(worktreepath)'
 ```
 
-Any row with a path is a worktree whose branch is already in `main`. Remove the ones that are
-yours with `git worktree remove`; another session's is its business even after its branch
+Any row with a path is a worktree whose branch is already in `development`. Remove the ones that
+are yours with `git worktree remove`; another session's is its business even after its branch
 merges, so leave those and say they are there.
 
-**The session that wrote a change is the one that should merge it back.** It already holds the
-intent behind every hunk; batching four branches' conflicts onto one agent at the end throws
-that away and makes it reconstruct what four sessions already knew.
+**The session that wrote a change is the one that merges it back**, in step 7, before it stops.
+It already holds the intent behind every hunk; batching four branches' conflicts onto one agent
+at the end throws that away and makes it reconstruct what four sessions already knew.
 
 Independent tickets are still not free of each other. Three things collide even in separate
 worktrees:
@@ -207,10 +220,11 @@ worktrees:
 - **`refs/stash`** — the stash is one stack for the whole repository, shared by every worktree.
   `git stash` in one worktree pushes onto another's entries and renumbers them, so a later
   `git stash pop` or `git stash drop` in *either* takes the wrong one. This is the one place a
-  worktree looks like isolation and is not. **Do not stash while another session is live** — the
-  guard denies the push from every tree, not just this one. Commit instead — a commit belongs to
-  your branch and cannot be popped by a stranger — and leave someone else's `stash@{0}` alone
-  even when it looks redundant.
+  worktree looks like isolation and is not. **The guard denies `git stash` from every tree,
+  unconditionally** — there is no "while another session is live" to check, because the wrong
+  entry is taken whenever the second session arrives, which may be after you have gone. Commit
+  instead — a commit belongs to your branch and cannot be popped by a stranger — and leave
+  someone else's `stash@{0}` alone even when it looks redundant.
 - **`G:`** — nothing else may touch it while a step that reads it runs, Explorer windows
   included. That is rule 1 territory, and it applies across sessions.
 - **`E:`** — the catalog, the thumbnails and the substrates share one NVMe. A ticket
