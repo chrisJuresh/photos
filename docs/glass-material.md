@@ -20,9 +20,15 @@ The bar names no height and grows when the filter chips wrap; the count names it
 through `--glass-tally-h` and centres against the bar with an auto block margin.
 `--header-h` is the bar's height alone, because the bar is the only one of the two the
 photographs start below — however tall `/tune` makes the count, it is floating over a
-photograph. The bar stops shrinking at `--bar-min` (420px) and the side margin gives
-way instead, so the shipped 650 is a margin on a wide monitor and a centred 420px bar
-on a window narrower than 1720px rather than no bar at all.
+photograph. The bar stops shrinking at `--bar-min` (560px) and the side margin gives
+way instead, so the shipped 650 is a margin on a wide monitor and a centred 560px bar
+on a window narrower than 1860px rather than no bar at all. That floor is the control
+row measured at its widest — 541px, the longest of the ten sort labels beside the
+largest stack count the badge can hold, with a pill's worth over for a font that
+measures wider elsewhere — because a bar narrower than the row it holds does not
+squeeze it, it paints it over the two buttons that follow. Below the floor the margin
+is nothing and the row wraps, which is the same thing the chips have always done, and
+`--header-h` is measured so the photographs start below the taller bar either way.
 
 The panels drop out of the bar's own box, so they open under the controls that
 summoned them rather than under the count. Triage is a pill in the bar like any other
