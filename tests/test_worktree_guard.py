@@ -11,6 +11,7 @@ so the tests below are about the boundary rather than about arbitration.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -101,18 +102,54 @@ def test_the_integration_branch_comes_from_the_committed_config(repo: Path) -> N
     assert guard.integration_branch(repo) == "development"
 
 
+def test_the_committed_guard_is_still_the_file_its_record_describes() -> None:
+    """A copied hook is a fork the moment upstream moves, and a stale one looks fine.
+
+    `.claude/worktree-per-change.json` names the upstream commit the copy came from and
+    hashes the file itself. Only the offline half of that is checkable here — is the
+    committed guard still what the record says — and it is the half that catches a hook
+    edited in place and a resync that forgot to write itself down. Whether upstream has
+    moved on since needs a clone, and this suite has no business fetching one.
+
+    The digest is over LF-normalised bytes, which is what git stores: the record crosses
+    machines and the line endings on disk do not.
+    """
+    record = json.loads((ROOT / ".claude" / "worktree-per-change.json").read_text(encoding="utf-8"))
+    normalised = HOOK.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(normalised).hexdigest() == record["guard"]["sha256"]
+
+
 @pytest.mark.parametrize(
     "command,expected",
     [
-        ("git commit -m 'x'", [("commit", ["-m", "x"])]),
-        ("git -C /somewhere switch main", [("switch", ["main"])]),
-        ("echo hi && git stash push", [("stash", ["push"])]),
+        ("git commit -m 'x'", [("commit", ["-m", "x"], None)]),
+        ("echo hi && git stash push", [("stash", ["push"], None)]),
         ("gh pr merge --squash", []),
-        ("git status", [("status", [])]),
+        ("git status", [("status", [], None)]),
     ],
 )
 def test_git_calls_are_read_out_of_a_shell_command(command: str, expected: list) -> None:
     assert guard.git_calls(command) == expected
+
+
+@pytest.mark.parametrize(
+    "command,where",
+    [
+        ("git -C /somewhere switch main", "/somewhere"),
+        ("cd ../other-repo && git add -A", "../other-repo"),
+        ('git -C "$W" commit -m x', None),
+    ],
+)
+def test_a_git_call_is_read_for_the_tree_it_names(command: str, where: str | None) -> None:
+    """`-C` and a leading `cd` say which tree a call lands in; a variable says nothing.
+
+    The rules are judged against that tree, which is what lets a call reaching into
+    another repository pass and one reaching back into this main checkout be denied.
+    An unreadable path reads as None — the session's own tree — because the guard
+    never runs a shell to find out what `$W` was.
+    """
+    (_subcommand, _args, named), = guard.git_calls(command)
+    assert named == where
 
 
 # ---------------------------------------------------------------------- decisions

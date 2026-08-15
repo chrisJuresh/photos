@@ -469,11 +469,16 @@ open `archive/v1/docs/` when you need the detail behind a finding.
 - Leave the worktree standing until its PR merges and name the path in your reply. The hook
   denies further edits in a worktree whose PR has merged: the next change takes a new one.
 - **Once it has merged, take all three down** — remote branch (`--delete-branch` above),
-  worktree (`ExitWorktree`, `action: "remove"`), then the local branch, in that order. A
-  merged branch left standing is a live push target after the PR that reviewed it has closed.
-  **Confirm the merge against GitHub, not git**: `--squash` keeps no ancestry, so
-  `git branch -d`, `--merged` and `merge-base --is-ancestor` read every merged branch here as
-  unmerged. `gh pr view <n> --json state --jq .state` for `MERGED`, then `git branch -D`.
+  worktree, then the local branch, in that order. A merged branch left standing is a live
+  push target after the PR that reviewed it has closed. **`ExitWorktree` with
+  `action: "remove"` will not take the tree down**: it removes only a worktree it created
+  itself, and every tree here is made with `git worktree add` and entered by path, so it
+  refuses. Ask for `"keep"`, which puts the session back in the main checkout, and let git do
+  the removal from there — nothing can remove the tree it is standing in, so the two are
+  separate steps in that order. **Confirm the merge against GitHub, not git**: `--squash`
+  keeps no ancestry, so `git branch -d`, `--merged` and `merge-base --is-ancestor` read every
+  merged branch here as unmerged. `gh pr view <n> --json state --jq .state` for `MERGED`,
+  then `git worktree remove <path>` and `git branch -D <slug>`.
 - **Never stash** — `refs/stash` is one stack for the whole repository, worktrees included, so
   a push here renumbers every other tree's entries. Commit instead. And **never restore a
   `HEAD` you moved by accident** — say what you ran and stop.
