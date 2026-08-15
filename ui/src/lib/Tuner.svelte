@@ -140,7 +140,7 @@
         "So two of these move the photographs and both move them down: Top, because the tiles " +
         "follow the bar rather than sliding under it, and Page top, because that is what it is " +
         "for. Sides moves the bar and the count alone. Its slider ends at half this window's " +
-        "width and re-scales when you drag the window, but the bar stops shrinking at 420px and " +
+        "width and re-scales when you drag the window, but the bar stops shrinking at 560px and " +
         "the margin gives way instead, so the last of that range does nothing here. No studio " +
         "value — its editor's shape controls size a demo blob, so the default is what ships.",
       rows: [

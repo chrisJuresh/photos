@@ -156,7 +156,7 @@ export const STUDIO = {
  * hung off the bar's left edge, out of the flow, so that the thing centred in
  * the window is the bar and not the pair. The bar stops shrinking at app.css's
  * `--bar-min` and the margin gives way instead, so 650 is a margin on a wide
- * monitor and a centred 420px bar on a narrow one rather than nothing at all.
+ * monitor and a centred 560px bar on a narrow one rather than nothing at all.
  *
  * `pageTop` is the gap between the bar's bottom edge and the first row of tiles
  * — the sheet's top padding is `headerTop + headerHeight + pageTop`. It ships at
