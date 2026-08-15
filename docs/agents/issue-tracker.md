@@ -144,7 +144,16 @@ without ever running it, and nothing here should stop them.
 
 `/worktree-per-change` is the protocol in full, and
 `.claude/worktree-per-change.json` is where `development` is named as the branch everything
-merges into.
+merges into. **It also records where the committed hook came from** — the upstream commit it
+was copied at, and a hash of the file — because a committed guard is a fork the moment the
+skill moves, and a stale one is the one kind of broken that still looks like it works: it
+denies confidently and prints a remedy that no longer fits. Its own tests are no help, having
+been copied at the same time and being equally old. `tests/test_worktree_guard.py` holds the
+copy to that record, so a hook edited in place, or a resync that forgot to write itself down,
+fails there rather than in the middle of someone's ticket. Whether *upstream* has moved is the
+other half of the question and is not asked here, because it needs a clone this suite has no
+business fetching. Resync by re-running the skill's installer, which writes both halves at the
+one moment they are both true — see "Installing it" in `/worktree-per-change`.
 
 ### Entering versus cd-ing
 
