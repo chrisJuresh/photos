@@ -96,8 +96,30 @@
   /* The bar never gets narrower than a row of pills. Past the point where the
      side margin would squeeze it below this, the margin gives way instead —
      which is what keeps the shipped 650 from collapsing the header on a window
-     narrower than 1720px. */
-  --bar-min: 420px;
+     narrower than 1860px.
+
+     It is the row measured rather than a number that sounds like one. At 420 it
+     was neither: the row measures 484px with stacking off, so on a 1440-wide
+     window the margin stopped giving way while the controls still had 60px to
+     find, and the pills ran out of the bar and were painted over the theme
+     button and Triage.
+
+     The measurement is of the row at its widest and not of the row as it
+     usually stands, because a floor that only fits the default is a floor that
+     gives way to a sort: every sort label was drawn into the pill in turn and
+     "Worst quality" is the longest of the ten, at 493 on its own and 541 beside
+     the widest stack count the badge can hold. 560 is that with a pill's worth
+     over, which is there for a machine whose system font measures a little
+     wider than the one this was read on.
+
+     It cannot be every composition: a bar carrying six filter chips is wider
+     than any floor worth reserving, and reserving it would push the count pane
+     off the left of a narrow window for a row that is not there. So `.controls`
+     wraps, and this number is what keeps the wrap for the windows and the
+     compositions the bar was not shaped around rather than for the ordinary
+     page — which also makes a floor that turns out to be a few pixels short a
+     bar that wraps somewhere, rather than the overlap this number replaced. */
+  --bar-min: 560px;
   /* The gap between the header's bottom edge and the first row of tiles. The
      same 14 as the inset below, so what the grid keeps under the header is what
      it keeps from every other edge of the window. */

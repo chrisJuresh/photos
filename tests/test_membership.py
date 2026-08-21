@@ -34,7 +34,12 @@ from photolib.membership import (
 )
 
 BASE = datetime(2021, 6, 1, 12, 0, 0)
-SETTING = Setting(strictness=20, linkage="majority")
+# The shipped setting, read from the module rather than restated: a corpus that
+# ran at one setting while `membership.run` defaulted to another would be two
+# populations, and the tests that turn on "a second run places nothing" would
+# quietly stop testing it. `test_the_recorded_setting_is_the_one_the_labels_settled`
+# is where the value itself is asserted.
+SETTING = Setting()
 HIGH = 100  # a Match well above any strictness in these tests
 LOW = 3  # checked, and agreed on almost nothing
 
@@ -200,7 +205,9 @@ def test_the_linkage_decides_and_the_setting_records_which_one(corpus: Stacks) -
     corpus.matched(a, b, HIGH)
     corpus.matched(b, c, HIGH)
     corpus.matched(a, c, LOW)
-    corpus.run(SETTING)
+    # Both rules named outright rather than one of them taken from the shipped
+    # default, which is a rule this test is comparing and not the one it runs at.
+    corpus.run(Setting(strictness=20, linkage="majority"))
     corpus.run(Setting(strictness=20, linkage="neighbour"))
 
     by_linkage = dict(
@@ -413,7 +420,7 @@ def test_a_second_setting_leaves_the_first_one_standing(corpus: Stacks) -> None:
         corpus.conn.execute(
             "SELECT strictness, count(*) FROM stack_member GROUP BY strictness"
         )
-    ) == {20: 2, 200: 2}
+    ) == {membership.STRICTNESS: 2, 200: 2}
 
 
 def test_a_setting_that_has_never_run_owes_every_tile(corpus: Stacks) -> None:
@@ -437,13 +444,20 @@ def test_the_rule_is_the_one_the_labels_were_replayed_against(corpus: Stacks) ->
 
 
 def test_the_recorded_setting_is_the_one_the_labels_settled() -> None:
-    """Strictness 20 with "matches most members", from ADR 0003."""
-    assert (membership.STRICTNESS, membership.DEFAULT_LINKAGE) == (20, "majority")
+    """Strictness 10 with the chain, from ADR 0003.
+
+    It was 20 with "matches most members" and it moved when the precision floor
+    `harness.calibrate` ranks under moved from 95% to 85% -- see
+    `photolib.membership.STRICTNESS`. Moving it is what adds a population rather
+    than overwriting one, so the setting this test names is the grid's default and
+    never the only assignment `stack_member` holds.
+    """
+    assert (membership.STRICTNESS, membership.DEFAULT_LINKAGE) == (10, "neighbour")
     assert Setting().key == (
         matches.METHOD,
         matches.VERSION,
-        20,
-        "majority",
+        10,
+        "neighbour",
         candidates.CEILING,
     )
 
@@ -577,7 +591,10 @@ def test_run_places_every_tile_without_opening_the_vault(
     assert membership.run(synthetic_config(tmp_path, migrated)) == 0
 
     report = capsys.readouterr().out
-    assert "strictness 20, majority linkage" in report
+    assert (
+        f"strictness {membership.STRICTNESS}, {membership.DEFAULT_LINKAGE} linkage"
+        in report
+    )
     assert "4 tiles to place" in report
     assert "2 stacks, 1 of more than one frame, largest 3" in report
 

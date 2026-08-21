@@ -1,27 +1,30 @@
 """Tests for the labelling harness's sampling, and for where its answers go.
 
-The harness is scaffolding with a stated end of life, so this file is
-deliberately narrow: what is under test is the part tickets 33 and 35 say is
-worth testing -- the pure functions over Match scores that decide which sets the
-reader is shown, including which round is asking and what a chain would have
-walked into each stack -- plus the one thing a reader would lose if it were
-wrong, which is an answer already given.
+Deliberately narrow: what is under test is what the reader can do and what gets
+stored, never how the sampler walks its rows. That is the pure functions over Match
+scores that decide which sets the reader is shown -- which band each one is drawn
+as one of, which round is asking, and what a chain would have walked into each
+stack -- the draw that hands them over one at a time, and the one thing a reader
+would lose if it were wrong, which is an answer already given.
 
-Nothing here starts a server, reads a substrate, or opens a path from
-config.toml. Scores are integers written in the test, so every expectation
-below is arithmetic against `STRICTNESS` rather than an opinion about a
-photograph.
+Nothing here starts a server or reads a substrate, and nothing opens a path from
+config.toml. Scores are integers written in the test, so every expectation below is
+arithmetic against `STRICTNESS` rather than an opinion about a photograph; the draw's
+tests run against a temporary catalog they build themselves.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from harness import label
 from harness.label import STRICTNESS, Question
+from photolib import matches
 
 
 def sha_of(seed: str) -> str:
@@ -52,16 +55,26 @@ def test_frames_that_agree_on_nothing_are_two_stacks() -> None:
     assert label.link([A, B], scores(ab=LOW)) == [[A], [B]]
 
 
-def test_a_pair_at_the_strictness_holds(   ) -> None:
-    """Strictness is a floor and not an exclusive bound, as `browse.py`'s window is."""
-    assert label.link([A, B], scores(ab=STRICTNESS)) == [[A, B]]
-    assert label.link([A, B], scores(ab=STRICTNESS - 1)) == [[A], [B]]
+def test_a_pair_at_the_strictness_holds() -> None:
+    """Strictness is a floor and not an exclusive bound, as `browse.py`'s window is.
+
+    Named rather than left to `link`'s default, which is the *grid's* strictness and
+    not the harness's -- the two have been the same number and are not now."""
+    assert label.link([A, B], scores(ab=STRICTNESS), STRICTNESS) == [[A, B]]
+    assert label.link([A, B], scores(ab=STRICTNESS - 1), STRICTNESS) == [[A], [B]]
 
 
-def test_linkage_is_complete_so_one_disagreement_starts_a_new_stack() -> None:
-    """ADR 0003: every pair inside a stack must match, not merely each frame and
-    its predecessor. C agrees with B and not with A, so it does not join."""
-    assert label.link([A, B, C], scores(ab=HIGH, bc=HIGH, ac=LOW)) == [[A, B], [C]]
+def test_linkage_that_wants_more_than_a_neighbour_starts_a_new_stack() -> None:
+    """ADR 0003's argument: every pair inside a stack must match, not merely each
+    frame and its predecessor. C agrees with B and not with A, so it does not join.
+
+    The rule is named because it is the subject: `link`'s default follows whatever
+    the labels last settled, and what this asserts is what a rule does and not which
+    rule is current."""
+    points = scores(ab=HIGH, bc=HIGH, ac=LOW)
+
+    assert label.link([A, B, C], points, joins=label.complete) == [[A, B], [C]]
+    assert label.link([A, B, C], points, joins=label.LINKAGE["majority"]) == [[A, B], [C]]
 
 
 def test_a_pair_with_no_row_is_read_as_agreeing_on_nothing() -> None:
@@ -296,32 +309,46 @@ def test_a_chain_reaching_the_frames_before_the_stack_counts_too() -> None:
     assert asked[1].chain == 3  # A, B and C, before it
 
 
-def test_a_set_an_earlier_round_answered_is_not_asked_again() -> None:
+def test_a_run_an_earlier_round_answered_about_is_not_asked_about_again() -> None:
     settled = Question(camera="Lumix", members=(A, B), before=(), after=(), margin=0)
     fresh = Question(camera="Lumix", members=(C, D), before=(), after=(), margin=0)
 
-    assert label.unanswered([settled, fresh], {label.key(settled.members)}) == [fresh]
+    assert label.unanswered([settled, fresh], {A}) == [fresh]
 
 
-def test_a_stack_that_has_grown_a_frame_is_a_question_the_reader_has_not_seen() -> None:
-    """The sets are keyed on the stack as drawn, and round two cuts the runs with a
-    different rule. A stack that has gained a member is a different claim, so
-    dropping it because it overlaps one already answered would drop the question."""
+def test_the_run_is_excluded_and_not_the_stack_as_it_happened_to_be_drawn() -> None:
+    """A later round draws from a different band, so it redraws the same run with the
+    boundary a frame or two over. Keyed on the stack, a set key would let it re-ask
+    about an evening the reader has already spent -- under a key they never saw."""
     grown = Question(camera="Lumix", members=(A, B, C), before=(), after=(), margin=0)
+    beside = Question(camera="Lumix", members=(E, F), before=((C, 4),), after=(), margin=0)
 
-    assert label.unanswered([grown], {label.key((A, B))}) == [grown]
+    assert label.unanswered([grown], {A}) == []       # a member of it was answered
+    assert label.unanswered([beside], {C}) == []      # so was a frame of its run
+    assert label.unanswered([beside], {G}) == [beside]
+
+
+def test_a_run_is_named_by_every_frame_a_set_carries_of_it() -> None:
+    question = Question(
+        camera="Lumix", members=(C, D), before=((B, 2), (A, 5)), after=((E, 3),), margin=0
+    )
+
+    assert question.run() == {A, B, C, D, E}
 
 
 # --- spreading the reader's time -----------------------------------------
 
 
-def asking(camera: str, margin: int, seed: str, chain: int = 0) -> Question:
+def asking(
+    camera: str, margin: int, seed: str, chain: int = 0, deciding: int = 0
+) -> Question:
     return Question(
         camera=camera,
         members=(sha_of(seed),),
         before=(),
         after=(),
         margin=margin,
+        deciding=deciding,
         chain=chain,
     )
 
@@ -396,6 +423,300 @@ def test_the_sample_is_the_same_one_every_time_the_harness_starts() -> None:
     tied = [asking("Lumix", 3, seed) for seed in "abc"]
 
     assert label.spread(tied, 3) == label.spread(list(reversed(tied)), 3)
+
+
+# --- the three bands a round straddles ----------------------------------------
+
+LOOSER = 12  # a Match a looser strictness would newly merge
+HOLDS = 25  # one the shipped setting already merges
+NOTHING = 0  # no row at all, which no strictness reaches
+
+
+def banded(count: int, deciding: int, camera: str = "Lumix") -> list[Question]:
+    """`count` sets whose drawing turns on a pair scoring `deciding`."""
+    return [
+        asking(camera, 0, f"{deciding}x{index}", deciding=deciding) for index in range(count)
+    ]
+
+
+def test_a_match_belongs_to_the_band_its_number_falls_in() -> None:
+    """The boundaries, as `SHARES` states them. A pure function over one stored
+    number, which is what makes the banding assertable without a photograph."""
+    assert label.band(NOTHING) == "unreachable"
+    assert label.band(4) == "unreachable"
+    assert label.band(5) == "loosen"
+    assert label.band(19) == "loosen"
+    assert label.band(20) == "merged"
+    assert label.band(40) == "merged"
+    assert label.band(41) is None  # decisive, and therefore not a question
+
+
+def test_a_draw_of_ten_straddles_the_dial_rather_than_sitting_on_it() -> None:
+    """`SHARES` in the proportions it states, without the draw having been told that
+    ten was coming: there is no round size to divide up."""
+    pool = banded(5, LOOSER) + banded(5, HOLDS) + banded(5, NOTHING)
+
+    picked = label.spread(pool, 10)
+
+    assert Counter(question.band for question in picked) == {
+        "loosen": 4,
+        "merged": 4,
+        "unreachable": 2,
+    }
+
+
+def test_the_bands_are_mixed_rather_than_served_in_blocks() -> None:
+    """The reader must not spend their first hour on one kind of question: a round
+    abandoned halfway through would otherwise be a round of one band."""
+    pool = banded(4, LOOSER) + banded(4, HOLDS) + banded(2, NOTHING)
+
+    assert [question.band for question in label.spread(pool, 10)] == [
+        "loosen",
+        "merged",
+        "loosen",
+        "merged",
+        "unreachable",
+        "loosen",
+        "merged",
+        "loosen",
+        "merged",
+        "unreachable",
+    ]
+
+
+def test_a_band_with_nothing_in_it_does_not_stall_the_draw() -> None:
+    pool = banded(3, HOLDS) + banded(3, NOTHING)
+
+    picked = label.spread(pool, 6)
+
+    assert len(picked) == 6
+    assert {question.band for question in picked} == {"merged", "unreachable"}
+
+
+def test_a_draw_of_one_carries_on_the_weave_rather_than_restarting_it() -> None:
+    """The sets are drawn one at a time, so the shares live in what has already been
+    dealt. Restarting at the top would hand back the same band every request."""
+    pool = banded(4, LOOSER) + banded(4, HOLDS)
+    dealt: list[Question] = []
+
+    for _ in range(4):
+        picked = label.spread(pool, 1, drawn=dealt)
+        pool.remove(picked[0])
+        dealt += picked
+
+    assert [question.band for question in dealt] == ["loosen", "merged", "loosen", "merged"]
+
+
+def test_the_cameras_are_still_spread_inside_a_band() -> None:
+    """A rule calibrated on the body the operator shoots most must not quietly
+    misbehave on the other four, whichever band the set was drawn from."""
+    pool = banded(3, HOLDS, "Lumix") + banded(3, HOLDS, "Sony")
+
+    picked = label.spread(pool, 4)
+
+    assert [question.camera for question in picked] == ["Lumix", "Sony", "Lumix", "Sony"]
+
+
+def test_a_set_is_banded_by_the_pair_its_drawing_turns_on() -> None:
+    """And never by its strongest pair. A burst of frames agreeing 300 apiece, held
+    on to one pair of twelve by "matches most members", is a set the dial is arguing
+    about -- and would be drawn as decisive if the best evidence spoke for it."""
+    asked = one([A, B, C, D], scores(ab=300, ac=300, ad=300, bc=300, bd=300, cd=LOOSER))
+
+    assert asked.members == (A, B, C, D)
+    assert asked.deciding == LOOSER
+    assert asked.band == "loosen"
+    assert label.band(300) is None  # which the strongest pair would have made it
+
+
+def test_a_neighbour_a_looser_dial_would_pull_in_puts_the_set_in_that_band() -> None:
+    """The reader's actual question, and the band that answers it: would turning the
+    dial down have brought in the frame they say is missing."""
+    asked = one([A, B, C], scores(ab=300, ac=300, bc=LOOSER))
+
+    assert asked.members == (A, B)
+    assert (asked.deciding, asked.band) == (LOOSER, "loosen")
+
+
+def test_a_set_held_together_at_the_line_is_one_the_setting_already_merges() -> None:
+    """Without this band a round could only discover missing merges and never wrong
+    ones, which would flatter every loosening."""
+    asked = one([A, B], scores(ab=HOLDS))
+
+    assert (asked.deciding, asked.band) == (HOLDS, "merged")
+
+
+def test_a_set_resting_on_a_pair_with_no_match_row_is_one_no_dial_reaches() -> None:
+    """"Matches most members" can hold a stack together over a pair the geometry
+    never checked, and no strictness would have merged that pair. If the dial turns
+    out not to be the answer, this band is the evidence for what is."""
+    asked = one([A, B, C, D], scores(ab=300, ac=300, ad=300, bc=300, bd=300))
+
+    assert asked.members == (A, B, C, D)
+    assert (asked.deciding, asked.band) == (NOTHING, "unreachable")
+
+
+def test_a_set_the_match_commits_to_is_not_a_question_and_is_not_drawn() -> None:
+    asked = one([A, B], scores(ab=300))
+
+    assert asked.band is None
+    assert label.spread([asked], 5) == []
+
+
+# --- drawing them one at a time -----------------------------------------------
+
+BASE = datetime(2021, 6, 1, 12, 0, 0)
+APART = 2  # seconds between the frames of a run, well inside the fence
+AWAY = 7200  # seconds between runs, well outside it
+
+
+class Catalog:
+    """Frames in time with the Matches between them written by hand.
+
+    Enough of a catalog for `candidates.population` to cut runs out of, and no more:
+    a Match is stated here rather than derived from a photograph, because what is
+    under test is which sets a known set of numbers becomes.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+        self.next_id = 0
+
+    def add(self, seed: str, second: int, camera: str = "Lumix") -> str:
+        sha256 = sha_of(seed)
+        self.conn.execute(
+            "INSERT INTO file (sha256, size, ext, kind, state, feature_ver, camera,"
+            " taken_src) VALUES (?, 1, '.jpg', 'image', 'published', '{}', ?,"
+            " 'exif:DateTimeOriginal')",
+            (sha256, camera),
+        )
+        self.next_id += 1
+        self.conn.execute(
+            "INSERT INTO photo (id, rep_sha256, sort_key) VALUES (?, ?, ?)",
+            (self.next_id, sha256, (BASE + timedelta(seconds=second)).isoformat()),
+        )
+        self.conn.commit()
+        return sha256
+
+    def matched(self, early: str, late: str, points: int) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pair_match (method, version, sha_early, sha_late,"
+            " points) VALUES (?, ?, ?, ?, ?)",
+            (matches.METHOD, matches.VERSION, early, late, points),
+        )
+        self.conn.commit()
+
+
+def straddling(corpus: Catalog, index: int, camera: str = "Lumix") -> list[str]:
+    """One run holding a set in each of the three bands.
+
+    Eight frames, four stacks of two. The first is held together at the line, so it
+    is one the setting already merges; the second sits beside a frame a looser dial
+    would pull in; the last two agree plainly and border frames the geometry never
+    checked, which no dial reaches.
+    """
+    run = [
+        corpus.add(f"{index}s{step}", index * AWAY + step * APART, camera)
+        for step in range(8)
+    ]
+    a, b, c, d, e, f, g, h = run
+    corpus.matched(a, b, HOLDS)
+    corpus.matched(c, d, 300)
+    corpus.matched(c, e, LOOSER)
+    corpus.matched(d, e, LOOSER)
+    corpus.matched(e, f, 300)
+    corpus.matched(g, h, 300)
+    return run
+
+
+def reading(migrated: tuple[Path, Path], **knobs) -> label.Sitting:
+    """A sitting over the catalog alone, read-only, with `state.sqlite3` not named."""
+    return label.sitting(label.read_only(migrated[0]), **knobs)
+
+
+@pytest.fixture
+def catalog(conn: sqlite3.Connection) -> Catalog:
+    return Catalog(conn)
+
+
+def test_a_run_holds_a_set_in_each_band(catalog: Catalog, migrated) -> None:
+    """The fixture the draws below rest on, asserted rather than assumed."""
+    straddling(catalog, 0)
+
+    drawing = reading(migrated)
+    drawn = [question.band for question in iter(drawing.draw, None)]
+
+    assert sorted(drawn) == ["loosen", "merged", "unreachable", "unreachable"]
+
+
+def test_the_first_set_is_drawn_without_the_catalog_being_cut_whole(
+    catalog: Catalog, migrated
+) -> None:
+    """No pool and no plan: the reader asks for a set and gets one, and the runs
+    behind it are still uncut. Twelve here, and one is enough to answer with."""
+    for index in range(12):
+        straddling(catalog, index)
+
+    drawing = reading(migrated)
+
+    assert len(drawing.order) == 12
+    assert drawing.draw() is not None
+    assert drawing.at == 1
+
+
+def test_two_requests_do_not_hand_back_the_same_set(catalog: Catalog, migrated) -> None:
+    for index in range(4):
+        straddling(catalog, index)
+
+    drawing = reading(migrated)
+    first, second = drawing.draw(), drawing.draw()
+
+    assert first is not None and second is not None
+    assert first.members != second.members
+
+
+def test_a_run_an_earlier_round_answered_about_is_never_drawn(
+    catalog: Catalog, migrated
+) -> None:
+    """Disjointness, by run: whatever the reader said about that run, they said it
+    about those photographs, and a new round asking again from a slightly different
+    angle buys nothing."""
+    judged = straddling(catalog, 0)
+    for index in range(1, 4):
+        straddling(catalog, index)
+
+    # One frame of it, and not one the sets were even drawn around.
+    drawing = reading(migrated, already={judged[7]})
+    drawn = list(iter(drawing.draw, None))
+
+    assert drawn
+    assert not any(question.run() & set(judged) for question in drawn)
+
+
+def test_the_sets_are_drawn_from_more_than_one_camera(catalog: Catalog, migrated) -> None:
+    """A setting calibrated on the body the operator shoots most must not quietly
+    misbehave on the others, and the sitting may be four sets long."""
+    straddling(catalog, 0, "Lumix")
+    straddling(catalog, 1, "Lumix")
+    straddling(catalog, 2, "Sony")
+
+    drawing = reading(migrated)
+    drawn = [drawing.draw() for _ in range(4)]
+
+    assert {question.camera for question in drawn} == {"Lumix", "Sony"}
+
+
+def test_the_draw_ends_when_the_catalog_has_no_question_left(
+    catalog: Catalog, migrated
+) -> None:
+    straddling(catalog, 0)
+
+    drawing = reading(migrated)
+    while drawing.draw() is not None:
+        pass
+
+    assert drawing.draw() is None
+    assert drawing.dry == set(label.BANDS)  # searched for, and none left
 
 
 # --- what the reader's answer says --------------------------------------------
@@ -487,6 +808,91 @@ def test_an_answer_records_the_stack_it_was_about() -> None:
     assert stored["camera"] == "Lumix"
 
 
+def test_this_sitting_is_stamped_as_round_three(answers) -> None:
+    """The report scores a round apart from the rounds that chose the setting it is
+    checking, so what this sitting writes has to say it is neither of them."""
+    given(answers)
+
+    assert label.ROUND == 3
+    assert label.answers(answers)[label.key((A, B))]["round"] == 3
+    assert len(label.answers(answers, 3)) == 1
+    assert label.answers(answers, 2) == {}
+
+
+def test_a_reason_says_why_the_frame_it_is_keyed_on_does_not_belong(answers) -> None:
+    """The count four tickets downstream turn on: "the wrong people are in it" was
+    indistinguishable from "this is a different photograph" until this column."""
+    given(answers, evicted=(A,), reasons={A: "people"})
+
+    stored = label.answers(answers)[label.key((A, B))]
+    assert stored["evicted"] == [A]  # the shape rounds one and two wrote, unchanged
+    assert stored["reasons"] == {A: "people"}
+
+
+def test_a_set_split_for_two_different_reasons_reads_as_such(answers) -> None:
+    """Which is why the reasons are stored per frame and not per set."""
+    given(answers, evicted=(A, B), reasons={A: "people", B: "close"})
+
+    assert label.answers(answers)[label.key((A, B))]["reasons"] == {
+        A: "people",
+        B: "close",
+    }
+
+
+def test_an_answer_nobody_could_be_asked_why_about_reads_as_unknown(answers) -> None:
+    """Not as "no reason given": rounds one and two hold sixty answers with nothing
+    to press, and counting their silence as a denial would make the people problem
+    look smaller than it is."""
+    given(answers, evicted=(A,))
+
+    assert label.answers(answers)[label.key((A, B))]["reasons"] is None
+
+
+def test_a_reader_asked_and_pressing_nothing_is_a_different_fact(answers) -> None:
+    given(answers, evicted=(A,), reasons={})
+
+    assert label.answers(answers)[label.key((A, B))]["reasons"] == {}
+
+
+def reasonless(path: Path, rows: list[tuple]) -> None:
+    """A labels file in the shape written before an eviction could say why."""
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE answer (members TEXT PRIMARY KEY, camera TEXT, surrounding TEXT,"
+        " margin INTEGER, verdict TEXT, evicted TEXT, included TEXT, answered_at TEXT,"
+        " round INTEGER NOT NULL DEFAULT 1)"
+    )
+    old.executemany("INSERT INTO answer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    old.commit()
+    old.close()
+
+
+def test_an_answer_from_before_the_column_existed_still_reads(tmp_path: Path) -> None:
+    """The sixty answers rounds one and two hold are what ADR 0003's findings are
+    derived from, and this ticket must not touch them."""
+    path = tmp_path / "labels.sqlite3"
+    reasonless(
+        path,
+        [
+            (label.key((A, B)), "Lumix", f'["{C}"]', 2, "split", f'["{B}"]', "[]",
+             "2026-08-11", 2),
+        ],
+    )
+
+    conn = label.store(path)
+    try:
+        stored = label.answers(conn)[label.key((A, B))]
+        given(conn, evicted=(A,), reasons={A: "moment"})
+        fresh = label.answers(conn)[label.key((A, B))]
+    finally:
+        conn.close()
+
+    assert (stored["round"], stored["verdict"], stored["evicted"]) == (2, "split", [B])
+    assert stored["reasons"] is None
+    # And the column it gained is writable, so the round in hand records into it.
+    assert fresh["reasons"] == {A: "moment"}
+
+
 def test_an_answer_records_which_round_asked_it(answers) -> None:
     """Round two's answers are a check on the setting round one chose, so an answer
     that did not say which round asked it could not be told from the evidence it is
@@ -497,8 +903,8 @@ def test_an_answer_records_which_round_asked_it(answers) -> None:
 
 
 def test_the_counter_reads_the_round_in_hand(answers) -> None:
-    """"How many more are useful" is a question about this sitting, and an earlier
-    round's answers are not in the sample at all."""
+    """"How many have I given" is a question about this sitting, and an earlier
+    round's answers are not drawable at all."""
     given(answers, round=1)
 
     assert label.answers(answers, 2) == {}
@@ -506,13 +912,15 @@ def test_the_counter_reads_the_round_in_hand(answers) -> None:
     assert len(label.answers(answers)) == 1  # every round, which is what the report reads
 
 
-def test_only_an_earlier_round_keeps_a_set_out_of_the_sample(answers) -> None:
-    """An answer given in the round in hand comes back with its set so it can be
-    revised; a set an earlier round settled is a question already answered."""
+def test_only_an_earlier_round_keeps_a_run_out_of_the_draw(answers) -> None:
+    """The frames an earlier round's answers were about, which is how a run is named
+    -- and never the round in hand's, whose answers come back with their sets so they
+    can be revised."""
     given(answers, round=1)
     label.record(answers, OTHER, shown=1, evicted=(), included=(), unsure=False, round=2)
 
-    assert label.answered_before(answers, 2) == {label.key((A, B))}
+    assert label.answered_before(answers, 2) == {A, B}
+    assert label.answered_before(answers, 3) == {A, B, C, D}
     assert label.answered_before(answers, 1) == set()
 
 
@@ -636,14 +1044,14 @@ def test_answers_written_before_rounds_existed_are_round_one(tmp_path: Path) -> 
     conn = label.store(path)
     try:
         carried = label.answers(conn)
-        # And they are what round two will not ask again.
+        # And their run is what a later round will not ask about again.
         settled = label.answered_before(conn, 2)
     finally:
         conn.close()
 
     assert carried[label.key((A, B))]["round"] == 1
     assert carried[label.key((A, B))]["surrounding"] == [C]
-    assert settled == {label.key((A, B))}
+    assert settled == {A, B}
 
 
 def test_naming_the_round_happens_once_and_a_second_open_leaves_it_alone(

@@ -12,9 +12,10 @@ repository root is the thing that runs: the grid and triage website, and the sch
   `migrate`, `triage` and `reveal` from `photolib`; the arrow never points the other way.
 - `archive/v1/` is the previous implementation, kept as **read-only reference**. Read it
   freely; do not edit it, refactor it, or fix its bugs.
-- `harness/` is the labelling harness, **scaffolding with a stated end of life**: it settles
-  the strictness threshold and is deleted whole once the grid ticket lands. Same one-way
-  arrow as `archive/pipeline/`.
+- `harness/` is the labelling harness and the reports over it — **a standing tool, not
+  scaffolding**. It was written to settle the strictness threshold once and it stays, because
+  recalibrating the grid against the reader's taste turned out to be a recurring need. Same
+  one-way arrow as `archive/pipeline/`: it reads `photolib`, `photolib` never reads it.
 - **`Open Photo Vault.cmd`** at the root is the double-click launcher for the website.
 
 ## Hard rules
@@ -116,6 +117,9 @@ is a property of the view. Nothing is drawn stacked until
 **linkage** — pick *which* stored assignment to read, and offer only the settings a pass has
 written, so a knob is a choice between populations rather than a threshold dialled live;
 the window is not among them, being the fence the Match rows were computed behind.
+Two populations exist: **strictness 10 with *the chain*, which is the default**, and
+strictness 20 with *matches most members*, which was the default until 2026-08-21 and is
+kept so that the change is something the reader can see rather than be told about.
 Moving one regroups, which empties the selected set, so the panel says so before it happens
 rather than after. It is grid-only: `/api/triage/*` is untouched and
 a triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
@@ -229,18 +233,26 @@ against a median of 5 beyond two minutes.
 python -m photolib.matches
 ```
 
-To judge those Matches — the **labelling harness** ADR 0003 says strictness will be settled
-by. It shows one candidate stack at a time with the frame before and after it, which is what
+To judge those Matches — the **labelling harness**, which is where strictness was settled and
+where it is settled again whenever the grid stops matching the reader's taste. It shows one
+candidate stack at a time with the frame before and after it, which is what
 lets one screen answer both of the reader's complaints: *does this stack hold something that
 does not belong*, and *is it missing something that should be here*. Space accepts the stack
 as drawn, clicking a member says it does not belong, clicking a neighbour says it should have
 been included — each click is recorded as it is made — and `u` records **not sure**, which is
 an answer rather than a skip; dragging across several frames marks them together and records
-once. The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the run is on screen.
+once. **`p`, `m` and `c` say why a frame does not belong** — different people, a different
+moment, just not close enough — and the answer stores that **per frame**, so a set split for
+two reasons reads as such and the reader's instinct that people are the problem becomes a
+count. A press answers for the frames pushed out that have no reason yet, so a drag of three
+and one press covers all three; missing the key blocks nothing, and an answer given before the
+column existed reads as *reasons unknown* rather than as none given. Nothing reads the column
+yet: the ticket that prices the people rule does, and `harness.calibrate` ignores it.
+The keys are vim's — `h`/`l` between sets, `k`/`j` for how much of the run is on screen.
 `k` widens the view when the answer turns on what is past the edge, **with no ceiling** — one
 frame each side is enough for 46% of candidate stacks but only 27% of the least decisive ones,
-and every ceiling picked for it so far has been hit, so the whole run rides with the set. That
-is 3,808 frames and about 316 KB over a round's thirty sets. `g` shows the whole run and `0`
+and every ceiling picked for it so far has been hit, so the whole run rides with the set.
+`g` shows the whole run and `0`
 comes back. The frames shrink to a floor and then the box scrolls, rather than the view
 stopping. **The frame past each end of the run is drawn too**, dotted and always — the fence
 rules it out of the stack, so it is there as the reader's check that the run ended because the
@@ -249,25 +261,36 @@ the same photograph is a wrong timestamp, and nothing else on the screen could s
 answer says is bounded by what was on screen for it**, which is stored per answer and is the
 column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
 that the stack is complete. Answers go to a `labels.sqlite3` of its own beside the catalog,
-**never `state.sqlite3`**, and it is not a migrated database because a disposable table has no
-business in the shipped schema. Frames come from the substrate tree. Its one test is the
-sampling.
+**never `state.sqlite3`**, and it is not a migrated database because a table nothing shipped
+reads has no business in the shipped schema. Frames come from the substrate tree.
 
-**One run is one of ADR 0003's two rounds of thirty, and which round it is decides which sets
-are dealt.** `--strictness`, `--linkage`, `--sets` and `--round` say so, and their defaults are
-round two: strictness 20 with *matches most members*, which is what round one settled rather
-than what the ADR argued from. Round one ranked its sets by how little the Match committed to
-them; round two leads on **the chain** — how many frames single linkage would drag across a
-boundary the settled rule drew, either side of the stack and counted over every member rather
-than the first, which is where a pan or a walk between subjects shows up — and breaks ties on
-that margin. Measured over this catalog: 20 of round two's 30 sets have a chain to price, one
-of them dragging 48 frames, at margins up to 244 points where the least-decisive ranking would
-never have looked. That population is the one round one holds none of and the
-single question standing between neighbour linkage and the default; the reader is not told which
-sets those are, because that would prime the rejection the round exists to observe. Both rounds
-are still dealt out a camera at a time and in the same deterministic order, **a set an earlier
-round answered is not asked again**, and the counter counts the round in hand. Round one's
-existing answers carry over as round one with nothing re-labelled.
+**A round is one sitting bounded by the reader stopping**, and `--round` says which one it is —
+3 by default, `--strictness` and `--linkage` still saying what the sets are drawn at. **Nothing
+is generated before the reader asks for it**: the first set arrives with the page, each one
+after it is a query over numbers already in the catalog, and eight sets is a round exactly as
+two hundred is. Rounds one and two drew thirty each from wherever the Match was least decisive
+around the setting — round one on the margin, round two on **the chain**, which is how many
+frames single linkage would drag across a boundary the settled rule drew and is what priced
+neighbour linkage out. Neither sampler could ask whether the line is in the right place at all,
+so round three draws from **three bands** instead: pairs a looser dial would newly merge
+(5–19, 40% of the draw), pairs the shipped setting already merges (20–40, 40% — without them a
+round can only find missing merges and would flatter every loosening), and pairs no strictness
+reaches (under 5 or no Match row, 20% — the evidence for what the answer is if the dial is not).
+**Those boundaries are cut around strictness 20, which is where the grid stood when round
+three was drawn and is no longer where it stands** — the setting shipped now is 10, so the
+middle band is only partly "already merges" and the sampler still draws at 20. It stays that
+way on purpose: re-pointing it means re-deriving the three bands, which is a round-four
+question and not a constant to nudge. `harness/label.py`'s `STRICTNESS` says the same thing
+where a reader would edit it.
+A set is banded by the least decisive pair its drawing turns on and never by its strongest, and
+above 40 is decisive and not drawn at all. The bands are **mixed rather than served in blocks**,
+because a round abandoned halfway through would otherwise be a round of one band; a band that
+runs out is said so on the console and never on the page, since telling the reader which band a
+set came from is telling them what to say about it. Sets are still dealt across the cameras and
+in the same deterministic order, **a run an earlier round answered about is not asked about
+again** — by run and not by set, so a stack redrawn a frame wider is not a fresh question — and
+the counter counts the answers given this round. Every earlier round's answers carry over with
+nothing re-labelled.
 
 ```bash
 python -m harness.label --open
@@ -289,12 +312,34 @@ harness's window. The frame past the end of the run is separated out for the sam
 in reverse: no strictness reaches it, so what the reader said about it is evidence about
 the 3600s fence. Confident labels are scored apart from the not-sure ones, and every
 setting **names the labelled cases it gets wrong** rather than only counting them.
-**The rounds are scored apart and never pooled**: the earliest round is the evidence a
-setting is chosen from, every later one is replayed against that choice without voting on
-it — pooling them would let the check recommend the thing it is checking — and round two's
-own section prices the chain at the chosen strictness, which is the comparison round one's
-labels could not make, naming the cases **every** rule gets wrong there and not only the
-chosen rule's. `--precision` moves the floor and `--linkage` narrows which rules are
+
+**The floor is 85% and it used to be 95%**, a named constant carrying its reasoning so that
+moving it again is a decision rather than an edit: the reader browsed the 95% result,
+reported seeing no wrongly stacked photographs at all *and* that the pre-stacking grouping
+was better, which says the floor was above the evidence and the recall it cost is the whole
+complaint. **A rate is not the whole of a mistake**, so every setting also reports the most
+wrongly stacked pairs in any single case, and among the settings within a hair of the best
+recall — one point, `HAIR`, because two thresholds never tie exactly and a tie-break waiting
+for one never fires — the one whose errors *scatter* wins. **Both counting conventions are
+printed and neither is chosen**: once per answer, which is the weight a calibration wants,
+and once per pair globally, which is what a share of a population needs.
+
+**The rounds are scored apart and never pooled, and the newest one chooses.** That is the
+inversion of the rule this ran under before and it is deliberate: rounds one and two were
+answered under the 95% floor and a stricter question, so they check the pick rather than
+make it. **A quarter of the newest round is held back** from the choice as well — partitioned
+by a stable hash of each answer's own key, never a draw, so re-running cannot re-roll the
+slice until it agrees — and the pick is replayed against it afterwards; a pick that fails
+its own check is printed as failing rather than silently re-chosen. That is the confirmation
+round two used to provide, taken out of the same sitting. Under twenty confident answers in
+the choosing slice it **refuses and says the count** rather than returning a bad number.
+Round two keeps its own job either way: its section prices the chain at the chosen
+strictness, which is the comparison round one's labels could not make, naming the cases
+**every** rule gets wrong there and not only the chosen rule's — and where the chain is
+itself what was chosen, it is asked whether it clears the floor on the sets drawn to break
+it rather than asked to beat itself.
+
+`--precision` moves the floor and `--linkage` narrows which rules are
 in the running, so a decision to set one aside is a command rather than an argument made
 afterwards. It reads
 the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate and never touches
@@ -307,18 +352,15 @@ that were never checked.
 python -m harness.calibrate
 ```
 
-Its output is `docs/adr/0003-stack-on-verified-match.md`'s "What the labels settled" and
-"What round two settled", and **the bare run above is not the command that returns what the
-ADR recorded.** Over all three rules it recommends *neighbour* linkage at 25 — the best
-recall clearing the floor on round one — and the ADR declines it, now with round two's
-measurement rather than round one's argument: on the sets drawn where a chain crosses a
-boundary, neighbour scores 88.8% precision at strictness 20 and 92.1% at 25, both under the
-floor. The recorded default is strictness 20 with *matches most members*, confirmed by that
-round at 96.5% precision, and this is the run that returns it:
-
-```bash
-python -m harness.calibrate --linkage complete,majority
-```
+Its output is `docs/adr/0003-stack-on-verified-match.md`'s "What the recalibration settled",
+and the bare run above **is** the command that returns what the ADR now records: *the chain*
+at strictness 10, at 97.0% precision and 93.2% recall on round three's choosing slice, 90.2%
+on the quarter held back from it, and 88.2% on round two's chain-crossing sets — the
+population that declined the chain when the floor was 95%. The rule did not change and the
+floor did. The two earlier sections, "What the labels settled" and "What round two settled",
+describe the setting this superseded and the run that returned it is still
+`python -m harness.calibrate --linkage complete,majority`; that setting's population is
+still in `stack_member` and still offered by the Stacks panel.
 
 To price the **fingerprint screen** — the other thing ADR 0003 left open, and the one the
 labels turned round: at 0.40 the screen costs 5.2% of the pairs the reader kept together,
@@ -344,6 +386,26 @@ leaving the screen where it is.
 python -m harness.screen
 ```
 
+To finish that question — **match the pairs the screen rejected and see whether the geometry
+was there.** `harness.screen` prices a looser screen from the stored cosine and stops, on
+ADR 0003's reasoning that a recovered pair only helps if its Match then clears the reader's
+strictness. That held at strictness 20 and stops holding at 10, so this computes the number
+the ADR left open. **It writes nothing, and that is a fact about the code rather than a
+promise**: both connections are read-only, `candidate_pair` and `pair_match` are untouched,
+the 0.40 screen stays frozen, and the refusal guarding it is borrowed whole. It reads
+`labels.sqlite3`, the catalog and the substrate tree, all on the NVMe, and never opens `G:`.
+Unlike `harness.screen` it decodes photographs, so it is the slow one of the two, and a pair
+is counted once each rather than once per answer. `--strictness` defaults to the setting the
+grid runs. Measured: **297** kept pairs the screen turned away over three rounds, all 297
+decoded — no hole in the tree — Matches of median 9, quartiles 4/16 and best 413, of which
+**134 reach strictness 10** where 67 would have reached 20. Its output is ADR 0003's "The
+screen's last open number, answered", which says the reasoning has turned and leaves acting
+on it to a ticket of its own.
+
+```bash
+python -m harness.rejected
+```
+
 To read those Matches as **membership** — one row per tile saying which stack it is in,
 at the setting the labels settled. It is stored rather than derived per query because
 membership is a property of the photographs and not of the view, and **this table is what
@@ -367,11 +429,14 @@ pass counts those pairs and names the frames a *survivor* with no Match row touc
 being a hole rather than a design. It reads the catalog on the NVMe and nothing else — no
 substrate, no `G:`, and `state.sqlite3` is not attached. Resumable a run at a time,
 idempotent, and it refuses while a writer holds the catalog.
-Measured: 24,076 EXIF-dated tiles in 1,954 runs placed in 2–3s, 5–9s including the plan,
-into 9,108 stacks — 4,138 of them holding more than one frame, the largest 96, collapsing
-19,106 tiles. Of the fence's 3,634,381 pairs, 566,522 carry a Match and 3,065,689 were
-rejected by the screen; **no survivor is missing a Match row**, so nothing is owed. The
-table grew the catalog from 2,631 MB to 2,636 MB.
+Measured at the shipped setting — strictness 10 with *the chain*: 24,076 EXIF-dated tiles in
+1,954 runs placed in 2–3s, 5–9s including the plan, into 7,995 stacks — 3,984 of them holding
+more than one frame, the largest 96, collapsing 20,065 tiles. Of the fence's 3,634,381 pairs,
+566,522 carry a Match and 3,065,689 were rejected by the screen; **no survivor is missing a
+Match row**, so nothing is owed. The setting this superseded — strictness 20 with *matches
+most members*, 9,108 stacks and 19,106 tiles collapsed — is **still in the table**, because a
+setting is part of the key: the Stacks panel offers both and the reader flips between them.
+Each population costs about 5 MB of catalog.
 
 ```bash
 python -m photolib.membership

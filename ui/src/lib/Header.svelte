@@ -503,12 +503,34 @@
      `--bar-min`, the margin gives way and the bar stops shrinking.
 
      `stretch` is the default for the bar's own stack, which is how the bar stays
-     as tall as its contents and grows when the chips wrap. */
+     as tall as its contents and grows when the chips wrap.
+
+     The window in that `min()` is `100%` and not `100vw`, which are not the same
+     window when a scrollbar is out: `100vw` counts it and this box's percentages
+     do not, so the bar came out the scrollbar's width narrower than the floor it
+     was promised — 545 on this grid where `--bar-min` says 560. A floor measured
+     off the row it has to hold has to be compared against the space the row is
+     actually laid out in, and 15px is most of the gap between the two pills that
+     were overlapping.
+
+     The margin gives way to nothing and no further. On a window narrower than
+     the floor itself the halved remainder is negative, and a negative margin is
+     the bar hanging off both edges of the window rather than a bar that has run
+     out of room: at 560 it does that on a window the old 420 still fitted, so
+     the floor and this guard are one change. What the bar does with the room
+     instead is wrap, which is the row's answer to being short of it.
+
+     One margin named once and read from both sides, rather than the same
+     expression written out twice: they are two sides of a centred bar and are
+     the same number by definition, so the property is what keeps them from
+     drifting apart in an edit. The percentage in it resolves where it is used,
+     which is here, against the box these two insets are positioning. */
   .topbar {
+    --bar-margin: max(0px, min(var(--header-side), calc((100% - var(--bar-min)) / 2)));
     position: fixed;
     top: var(--header-top);
-    left: min(var(--header-side), calc((100vw - var(--bar-min)) / 2));
-    right: min(var(--header-side), calc((100vw - var(--bar-min)) / 2));
+    left: var(--bar-margin);
+    right: var(--bar-margin);
     z-index: 30;
     display: flex;
     align-items: stretch;
@@ -687,9 +709,26 @@
     letter-spacing: -0.01em;
   }
 
+  /* The pills wrap, and that is what keeps them off the two buttons after them.
+     They are `flex: none` — a pill narrower than its own word is not a control —
+     so a row of them that does not fit has to go somewhere, and with `nowrap`
+     and `overflow: visible` the somewhere was on top of the theme button and
+     Triage, which do not move when the controls grow. Wrapping is the only one
+     of the three answers that keeps every control both whole and legible:
+     clipping loses one, scrolling hides one behind a gesture nothing announces.
+
+     The bar grows taller by a row when it happens, which is a thing this header
+     already does for the chips and already publishes — `--header-h` is measured
+     rather than assumed, so the photographs start below the taller bar.
+
+     `--bar-min` is what keeps this rare: it is set to what the row actually
+     measures, so wrapping is the answer to a window narrower than the bar's
+     floor or a composition wider than the shipped one, rather than the answer to
+     an ordinary page. */
   .controls {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--s-2);
     flex: 1;
     min-width: 0;

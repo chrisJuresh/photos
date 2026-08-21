@@ -1,6 +1,6 @@
-/* The labelling harness's whole appearance. Deliberately plain: it is
-   scaffolding, it is deleted with the rest of `harness/`, and nothing about it
-   is shared with the website's own styling. */
+/* The labelling harness's whole appearance. Deliberately plain, and deliberately
+   its own: nothing here is shared with the website's styling, because the reader
+   is judging photographs and not looking at a product. */
 
 :root {
   color-scheme: dark;

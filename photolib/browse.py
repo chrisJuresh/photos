@@ -86,9 +86,12 @@ STACK_ON = "on"
 
 # The setting the grid reads unless the reader names another: what
 # `python -m photolib.membership` writes by default, which is what ADR 0003's
-# labels settled.
-DEFAULT_STRICTNESS = 20
-DEFAULT_LINKAGE = "majority"
+# labels settled. It moved once, from strictness 20 and "matches most members",
+# when the precision floor the report ranks under moved from 95% to 85% -- see
+# `photolib.membership.STRICTNESS`, which carries the reasoning, and note that the
+# old population is still written and still selectable.
+DEFAULT_STRICTNESS = 10
+DEFAULT_LINKAGE = "neighbour"
 
 # The assignment the grid reads: the setting `photolib.membership` wrote
 # `stack_member` under. A change of any of the five adds a population to that table

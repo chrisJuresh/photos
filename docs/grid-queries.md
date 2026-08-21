@@ -43,7 +43,7 @@ count equals what selecting it actually yields. Keep both green.
 
 `stack=on` draws the frames verified to be the same photograph as one tile. **The
 grouping is read, not computed**: `photolib.membership` wrote one row per tile at
-strictness 20 with *matches most members* behind the 3600s fence, and `browse.py` joins
+strictness 10 with *the chain* behind the 3600s fence, and `browse.py` joins
 `stack_member` on those five key columns — [ADR 0003](adr/0003-stack-on-verified-match.md)
 is the decision and [ADR 0001](adr/0001-stack-on-capture-time-not-phash.md) the
 measurements it stands on. There is no window to send: what used to be a slider is the
@@ -80,8 +80,17 @@ Measured over the real catalog with membership in place — the default stills v
 
 | | stacks | of more than one | largest | stacks of one |
 |---|---|---|---|---|
-| whole view | 9,338 | 4,138 | 96 | 5,200 |
-| `orient=landscape` | 2,165 | 756 | 48 | 1,409 |
+| whole view | 7,712 | 3,505 | 96 | 4,207 |
+| `orient=landscape` | 2,010 | 708 | 48 | 1,302 |
+
+Re-measured 2026-08-21 when the default moved from strictness 20 with *matches most
+members* to strictness 10 with *the chain* — see ADR 0003's "What the recalibration
+settled". The setting it moved from is still a population in the table and still drawable,
+and on the same machine and the same tile set it reads 8,706 / 3,621 / 96 / 5,085 for the
+whole view and 2,203 / 683 / 48 / 1,520 for `orient=landscape`. **Fewer stacks of more than
+one frame and fewer stacks of one at the same time** is what a looser rule does: it pulls
+frames that used to stand alone into stacks that already existed rather than starting new
+ones.
 
 **A filter shrinks a stack and never splits it, checked over the whole corpus.** Every
 stack under `orient=landscape`, `ext=.jpg`, `grade=best` and `year=2023` is a subset of a
@@ -93,10 +102,20 @@ holds and is memoised per view and sort — see `GridServer.assignment`:
 
 | view | assignment | 500-cover page | 200-cover page |
 |---|---|---|---|
-| `newest` | 630 ms | 56 ms (1,579 frames) | 19 ms |
-| `oldest` | 660 ms | 23 ms (757 frames) | 7 ms |
-| `largest` | 340 ms | 61 ms (1,757 frames) | 29 ms |
-| `newest`, `orient=landscape` | 470 ms | 43 ms (1,211 frames) | 18 ms |
+| `newest` | 713 ms | 80 ms (1,883 frames) | 26 ms (523 frames) |
+| `oldest` | 714 ms | 27 ms (800 frames) | 9 ms (280 frames) |
+| `largest` | 370 ms | 47 ms (1,260 frames) | 12 ms (344 frames) |
+| `newest`, `orient=landscape` | 513 ms | 48 ms (1,228 frames) | 22 ms (523 frames) |
+
+**Re-measured 2026-08-21 at the looser default, because a bigger average stack is more
+frames behind the same number of covers.** The same script in the same process reads 647 /
+64 / 22 ms, 701 / 29 / 10 ms, 393 / 49 / 13 ms and 572 / 50 / 23 ms at the setting this
+moved from. Only one figure moved beyond the ±15% these timings repeat within: **a
+500-cover `newest` page, 64 ms to 80 ms**, and it is the cover rule reading 1,883 members
+where it read 1,579. The bill tracks frames on the page and never stacks in the table,
+which is why `oldest` and `largest` did not move at all and why a second population in
+`stack_member` costs nothing. First paint on `newest` is ~790 ms against ~710 ms, and the
+30 ms gate is met by a 200-cover page on `oldest` and `largest` as it was.
 
 Against 9 ms for an unstacked page and 227 ms for a `total`. The plan is
 `SCAN p USING INDEX photo_sort` with `SEARCH sm USING PRIMARY KEY` — membership is a
@@ -106,10 +125,10 @@ order. A test asserts all three.
 
 **The bill against what it replaced is close to a wash, and its shape changed.** The
 window grouping paid ~410 ms to count the stacks plus 72–77 ms for a first `newest` page,
-and ~22 ms a page after it; this pays ~630 ms once and 56 ms a page. So the first paint on
-`newest` is ~690 ms where it was ~490 ms, every page after it is cheaper, and **the 30 ms
-the spec asked for is met only by a 200-cover page on `oldest`**. The lever is the page
-size, as it was.
+and ~22 ms a page after it; this pays ~713 ms once and 80 ms a page. So the first paint on
+`newest` is ~790 ms where it was ~490 ms, every page after it is cheaper, and the 30 ms
+the spec asked for is met by a 200-cover page on `oldest` and `largest`. The lever is the
+page size, as it was.
 
 **Both of the count pane's numbers come out of that one pass.** `stacks` is the
 assignment's length rather than a count of its own, which is how two readings of one
@@ -151,8 +170,9 @@ stack sits. The keyset cursor stays the *first* member's `(key, id)`, since that
 ordering's own row; the drawn frame can sit anywhere in it.
 
 **The rule costs one read over the page's own members**, and on a stacked page it is
-most of the bill: a 500-cover `newest` page ranks 1,299 members and spends 33 ms of its
-56 ms doing it. Both halves of that read are irreducible without a schema change this
+most of the bill: a 500-cover `newest` page ranks 1,883 members and spends 42 ms of its
+80 ms doing it — 1,579 and 33 of 64 at the setting the default moved from, which is the
+whole of why that page got dearer. Both halves of that read are irreducible without a schema change this
 feature does not make — fetching the rows by id, and SQLite parsing `file.quality` once
 per row. Stacks of one are not read for at all, having nothing to choose between, and
 computing the mean in SQL with `json_each` measured slower than shipping the histogram

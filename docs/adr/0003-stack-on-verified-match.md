@@ -546,3 +546,134 @@ grid actually draws.
 They are also reproducible from the catalog and the labels file on the NVMe, read-only, and
 from nothing in this repository — which is why they are written down here rather than asserted
 in a test.
+
+## What the recalibration settled
+
+**Strictness 10, linkage "the chain".** Recorded 2026-08-21 from round three of the
+labelling harness — ninety-three sets, every one answered with certainty — replayed by
+`harness/calibrate.py` under the 85% floor the section above adopted. It supersedes
+strictness 20 with *matches most members*, and **it does not delete it**: a setting is part
+of `stack_member`'s key, so the old assignment is still in the table and still offered by
+the Stacks panel. The command that returns this setting is the bare one:
+
+```bash
+python -m harness.calibrate
+```
+
+### Which labels chose it, and which only checked it
+
+**Round three chose; rounds one and two were replayed as checks.** That is the inversion of
+the rule the section above ran under, it is deliberate, and this is where it is recorded:
+rounds one and two were answered against a 95% floor and a stricter question, so they can no
+longer be what settles the looser one. They still check it, and a check they could not fail
+would not be worth running.
+
+**A quarter of round three was held back from the choice**, partitioned by a stable hash of
+each answer's own key rather than drawn — so re-running the report cannot re-roll the slice
+until it agrees. Seventy answers chose and twenty-three checked. That is the confirmation
+round two provided last time, taken out of the same sitting instead of another evening.
+
+The choosing slice is 23,440 labelled pairs over 33 runs — 10,009 the reader kept together
+and 13,431 they pushed apart. Its ceilings, in the same three the section above reports:
+**158 kept pairs carry no Match row at all**, 136 more were checked and agreed on nothing,
+and the strongest pair the reader pushed apart scores 239 points. Its five longest sets are
+**90%** of the pairs kept together, which is why the report refuses to choose from fewer than
+twenty answers at all.
+
+### What each population says about the pick
+
+| labels | precision | recall | worst single case | cases wrong |
+|---|---|---|---|---|
+| round 3, choosing slice (70) | 97.0% | 93.2% | 204 | 17/70 |
+| round 3, held back (23) | 90.2% | 91.1% | 18 | 6/23 |
+| round 2, drawn to break the chain (30) | 88.2% | 94.3% | — | 16/30 |
+| round 1 (30) | 86.0% | 51.6% | — | 18/30 |
+
+All four clear the 85% floor. Round one's recall is low because its sets were drawn where the
+Match was least decisive around strictness 20, which is a population this setting was not
+chosen on and is not being scored for.
+
+**The chain is what the floor bought.** This ADR declined *neighbour* linkage by argument and
+round two then declined it by measurement — 88.8% precision at strictness 20 against *matches
+most members*' 96.5%, on sets drawn where a chain crosses a boundary the settled rule drew.
+Those numbers have not moved and neither has the rule. The floor has: 88.2% on that same
+population clears 85% where it failed 95%. This is the one line to read before restoring the
+old rule — the chain was rejected for failing a floor that no longer exists.
+
+At strictness 10 the three rules are close, which is the other half of why the pick is not
+alarming:
+
+| linkage at 10 | precision | recall | worst single case |
+|---|---|---|---|
+| complete | 96.5% | 70.8% | 204 |
+| matches most members | 97.1% | 92.8% | 204 |
+| **the chain** | **97.0%** | **93.2%** | **204** |
+
+### Where the worst case decided it
+
+Ranked on recall alone the sweep returns **matches most members at strictness 4** — 94.1%
+recall, 85.2% precision, and **576 wrongly stacked pairs in a single answer**. It is beaten
+by the tie-break this recalibration added: among the settings within a hair of the best
+recall, the one whose errors scatter wins. The chain at 10 gives up 0.9 points of recall and
+cuts the worst case to 204, and that is the trade the reader described in their own terms — a
+wrong frame in a stack of twelve is a shrug, and a stack holding four unrelated photographs
+is what this whole line of work was opened about.
+
+**"A hair" is one point of recall** (`harness.calibrate.HAIR`), and it is a tolerance rather
+than an equality because two thresholds never tie exactly, so a tie-break waiting for one
+would never fire. The width is read off the evidence: the five longest sets are 90% of the
+pairs kept together, so the third figure of a recall is which bursts the sampler dealt. The
+pick is not knife-edge on it — anything from one point upwards lands on a chain setting near
+strictness 10, and only a tolerance under half a point returns the 576-pair setting.
+
+### Both counting conventions, printed and not chosen between
+
+The sweep table now carries precision and recall twice: once per answer, which is the weight
+a calibration wants, and once per pair globally, which is what a share of a population needs.
+At the chosen setting they are 97.0%/93.2% and 97.0%/94.3%. They disagree by about a point in
+recall, in the direction a long burst predicts, and neither is quoted as the other.
+
+### What the new population is
+
+`python -m photolib.membership` wrote it beside the old one, changing nothing that was there:
+
+| | stacks | of more than one | largest | tiles collapsed |
+|---|---|---|---|---|
+| strictness 20, matches most members | 9,108 | 4,138 | 96 | 19,106 |
+| **strictness 10, the chain** | **7,995** | **3,984** | **96** | **20,065** |
+
+24,076 EXIF-dated tiles in 1,954 runs, placed in 2s. Of the fence's 3,634,381 pairs, 566,522
+carry a Match and 3,065,689 were rejected by the screen; **no survivor is missing a Match
+row**, so nothing is owed. A second run of the finished pass places nothing.
+
+The count is not the whole change: fewer stacks of more than one frame *and* more tiles
+collapsed is a looser rule pulling frames that used to stand alone into stacks that already
+existed. On the grid's `newest` view that is 7,712 covers where the old setting drew 8,706 —
+see `docs/grid-queries.md`, whose page-cost table was re-measured at both settings.
+
+## The screen's last open number, answered
+
+The section above left exactly one thing outstanding: **match the pairs the reader kept that
+the screen rejected, and see whether their geometry agrees.** It said that needed a write to
+the catalog. It does not — the pairs are named by the labels, their substrates are on the
+NVMe, and `matches.match` takes two images — so `python -m harness.rejected` computes it and
+stores nothing. `candidate_pair`, `pair_match` and the frozen 0.40 screen are untouched, and
+the refusal that guards the constant is borrowed whole.
+
+Over all three rounds there are **297** such pairs, counted once each, not the 192 the section
+above names: that figure was over rounds one and two, and round three added to it.
+
+- **All 297 decoded.** Not one is a hole in the derivative tree, which confirms the section
+  above's finding on a population half again as large.
+- Their Matches are **median 9, quartiles 4/16, best 413**, and 35 of them agree on nothing.
+- **134 of them reach strictness 10.** At strictness 20 it would have been 67.
+- The loosest screen that recovers all of them is **0.087**, which `harness.screen` prices at
+  1.77M fresh pairs, 1h42m and 356 MB.
+
+**This overturns the reasoning and not yet the recommendation.** The section above left the
+screen at 0.40 because a recovered pair only helps if its Match then clears strictness, and
+at 20 it judged that unlikely. At 10 it is not unlikely: 45% of the rejected pairs clear, and
+the best of them scores 413 points, which is not a marginal call about a photograph — it is a
+stack the grid is not drawing. Whether that is worth 1h42m and 356 MB is a decision, and
+moving `SCREEN` means re-running the candidates pass, the match pass and the membership pass.
+**That is a ticket of its own; this one measured and stopped.**
