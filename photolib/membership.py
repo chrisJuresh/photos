@@ -69,20 +69,29 @@ from photolib.config import Config, load
 
 # The reader's strictness: the Match at or above which two frames are the same
 # photograph. Settled by the labelling harness and recorded in ADR 0003's "What the
-# labels settled" -- 96.0% precision and 34.2% recall over round one's thirty sets,
-# confirmed by round two at 96.5% on sets drawn to break the rule below. It is a
-# threshold on the Match and never on the fingerprint's cosine, which is
-# `photolib.candidates.SCREEN`.
-STRICTNESS = 20
+# labels settled". It is a threshold on the Match and never on the fingerprint's
+# cosine, which is `photolib.candidates.SCREEN`.
+#
+# **It was 20 and is 10, because the floor it was chosen under moved.** 20 was the
+# best recall clearing a 95% precision floor on round one. The reader then browsed
+# that grid and reported both that they never saw two unrelated photographs in one
+# stack and that the grouping before any of this was better -- which says the floor
+# was above the evidence and the recall it cost is the whole complaint. Round three
+# was labelled to answer the looser question and `harness.calibrate` re-ran the
+# sweep under an 85% floor: 97.0% precision and 93.2% recall on the choosing slice,
+# 90.2% on the quarter held back from it.
+STRICTNESS = 10
 
-# The linkage the same labels settled: "matches most members". ADR 0003 argued from
-# complete linkage and its own measurement overruled that -- 224 of the pairs the
-# reader kept together carry no Match row at all, and complete linkage cannot
-# express a burst holding one, so at 42 frames its named failure is not the lesser
-# evil it was accepted as. `neighbour` was measured and rejected rather than feared:
-# on round two's chain-crossing sets it scores 88.8% precision against this rule's
-# 96.5%.
-DEFAULT_LINKAGE = "majority"
+# The linkage those labels settled, and it moved with the floor: the **chain**, a
+# frame joining the stack when it agrees with the frame before it.
+#
+# ADR 0003 argued from complete linkage, round one's labels overruled that in favour
+# of "matches most members", and round three's overrule it again. `neighbour` was
+# never feared here -- it was measured and rejected, at 88.8% precision on round
+# two's chain-crossing sets against `majority`'s 96.5%, which failed a 95% floor.
+# Under 85% it clears: 88.2% on those same sets and 86.0% on round one's, both
+# scored at the strictness above. The rule did not change and the floor did.
+DEFAULT_LINKAGE = "neighbour"
 
 PROGRESS_SECONDS = 30
 
@@ -160,15 +169,17 @@ def link(
     run: Sequence[str],
     points: Points,
     strictness: int = STRICTNESS,
-    joins: Joins = majority,
+    joins: Joins = LINKAGE[DEFAULT_LINKAGE],
 ) -> list[list[str]]:
     """One run cut into stacks, by `joins` at `strictness`.
 
-    The defaults are the settled setting and not ADR 0003's opening argument, so a
-    caller that says nothing gets the rule the labels chose rather than the one they
-    overruled. Every caller that draws or replays a round passes the round's own rule
-    anyway: `harness.label` passes what its sets are cut with and `harness.calibrate`
-    passes each of `LINKAGE` in turn.
+    **Both defaults are read off the settled setting rather than written out**, so
+    that moving one moves the other with it: a caller that says nothing gets the rule
+    the labels chose and never a rule that was current when this line was typed. Every
+    caller that draws or replays a round passes the round's own anyway --
+    `harness.label` passes what its sets are cut with and `harness.calibrate` passes
+    each of `LINKAGE` in turn -- so what the defaults serve is a reader asking what
+    the grid does.
 
     The walk is forward and greedy whichever rule is in force, as the window grouping
     `photolib.browse` used to do was: a frame the walk consumed early can agree with

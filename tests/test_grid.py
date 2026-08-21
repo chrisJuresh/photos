@@ -1059,6 +1059,13 @@ def test_stacking_off_returns_what_it_returned_before_stacking_existed(stacked):
 
 
 STRICTER = {"strictness": 40, "linkage": browse.DEFAULT_LINKAGE}
+# The setting the grid is pointed at, read rather than written out: it moves when the
+# labels are recalibrated, and none of these tests is about which value it currently
+# holds. `tests/test_membership.py` is where the value itself is asserted.
+DEFAULT_SETTING = {
+    "strictness": browse.DEFAULT_STRICTNESS,
+    "linkage": browse.DEFAULT_LINKAGE,
+}
 
 
 def place_stricter(grid: Grid) -> dict[str, list[int]]:
@@ -1094,10 +1101,11 @@ def test_the_facets_route_offers_the_assignments_that_exist(stacked):
     names no vocabulary of its own."""
     place_stricter(stacked)
     stacking = get_json(stacked.port, "/api/facets")["stacking"]
-    assert stacking["default"] == {"strictness": 20, "linkage": "majority"}
+    label = browse.LINKAGE_LABELS[browse.DEFAULT_LINKAGE]
+    assert stacking["default"] == DEFAULT_SETTING
     assert stacking["settings"] == [
-        {"strictness": 20, "linkage": "majority", "label": "matches most members"},
-        {"strictness": 40, "linkage": "majority", "label": "matches most members"},
+        {**DEFAULT_SETTING, "label": label},
+        {**STRICTER, "label": label},
     ]
 
 
@@ -1114,13 +1122,16 @@ def test_a_page_is_grouped_at_the_setting_the_reader_asked_for(stacked):
     stricter = place_stricter(stacked)
     body = get_json(stacked.port, "/api/photos?limit=1000&stack=on&strictness=40")
 
-    assert (body["strictness"], body["linkage"]) == (40, "majority")
+    assert (body["strictness"], body["linkage"]) == (40, browse.DEFAULT_LINKAGE)
     assert body["total"] == len(stacked.rows)  # the knob groups tiles, never hides them
     assert body["stacks"] == len(body["photos"]) == len(stricter) > 38
     assert sum(photo["n"] for photo in body["photos"]) == len(stacked.rows)
 
     at_default = get_json(stacked.port, "/api/photos?limit=1000&stack=on")
-    assert (at_default["strictness"], at_default["linkage"]) == (20, "majority")
+    assert (at_default["strictness"], at_default["linkage"]) == (
+        browse.DEFAULT_STRICTNESS,
+        browse.DEFAULT_LINKAGE,
+    )
     assert at_default["stacks"] == 38
 
 
@@ -1128,10 +1139,15 @@ def test_a_setting_nobody_wrote_is_refused_rather_than_drawn(stacked):
     """The whole reason the panel offers what exists: read at a setting with no
     rows, the LEFT JOIN answers every tile as its own stack, which is a page a
     reader cannot tell from a library that brackets nothing."""
+    # A rule that is not the default, whichever the default currently is: naming the
+    # default is the one request served without the panel having offered it.
+    unwritten = next(
+        name for name in browse.LINKAGE_LABELS if name != browse.DEFAULT_LINKAGE
+    )
     for query, field in (
         ("strictness=40", "strictness"),
-        ("linkage=neighbour", "linkage"),
-        ("strictness=40&linkage=complete", "linkage"),
+        (f"linkage={unwritten}", "linkage"),
+        (f"strictness=40&linkage={unwritten}", "linkage"),
     ):
         status, _, body = http_request(
             stacked.port, "GET", f"/api/photos?limit=10&stack=on&{query}"
@@ -1151,12 +1167,13 @@ def test_the_knobs_key_the_assignment_and_not_the_tile_count(stacked):
         "/api/photos?limit=5&stack=on&strictness=40",  # the same one, again
     ):
         get_json(stacked.port, url)
+    default = (browse.DEFAULT_STRICTNESS, browse.DEFAULT_LINKAGE)
     assert sorted(
         (key.strictness, key.linkage) for key in stacked.server._assignments
-    ) == [(20, "majority"), (40, "majority")]
+    ) == sorted([default, (40, browse.DEFAULT_LINKAGE)])
     assert len(stacked.server._totals) == 1
     assert all(
-        (key.strictness, key.linkage) == (20, "majority") for key in stacked.server._totals
+        (key.strictness, key.linkage) == default for key in stacked.server._totals
     )
 
 

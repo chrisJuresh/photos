@@ -119,8 +119,14 @@ from photolib.membership import (  # noqa: F401 -- re-exported for `harness.cali
 # 20 because that is where the two populations `photolib.matches` measured start
 # to separate: pairs a second or less apart score a median of 283 and 94% of them
 # reach 20 or more, against a median of 5 beyond two minutes. Round one's answers
-# left it where it stood and `photolib.membership` ships it, so it is the setting
-# under test rather than a guess, and `--strictness` is how a round moves it.
+# left it where it stood, and `--strictness` is how a round moves it.
+#
+# **It is deliberately not `photolib.membership.STRICTNESS` any more.** The two were
+# the same number, on the reasoning below that a round draws at the setting the grid
+# ships; the grid now ships 10, and this cannot simply follow it, because `LOOSEN`
+# and `MERGED` are three bands cut *around* 20 and would be incoherent at any other
+# value. Re-pointing the sampler means re-deriving those bands, which is round four's
+# business and not this constant's.
 STRICTNESS = 20
 
 # The rule the sets are cut with. `complete` is what ADR 0003 argued from and
@@ -129,9 +135,10 @@ STRICTNESS = 20
 # recall at once, because 224 of the pairs the reader kept together carry no Match
 # row at all and complete linkage cannot express a burst holding one.
 #
-# It is the default because a round draws at the setting the grid is shipping --
-# `photolib.membership` writes this rule, so this is what the reader is complaining
-# about when they complain. `--linkage` is how a round says otherwise.
+# It was the default because a round draws at the setting the grid is shipping. The
+# grid ships *the chain* now, and this stays where it is for `STRICTNESS`'s reason:
+# the bands are cut around the pair, and moving half of it would draw a round nobody
+# can read. `--linkage` is how a round says otherwise.
 DEFAULT_LINKAGE = "majority"
 
 # Which round this is. **A round is one sitting bounded by the reader stopping**,

@@ -752,6 +752,28 @@ def test_the_panel_is_offered_the_assignments_that_exist(bursts):
     )
 
 
+def test_the_setting_the_default_moved_away_from_stays_selectable(bursts):
+    """Moving the grid's default adds a population and never replaces one, so the
+    grouping the reader has been looking at is still there to flip back to. This is
+    what makes trying the new one cost nothing: the panel offers both, and undoing
+    it is a click rather than a pass."""
+    previous = {"strictness": 20, "linkage": "majority"}
+    current = {
+        "strictness": browse.DEFAULT_STRICTNESS,
+        "linkage": browse.DEFAULT_LINKAGE,
+    }
+    offered = (previous, current)
+
+    assert previous != current  # the default did move, or this test proves nothing
+    assert browse.parse_setting(
+        {"strictness": ["20"], "linkage": ["majority"]}, offered
+    ) == (20, "majority")
+    assert browse.parse_setting({}, offered) == (
+        browse.DEFAULT_STRICTNESS,
+        browse.DEFAULT_LINKAGE,
+    )
+
+
 def test_the_settings_are_found_by_key_and_never_by_scanning_the_table(bursts):
     """It runs once per process and is in front of the first page, so what it must
     not do is read the assignment to find out which assignments exist. The key's
@@ -807,8 +829,13 @@ def test_an_assignment_nobody_wrote_is_refused_rather_than_drawn(bursts):
         view(stack="on", strictness="40", offered=())
     assert raised.value.field == "strictness"
 
+    # A rule that is not the default, whichever the default currently is: naming
+    # the default is the one request `parse_setting` accepts unoffered.
+    unwritten = next(
+        name for name in browse.LINKAGE_LABELS if name != browse.DEFAULT_LINKAGE
+    )
     with pytest.raises(browse.BadFilter) as raised:
-        view(stack="on", linkage="neighbour")
+        view(stack="on", linkage=unwritten)
     assert raised.value.field == "linkage"
 
 

@@ -319,6 +319,22 @@ def test_the_check_names_the_cases_each_rule_gets_wrong_and_not_only_the_chosen_
     assert "nothing -- it reproduces every label it was shown" in said
 
 
+def test_the_chain_being_the_chosen_rule_is_asked_the_floor_and_not_a_tautology() -> None:
+    """Under an 85% floor the chain can be what wins, and then "does the chain beat
+    the chain" is not a question. What these sets can still answer is whether it
+    clears the floor on the population drawn to break it."""
+    case = calibrate.case(answer([B, C], surrounding=[A, D], round=1), (A, B, C, D))
+    points = scores(ab=LOW, ac=LOW, ad=LOW, bc=HIGH, bd=LOW, cd=HIGH)
+    scored = calibrate.sweep([case], points, (STRICT,), tuple(calibrate.LINKAGE))
+
+    said = "\n".join(calibrate.chained(scored, calibrate.Setting(STRICT, "neighbour")))
+
+    assert "the chain is the chosen rule" in said
+    assert "does not beat" not in said
+    # 1 pair kept and 2 wrongly stacked here, so it falls under any usable floor.
+    assert "under the 85% floor it was chosen to clear" in said
+
+
 def test_the_chain_is_priced_against_the_rule_the_setting_chose() -> None:
     """What round two exists for. On these labels the chain reaches a frame the
     reader pushed out and "matches most members" does not, so it no longer beats it
@@ -417,3 +433,331 @@ def test_a_setting_that_claims_nothing_is_not_chosen() -> None:
     )
 
     assert chosen == calibrate.Setting(20, "complete")
+
+
+# --- the floor, which moved ---------------------------------------------------
+
+
+def test_the_floor_is_85_percent_and_lets_through_what_95_would_not() -> None:
+    """The reader browsed the 95% result and reported both that they saw no wrong
+    merges and that the previous grouping was better, which says the floor was set
+    above the evidence and the recall it bought is the complaint. So a setting at
+    90% precision now answers, and under the old floor it could not."""
+    loose = calibrate.Tally(together=9, wrongly_together=1, missed=2)
+    strict = calibrate.Tally(together=3, wrongly_together=0, missed=8)
+    scored = {
+        calibrate.Setting(5, "complete"): loose,
+        calibrate.Setting(20, "complete"): strict,
+    }
+
+    assert calibrate.PRECISION == 0.85
+    assert calibrate.choose(scored) == calibrate.Setting(5, "complete")
+    assert calibrate.choose(scored, floor=0.95) == calibrate.Setting(20, "complete")
+
+
+def test_the_worst_single_case_breaks_a_tie_towards_the_setting_that_scatters() -> None:
+    """A wrong frame in a stack of twelve is a shrug and a stack of nine holding
+    four unrelated photographs is what the complaint was about, so two settings
+    the labels cannot separate on recall are separated on where the errors fell."""
+    scattered = calibrate.Tally(
+        together=18,
+        wrongly_together=2,
+        missed=0,
+        wrong={
+            "one": [calibrate.Wrong("wrongly together", A, B, 30)],
+            "two": [calibrate.Wrong("wrongly together", C, D, 30)],
+        },
+    )
+    concentrated = calibrate.Tally(
+        together=18,
+        wrongly_together=2,
+        missed=0,
+        wrong={
+            "one": [
+                calibrate.Wrong("wrongly together", A, B, 30),
+                calibrate.Wrong("wrongly together", A, C, 30),
+            ]
+        },
+    )
+
+    assert scattered.concentration == 1
+    assert concentrated.concentration == 2
+    assert (scattered.precision, scattered.recall) == (
+        concentrated.precision,
+        concentrated.recall,
+    )
+    chosen = calibrate.choose(
+        {
+            calibrate.Setting(5, "complete"): scattered,
+            calibrate.Setting(6, "complete"): concentrated,
+        }
+    )
+
+    assert chosen == calibrate.Setting(5, "complete")
+
+
+def test_a_hair_less_recall_still_loses_to_scattered_errors() -> None:
+    """"Within a hair" and not "equal": recall is continuous, an exact tie between
+    two thresholds never happens, and a tie-break waiting for one never fires. The
+    band is `HAIR` wide because the five longest sets carry most of the pairs a
+    round keeps together, so the third figure of a recall is which bursts the
+    sampler dealt rather than the threshold."""
+    greedy = calibrate.Tally(  # the best recall, and every error in one stack
+        together=1000,
+        wrongly_together=100,
+        missed=5,
+        wrong={"one": [calibrate.Wrong("wrongly together", A, B, 30)] * 100},
+    )
+    careful = calibrate.Tally(  # half a point behind, and its errors scattered
+        together=995,
+        wrongly_together=10,
+        missed=10,
+        wrong={
+            str(index): [calibrate.Wrong("wrongly together", A, B, 30)]
+            for index in range(10)
+        },
+    )
+    scored = {
+        calibrate.Setting(4, "majority"): greedy,
+        calibrate.Setting(10, "majority"): careful,
+    }
+
+    assert greedy.recall > careful.recall
+    assert greedy.recall - careful.recall < calibrate.HAIR
+    assert calibrate.choose(scored) == calibrate.Setting(10, "majority")
+
+
+def test_a_setting_further_than_a_hair_behind_does_not_get_to_argue() -> None:
+    """The band is a tolerance and not a licence: recall still ranks, and a
+    setting that gives up real recall for a tidier worst case has made the trade
+    this report exists to show rather than won a tie-break."""
+    best = calibrate.Tally(
+        together=90,
+        wrongly_together=9,
+        missed=10,
+        wrong={"one": [calibrate.Wrong("wrongly together", A, B, 30)] * 9},
+    )
+    timid = calibrate.Tally(together=50, wrongly_together=0, missed=50)
+
+    chosen = calibrate.choose(
+        {
+            calibrate.Setting(4, "majority"): best,
+            calibrate.Setting(30, "majority"): timid,
+        }
+    )
+
+    assert best.recall - timid.recall > calibrate.HAIR
+    assert chosen == calibrate.Setting(4, "majority")
+
+
+def test_a_missed_pair_is_not_concentration() -> None:
+    """A case that misses everything is a stack drawn small, which is the failure
+    the reader is asking for less of rather than the one being counted here."""
+    timid = calibrate.Tally(
+        together=1,
+        missed=3,
+        wrong={"one": [calibrate.Wrong("missed", A, B, 3)] * 3},
+    )
+
+    assert timid.concentration == 0
+
+
+# --- both counting conventions ------------------------------------------------
+
+
+def test_a_pair_two_answers_mention_is_two_mentions_and_one_pair() -> None:
+    """The two rounds partition a run differently and their sets overlap, so a
+    long burst arrives quadratically under one convention and once under the
+    other. Both are printed because neither is the whole picture."""
+    run = (A, B, C, D)
+    points = scores(ab=HIGH, ac=HIGH, ad=LOW, bc=HIGH, bd=LOW, cd=LOW)
+    both = [
+        calibrate.case(answer([A, B, C]), run),
+        calibrate.case(answer([A, B, C], surrounding=[D]), run),
+    ]
+
+    tally = replay(both, points, STRICT)
+
+    # Three pairs of the burst, mentioned by two answers each.
+    assert tally.together == 6
+    assert tally.once.together == 3
+    assert tally.precision == tally.once.precision == 1.0
+
+
+def test_the_table_prints_both_conventions_and_the_worst_case() -> None:
+    case = calibrate.case(answer([B, C], surrounding=[A]), (A, B, C))
+    points = scores(ab=HIGH, ac=HIGH, bc=HIGH)
+
+    printed = "\n".join(
+        calibrate.table(calibrate.sweep([case], points, (STRICT,), ("complete",)), 1)
+    )
+
+    assert "per answer" in printed and "per pair" in printed
+    assert "worst" in printed
+
+
+# --- the held-back quarter ----------------------------------------------------
+
+
+def trio(index: int) -> tuple[str, str, str]:
+    """Three frames of a run of their own, so no two answers share a photograph."""
+    return tuple(sha_of(f"{index:02d}{letter}") for letter in "xyz")
+
+
+def sitting(count: int, *, round: int = 3) -> list:
+    """`count` answers, each one a two-frame stack with a neighbour beside it."""
+    return [
+        calibrate.case(
+            answer([x, y], surrounding=[z], round=round), (x, y, z)
+        )
+        for x, y, z in (trio(index) for index in range(count))
+    ]
+
+
+def told(cases, *, wrong_in) -> dict:
+    """Scores that draw every stack as the reader drew it, except where told not to.
+
+    A case named in `wrong_in` gets a neighbour that agrees with both members, so
+    every setting stacks a frame the reader pushed out. That is the poison: it is
+    a precision failure and nothing else.
+    """
+    poisoned = {case.name for case in wrong_in}
+    points: dict[tuple[str, str], int] = {}
+    for case in cases:
+        x, y, z = case.run
+        points[(x, y)] = HIGH
+        points[(x, z)] = points[(y, z)] = HIGH if case.name in poisoned else LOW
+    return points
+
+
+def test_the_held_back_slice_is_the_same_on_every_run() -> None:
+    """A stable hash of the answer's own key, so re-running the report cannot
+    quietly re-roll the slice until it agrees with the pick."""
+    cases = sitting(40)
+
+    first = calibrate.partition(cases)
+    again = calibrate.partition(cases)
+
+    assert [case.name for case in first[0]] == [case.name for case in again[0]]
+    assert [case.name for case in first[1]] == [case.name for case in again[1]]
+    assert first[0] and first[1]  # both slices exist at this size
+    assert len(first[0]) + len(first[1]) == 40
+
+
+def test_the_slice_turns_on_the_frames_and_not_on_what_the_reader_said() -> None:
+    """The key is the stack as it was drawn. An answer moving from accept to split
+    is the same question answered differently, not a different question."""
+    x, y, z = trio(0)
+    accepted = calibrate.case(answer([x, y], surrounding=[z]), (x, y, z))
+    split = calibrate.case(
+        answer([x, y], surrounding=[z], evicted=[y], verdict="split", camera="Nikon"),
+        (x, y, z),
+    )
+
+    assert calibrate.held_back(accepted) == calibrate.held_back(split)
+
+
+def test_the_pick_comes_from_the_choosing_slice_and_the_checking_slice_only_checks(
+    capsys,
+) -> None:
+    """The confirmation a second sitting used to provide. The held-back quarter is
+    poisoned here, so pooling it would drop precision under the floor and change
+    the answer -- and the report still returns what the choosing slice said, and
+    prints the check as a failure rather than re-choosing from it."""
+    cases = sitting(40)
+    choosing, checking = calibrate.partition(cases)
+    points = told(cases, wrong_in=checking)
+
+    chosen = calibrate.report(cases, points, [], strictnesses=(STRICT,))
+
+    printed = capsys.readouterr().out
+    assert chosen == calibrate.Setting(STRICT, "complete")
+    assert calibrate.replay(choosing, points, STRICT, calibrate.LINKAGE["complete"]).precision == 1.0
+    assert "held-back quarter" in printed
+    assert "fails its own check" in printed
+
+
+def test_a_pick_that_is_not_the_best_recall_says_so_and_says_what_beat_it(
+    capsys,
+) -> None:
+    """The tie-break can hand back a setting a hair behind the top one, so the line
+    under the pick must not claim it is the best recall -- a reader comparing that
+    line against the table has to be able to see why it lost."""
+    scored = {
+        calibrate.Setting(4, "majority"): calibrate.Tally(
+            together=1000,
+            wrongly_together=100,
+            missed=5,
+            wrong={"one": [calibrate.Wrong("wrongly together", A, B, 30)] * 100},
+        ),
+        calibrate.Setting(10, "majority"): calibrate.Tally(
+            together=995,
+            wrongly_together=10,
+            missed=10,
+            wrong={
+                str(index): [calibrate.Wrong("wrongly together", A, B, 30)]
+                for index in range(10)
+            },
+        ),
+    }
+    chosen = calibrate.choose(scored)
+    assert chosen == calibrate.Setting(10, "majority")
+
+    calibrate.report_choice(scored, chosen, calibrate.PRECISION)
+    printed = capsys.readouterr().out
+
+    assert "not the best recall" in printed
+    # What it gave up and what it bought: the top recall it is behind, and its own
+    # worst case against the hundred-in-one-stack the top setting carries.
+    assert "99.5%" in printed
+    assert scored[calibrate.Setting(4, "majority")].concentration == 100
+    assert "1 wrongly stacked in its worst case" in printed
+
+
+def test_a_pick_the_held_back_quarter_agrees_with_is_printed_as_checking_out(
+    capsys,
+) -> None:
+    cases = sitting(40)
+
+    chosen = calibrate.report(cases, told(cases, wrong_in=[]), [], strictnesses=(STRICT,))
+
+    assert chosen == calibrate.Setting(STRICT, "complete")
+    assert "the pick checks out" in capsys.readouterr().out
+
+
+# --- which round chooses ------------------------------------------------------
+
+
+def test_the_newest_round_chooses_and_the_earlier_ones_are_replayed_as_checks(
+    capsys,
+) -> None:
+    """Rounds one and two answered a stricter question under a 95% floor, so they
+    can no longer be the source of the choice. They are replayed and never voted
+    with -- here they are poisoned outright and the pick is unmoved."""
+    newest = sitting(40, round=3)
+    earlier = [
+        calibrate.case(answer(case.members, surrounding=case.run[2:], round=1), case.run)
+        for case in sitting(40)[:8]
+    ]
+    points = told(newest, wrong_in=[])
+
+    chosen = calibrate.report([*earlier, *newest], points, [], strictnesses=(STRICT,))
+
+    printed = capsys.readouterr().out
+    assert chosen == calibrate.Setting(STRICT, "complete")
+    assert "round 3, the evidence the setting is chosen from" in printed
+    assert "round 1, a check on complete linkage" in printed
+
+
+def test_too_few_answers_is_a_refusal_with_the_count_and_never_a_choice(capsys) -> None:
+    """A sitting this short is settled by a handful of long bursts rather than by
+    the library, so the honest output is to say how many there were."""
+    cases = sitting(8)
+    choosing, _ = calibrate.partition(cases)
+
+    chosen = calibrate.report(cases, told(cases, wrong_in=[]), [], strictnesses=(STRICT,))
+
+    printed = capsys.readouterr().out
+    assert chosen is None
+    assert f"{len(choosing)} confident answers" in printed
+    assert f"{calibrate.ENOUGH} is the least this report will choose from" in printed

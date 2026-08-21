@@ -55,16 +55,26 @@ def test_frames_that_agree_on_nothing_are_two_stacks() -> None:
     assert label.link([A, B], scores(ab=LOW)) == [[A], [B]]
 
 
-def test_a_pair_at_the_strictness_holds(   ) -> None:
-    """Strictness is a floor and not an exclusive bound, as `browse.py`'s window is."""
-    assert label.link([A, B], scores(ab=STRICTNESS)) == [[A, B]]
-    assert label.link([A, B], scores(ab=STRICTNESS - 1)) == [[A], [B]]
+def test_a_pair_at_the_strictness_holds() -> None:
+    """Strictness is a floor and not an exclusive bound, as `browse.py`'s window is.
+
+    Named rather than left to `link`'s default, which is the *grid's* strictness and
+    not the harness's -- the two have been the same number and are not now."""
+    assert label.link([A, B], scores(ab=STRICTNESS), STRICTNESS) == [[A, B]]
+    assert label.link([A, B], scores(ab=STRICTNESS - 1), STRICTNESS) == [[A], [B]]
 
 
-def test_linkage_is_complete_so_one_disagreement_starts_a_new_stack() -> None:
-    """ADR 0003: every pair inside a stack must match, not merely each frame and
-    its predecessor. C agrees with B and not with A, so it does not join."""
-    assert label.link([A, B, C], scores(ab=HIGH, bc=HIGH, ac=LOW)) == [[A, B], [C]]
+def test_linkage_that_wants_more_than_a_neighbour_starts_a_new_stack() -> None:
+    """ADR 0003's argument: every pair inside a stack must match, not merely each
+    frame and its predecessor. C agrees with B and not with A, so it does not join.
+
+    The rule is named because it is the subject: `link`'s default follows whatever
+    the labels last settled, and what this asserts is what a rule does and not which
+    rule is current."""
+    points = scores(ab=HIGH, bc=HIGH, ac=LOW)
+
+    assert label.link([A, B, C], points, joins=label.complete) == [[A, B], [C]]
+    assert label.link([A, B, C], points, joins=label.LINKAGE["majority"]) == [[A, B], [C]]
 
 
 def test_a_pair_with_no_row_is_read_as_agreeing_on_nothing() -> None:

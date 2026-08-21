@@ -16,6 +16,29 @@ speak, and never a ranking: ordering on precision alone hands back the corner of
 the sweep, where a setting stacks almost nothing and is therefore almost never
 wrong. `choose` is that floor and `frontier` is the trade it was drawn across.
 
+**Where the floor sits is the reader's call and it has moved once.** It stood at
+95% while the grid had never been browsed; the reader then browsed the result,
+reported seeing no wrongly stacked photographs at all, and reported that the
+pre-stacking grouping was better. Both halves say the same thing -- the floor was
+far above where they want it and the recall it was paid for is the whole
+complaint -- so it is 85% now. See `PRECISION`, which carries the reasoning beside
+the number so that nobody restores 95% on the original argument.
+
+**A rate is not the whole of a mistake, so the worst single case is scored too.**
+False merges concentrate: the reader's worst five answers of sixty held nearly
+half of them. A wrong frame in a stack of twelve is a shrug and a stack of nine
+holding four unrelated photographs is what this report exists to prevent, so
+among the settings within a hair of the best recall the one whose errors
+*scatter* wins. See `Tally.concentration` for the count and `HAIR` for why a hair
+is a tolerance rather than an equality -- an exact tie between two thresholds
+never happens, so a tie-break that waits for one never fires.
+
+**Both counting conventions are printed and neither is chosen.** A pair is the
+unit a threshold works in, and counting one per answer weights a run by how often
+the sampler returned to it while counting one per pair weights a long burst
+quadratically. They disagree, the disagreement is the shape of the evidence, and
+hiding either behind the other would be the report picking which. See `Counts`.
+
 **A label is evidence about the frames that were on screen when it was given,
 and about nothing else.** `harness.label` shows a candidate stack with what
 surrounds it and the reader widens that view as far as they like, but they never
@@ -44,14 +67,31 @@ reads as the stack as drawn, so the grey block is context and never a target.
 cases it gets wrong and the pair that bound each one, rather than only counting
 them.
 
-**The rounds are scored apart.** ADR 0003 asks for two, and the second is a check
-rather than more of the first: the earliest round's labels are the evidence a
-setting is chosen from, and every later round is replayed against that choice
-without voting on it. Pooling them would let the check recommend the thing it is
-checking, and an agreement between the two would then be arithmetic rather than a
-finding. Round two is also drawn where a *chain* crosses a boundary the settled
-rule drew -- the population round one held none of -- so it is the round that can
-finally price the rule ADR 0003 declined by argument. See `rounds` and `check`.
+**The rounds are scored apart, and the newest one is the evidence.** Pooling them
+would let a check recommend the thing it is checking, and an agreement between
+two rounds would then be arithmetic rather than a finding -- that much has not
+moved. What has moved is which round chooses. It used to be the earliest, on the
+reasoning that every later round is a check on what the first one settled. Rounds
+one and two were answered against a 95% floor and a stricter question than the one
+now being asked, so they can no longer be the source of the choice: the newest
+round is, and they are replayed as checks on it. The inversion is deliberate and
+this paragraph is where it is recorded. Round two keeps its own job either way --
+its sets are drawn where a *chain* crosses a boundary the settled rule drew, so it
+is still the only round that can price the rule ADR 0003 declined by argument. See
+`rounds`, `check` and `chained`.
+
+**A quarter of the newest round is held back, so the pick checks itself.** The
+round is partitioned by a stable hash of the answer's own key -- not a random
+draw, so two runs over one labels file agree and re-running cannot quietly re-roll
+until the answer is liked -- into a three-quarter *choosing* slice and a
+one-quarter *checking* slice. The setting comes from the choosing slice; it is
+then replayed against the checking slice, which never voted on it, and a pick that
+fails its own check is printed as failing rather than silently re-chosen. That is
+the confirmation a second sitting used to provide. See `partition` and `holdout`.
+
+**Too few answers is a refusal and never a number.** A choosing slice under
+`ENOUGH` answers is a short sitting rather than a measurement, and the honest
+output is to say how many there were and choose nothing.
 
     python -m harness.calibrate
 
@@ -68,6 +108,7 @@ for good: every round of labelling wants replaying, not only the first two.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sqlite3
 import sys
 from collections.abc import Iterable, Sequence
@@ -95,7 +136,46 @@ SWEEP = (1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 60, 100)
 # point at which a wrongly stacked pair stops being an anecdote, and the whole
 # frontier is printed beside it so the choice is visible rather than buried.
 # `--precision` moves it.
-PRECISION = 0.95
+#
+# **It stood at 0.95 and moved to 0.85, and the reason is written here so that
+# nobody restores it on the argument it was first set by.** 0.95 was chosen before
+# the grid had ever been browsed at any setting, from the constraint alone. The
+# reader then browsed what it shipped -- strictness 20, matches most members -- and
+# reported two things: that they saw no wrongly stacked photographs at all, and
+# that the grouping before anything was stacked was better. Those are one finding
+# said twice. A floor no wrong merge ever reaches is a floor set above the
+# evidence, and everything it was paid for came out of recall, which is the
+# complaint. So the floor is where a wrong merge starts being visible rather than
+# where it stops being conceivable, and the reader's own tie-break stands behind
+# it: they would rather over-merge than over-split.
+PRECISION = 0.85
+
+# One answer in four of the newest round is held back from the choice and scored
+# against it afterwards. Four because the choosing slice has to stay the larger
+# part by a long way -- it is the evidence, and a check is only worth having if
+# what it checks was decided properly first.
+HOLDBACK = 4
+
+# How close two settings' recall has to be before the one whose errors scatter
+# wins -- "within a hair", in the ticket's words.
+#
+# A tolerance and not an equality, because recall is a continuous score and an
+# exact tie between two thresholds never happens: a tie-break that only fires on
+# equality is a tie-break that never fires. The size is read off the report's own
+# evidence line. Recall is measured over the pairs of a few dozen answers and
+# **the five longest sets are around 90% of them**, so the third figure of a recall
+# is a fact about which bursts the sampler dealt rather than about the threshold.
+# One point is inside that; a worst case four times another's is not.
+HAIR = 0.01
+
+# The confident answers a choosing slice needs before it may choose at all.
+#
+# Twenty, because the evidence block prints why: the five longest sets carry most
+# of the pairs a round keeps together, so under twenty answers the sweep is
+# settled by a handful of bursts and the recommendation describes them rather than
+# the library. Rounds one and two were thirty each and round three ran to ninety.
+# A sitting shorter than this is a sitting, and the honest output is to say so.
+ENOUGH = 20
 
 
 # All three rules are `harness.label`'s own, so the rule this report calls a name
@@ -205,21 +285,52 @@ def grey(cases: Iterable[Case]) -> list[Case]:
 def rounds(cases: Iterable[Case]) -> dict[int, list[Case]]:
     """The labels by the round that asked for them, earliest first.
 
-    **The split is the whole of ADR 0003's second round.** The earliest round is
-    the evidence: its labels are what the sweep is scored over and what `choose`
-    picks a setting from. Every later round is a *check* on that pick, and a check
-    that was pooled into the evidence would be voting for the thing it is
-    checking -- the setting would be recommended partly by the labels drawn to
-    test it, and an agreement between the two would be arithmetic rather than a
-    finding.
+    **The split is what keeps a check from voting on what it checks.** One round
+    is the evidence -- its labels are what the sweep is scored over and what
+    `choose` picks a setting from -- and every other round is a *check* on that
+    pick. A round pooled into the evidence would be recommending the setting it
+    was drawn to test, and an agreement between the two would then be arithmetic
+    rather than a finding.
 
-    Earliest and not "round 1", so a labels file holding only a later round still
-    has evidence to be read from and says which round it is.
+    **The newest round is the evidence and the earlier ones are the checks**, which
+    is the way round the report used to run it. See the module docstring: rounds
+    one and two were answered under a 95% floor, against a stricter question than
+    the one now being asked, so they cannot be what settles the answer to this one.
+
+    Sorted rather than keyed on a fixed number, so a labels file holding one round
+    still has evidence to be read from and says which round it is.
     """
     split: dict[int, list[Case]] = {}
     for subject in cases:
         split.setdefault(subject.round, []).append(subject)
     return dict(sorted(split.items()))
+
+
+def held_back(subject: Case) -> bool:
+    """Whether this answer is in the checking slice rather than the choosing one.
+
+    **A stable hash of the answer's own key and never a random draw.** The key is
+    what `harness.label` files the answer under -- the frames of the stack as it
+    was drawn -- so the partition is a property of the label and survives every
+    re-run: a report cannot be run again until the slice it drew happens to agree
+    with it. `hashlib` and not `hash`, which is salted per process and would make
+    two runs in one afternoon disagree.
+
+    A run's answers land on both sides, which is deliberate: the slice is over
+    answers because an answer is the unit the reader gave and the unit `choose`
+    scores. It is not a claim that the two slices are independent photographs.
+    """
+    digest = hashlib.sha256(label.key(subject.members).encode()).digest()
+    return int.from_bytes(digest[:8], "big") % HOLDBACK == 0
+
+
+def partition(subjects: Iterable[Case]) -> tuple[list[Case], list[Case]]:
+    """One round as `(choosing, checking)` -- three quarters and one, deterministically."""
+    ordered = list(subjects)
+    return (
+        [subject for subject in ordered if not held_back(subject)],
+        [subject for subject in ordered if held_back(subject)],
+    )
 
 
 # --- scoring a setting --------------------------------------------------------
@@ -242,18 +353,57 @@ class Wrong:
 
 
 @dataclass
-class Tally:
-    """What one setting did to the labels it was replayed against.
+class Counts:
+    """Three counts and never a fourth, and the two questions asked of them.
 
-    Three counts and never a fourth: the pair both the reader and the setting
-    left apart is the overwhelming majority and reporting it would flatter every
-    setting equally. Precision and recall are the two questions asked of these
-    three, and they are kept apart -- see the module docstring.
+    The pair both the reader and the setting left apart is the overwhelming
+    majority and reporting it would flatter every setting equally. Precision and
+    recall are kept apart -- see the module docstring.
     """
 
     together: int = 0  # the reader kept them together and so did the setting
     wrongly_together: int = 0  # the setting stacked what the reader pushed out
     missed: int = 0  # the reader kept them together and the setting did not
+
+    @property
+    def precision(self) -> float | None:
+        """Of the pairs this setting stacked, how many the reader agreed with.
+
+        None rather than 1.0 when it stacked nothing: a setting that claims
+        nothing was never wrong, and reading that as perfect would recommend it.
+        """
+        claimed = self.together + self.wrongly_together
+        return self.together / claimed if claimed else None
+
+    @property
+    def recall(self) -> float | None:
+        wanted = self.together + self.missed
+        return self.together / wanted if wanted else None
+
+
+@dataclass
+class Tally:
+    """What one setting did to the labels it was replayed against.
+
+    **Counted twice, because the two conventions answer different questions and
+    neither is the whole picture.** The three fields on the tally itself are
+    *mentions*: one count per pair per answer, so a run two answers both reach
+    into is counted twice and a pair carries the weight of how much evidence
+    exists about it. `once` is the same three counts with each pair counted a
+    single time however many answers mention it, so a long burst stops arriving
+    quadratically and a pair is one fact about two frames. Measured over this
+    catalog the two are 4,427 mentions of 3,727 pairs.
+
+    The pick is made on mentions, which is what it has always been made on. `once`
+    is printed beside it rather than substituted for it: the ticket asked for the
+    quadratic weight to be *visible*, and a report that swapped one convention for
+    the other would have hidden the same thing from the other side.
+    """
+
+    together: int = 0  # the reader kept them together and so did the setting
+    wrongly_together: int = 0  # the setting stacked what the reader pushed out
+    missed: int = 0  # the reader kept them together and the setting did not
+    once: Counts = field(default_factory=Counts)
     wrong: dict[str, list[Wrong]] = field(default_factory=dict)
 
     @property
@@ -270,6 +420,31 @@ class Tally:
     def recall(self) -> float | None:
         wanted = self.together + self.missed
         return self.together / wanted if wanted else None
+
+    @property
+    def concentration(self) -> int:
+        """The most wrongly stacked pairs this setting put into any single case.
+
+        The rate says how often a setting is wrong and this says how badly it is
+        wrong at its worst, which is a different question and the one the reader
+        answered plainly: a wrong frame in a stack of twelve is a shrug, and a
+        stack of nine holding four unrelated photographs is what the complaint was
+        about. False merges concentrate -- the worst five answers of sixty held
+        nearly half of them -- so a setting whose errors scatter is preferred to
+        one that ties with it and buries them all in one stack. `choose` breaks
+        ties on this.
+
+        Wrongly stacked pairs only, and not the missed ones: a case that misses
+        everything is a stack drawn small, which is the failure the reader is
+        asking for less of.
+        """
+        return max(
+            (
+                sum(1 for entry in entries if entry.kind != "missed")
+                for entries in self.wrong.values()
+            ),
+            default=0,
+        )
 
     def note(self, subject: Case, entry: Wrong) -> None:
         self.wrong.setdefault(subject.name, []).append(entry)
@@ -301,24 +476,40 @@ def placed(
 
 
 def replay(cases: Iterable[Case], points: Points, strictness: int, joins: Joins) -> Tally:
-    """Score one setting against every label, naming what it got wrong."""
+    """Score one setting against every label, naming what it got wrong.
+
+    Every pair is counted into both conventions at once -- see `Tally`. `seen`
+    holds the pairs already counted into `once`, ordered by sha256 rather than by
+    the run, because two answers drawn from one run can name the same two frames
+    in either order and the deduplication has to see through that.
+    """
     tally = Tally()
     walked: dict[tuple[str, ...], dict[str, int]] = {}
+    seen: set[tuple[str, str]] = set()
     for subject in cases:
         at = walked.get(subject.run)
         if at is None:
             at = walked[subject.run] = placed(subject.run, points, strictness, joins)
         for early, late, same in pairs(subject):
             stacked = at[early] == at[late]
+            pair = (min(early, late), max(early, late))
+            fresh = pair not in seen
+            seen.add(pair)
             if same and stacked:
                 tally.together += 1
+                if fresh:
+                    tally.once.together += 1
             elif same:
                 tally.missed += 1
+                if fresh:
+                    tally.once.missed += 1
                 tally.note(
                     subject, Wrong("missed", early, late, label.match(points, early, late))
                 )
             elif stacked:
                 tally.wrongly_together += 1
+                if fresh:
+                    tally.once.wrongly_together += 1
                 tally.note(
                     subject,
                     Wrong("wrongly together", early, late, label.match(points, early, late)),
@@ -347,7 +538,8 @@ def sweep(
 
 
 def choose(scored: dict[Setting, Tally], floor: float = PRECISION) -> Setting | None:
-    """The best recall among the settings that clear the precision floor.
+    """The best recall among the settings that clear the precision floor, then the
+    least concentrated of everything within a hair of it.
 
     Precision is the binding constraint and recall is best-effort *under* it,
     which is a floor and not a ranking: ordering on precision alone hands back
@@ -356,10 +548,24 @@ def choose(scored: dict[Setting, Tally], floor: float = PRECISION) -> Setting | 
     decides between them.
 
     A setting that stacked nothing has no precision and is never chosen -- it was
-    not right, it was silent. Ties go to the **stricter** setting, because two
-    settings the labels cannot tell apart are not equally safe on the frames
-    nobody labelled, and then to complete linkage, because it is ADR 0003's
-    default and a softening has to earn itself.
+    not right, it was silent.
+
+    **Recall ranks, and everything within a hair of the best recall is then
+    separated on where its errors fell.** Two settings the labels can barely
+    separate on recall are not equally good: the one that put fewer wrongly
+    stacked pairs into its worst single case is, because that is the failure the
+    reader can actually see -- a wrong frame in a stack of twelve is a shrug and a
+    stack of nine holding four unrelated photographs is the complaint. See
+    `Tally.concentration` for the count and `HAIR` for how wide "a hair" is and
+    why it is a tolerance rather than an equality. Inside the band recall decides
+    again, then the stricter setting, on the grounds that two settings the labels
+    cannot tell apart are not equally safe on the frames nobody labelled, and then
+    complete linkage, because it is ADR 0003's default and a softening has to earn
+    itself.
+
+    Precision does not rank even here. It is the floor and nothing else, and
+    slipping it in as a tie-break would quietly restore the ordering the floor
+    exists to replace.
 
     Where nothing clears the floor there is no recommendation. Saying so is the
     honest answer and picking the least bad setting silently is not.
@@ -370,17 +576,23 @@ def choose(scored: dict[Setting, Tally], floor: float = PRECISION) -> Setting | 
         for setting, tally in scored.items()
         if tally.precision is not None and tally.precision >= floor
     ]
+    if not clearing:
+        return None
 
-    def ranked(setting: Setting) -> tuple:
-        tally = scored[setting]
-        return (
-            tally.recall if tally.recall is not None else -1.0,
-            tally.precision,
+    def recall(setting: Setting) -> float:
+        return scored[setting].recall or 0.0
+
+    best = max(recall(setting) for setting in clearing)
+    band = [setting for setting in clearing if recall(setting) >= best - HAIR]
+    return max(
+        band,
+        key=lambda setting: (
+            -scored[setting].concentration,
+            recall(setting),
             setting.strictness,
             -order.index(setting.linkage),
-        )
-
-    return max(clearing, key=ranked) if clearing else None
+        ),
+    )
 
 
 def beats(soft: Tally, strict: Tally) -> bool:
@@ -470,24 +682,32 @@ def percent(value: float | None) -> str:
 
 
 def table(scored: dict[Setting, Tally], total: int) -> list[str]:
-    """Every setting, by pairs and by cases.
+    """Every setting, under both counting conventions, with its worst single case.
 
-    Both counts, because they answer different questions and neither is the whole
-    picture. A pair is the unit the threshold works in and the unit "two
-    unrelated photographs in one stack" is about, but it counts a long burst
-    quadratically -- the reader's five longest drags are 79% of the pairs they
-    kept together. The case count is one vote each and cannot be dominated, and
-    is coarse for exactly the same reason.
+    **Mentions and pairs are both printed and neither is chosen**, because they
+    answer different questions and neither is the whole picture. A pair is the unit
+    the threshold works in and the unit "two unrelated photographs in one stack" is
+    about; counted once per answer it carries the weight of how much evidence there
+    is about it, and counted once globally it stops a long burst arriving
+    quadratically -- the reader's five longest drags are most of the pairs they kept
+    together, and the evidence block above prints the round's own share rather than
+    a figure written here. The case count is one vote each and cannot be dominated, and is
+    coarse for exactly the same reason. `worst` is the concentration -- the most
+    wrongly stacked pairs any single case carries -- which is what separates a
+    setting whose errors scatter from one that buries them all in one stack.
     """
     lines = [
-        "  linkage    strictness   precision    recall    stacked   wrong   missed   cases wrong",
+        "                          ------------ per answer ------------   ----- per pair ----",
+        "  linkage    strictness   precision    recall   wrong   missed   "
+        "precision    recall   worst   cases wrong",
     ]
     for setting, tally in scored.items():
         lines.append(
             f"  {setting.linkage:<10} {setting.strictness:>10}   "
             f"{percent(tally.precision)}   {percent(tally.recall)}   "
-            f"{tally.together:>8}   {tally.wrongly_together:>5}   {tally.missed:>6}   "
-            f"{len(tally.wrong):>7}/{total}"
+            f"{tally.wrongly_together:>5}   {tally.missed:>6}   "
+            f"{percent(tally.once.precision)}   {percent(tally.once.recall)}   "
+            f"{tally.concentration:>5}   {len(tally.wrong):>7}/{total}"
         )
     return lines
 
@@ -653,8 +873,10 @@ def made_of(subjects: Sequence[Case], points: Points) -> list[str]:
     ]
 
 
-def chained(scored: dict[Setting, Tally], chosen: Setting) -> list[str]:
-    """What a later round says about the rule ADR 0003 declined without measuring it.
+def chained(
+    scored: dict[Setting, Tally], chosen: Setting, floor: float = PRECISION
+) -> list[str]:
+    """What another round says about the rule ADR 0003 declined without measuring it.
 
     This is the comparison round two exists for. Round one recommended neighbour
     linkage and the ADR declined it on the evidence's shape rather than on its
@@ -662,6 +884,12 @@ def chained(scored: dict[Setting, Tally], chosen: Setting) -> list[str]:
     pushed out, so a chain that walks a whole run into one stack scored perfectly.
     Round two's sets are drawn where a chain crosses a boundary the settled rule
     drew, so here the chain can finally be wrong.
+
+    **When the chain is itself what was chosen, the question changes shape.** There
+    is no rule for it to beat -- it would be beating itself -- and asking whether it
+    does would print a tautology. What these sets can still answer is the one that
+    matters: on the population drawn to break it, does it clear the floor it was
+    chosen under. So that is what is asked instead.
     """
     lines = [
         f"\nthe chain, at strictness {chosen.strictness} -- what these sets were drawn"
@@ -683,6 +911,29 @@ def chained(scored: dict[Setting, Tally], chosen: Setting) -> list[str]:
     )
     if chain is None or settled is None:
         return lines
+    if chosen.linkage == "neighbour":
+        if chain.precision is None:
+            lines.append(
+                "  the chain is the chosen rule and it stacked nothing here, so these"
+                " sets neither confirm nor deny it."
+            )
+        elif chain.precision >= floor:
+            lines.append(
+                f"  the chain is the chosen rule, and on the sets drawn to break it it"
+                f" holds {percent(chain.precision)} precision -- clear of the"
+                f" {floor:.0%} floor. ADR 0003 declined it under a 95% floor, and this"
+                " is where that declining is re-read rather than assumed: the rule did"
+                " not change, the floor did."
+            )
+        else:
+            lines.append(
+                f"  the chain is the chosen rule and it falls to"
+                f" {percent(chain.precision)} precision here, under the {floor:.0%}"
+                " floor it was chosen to clear -- on the population drawn to break it."
+                " That is a reason to set it aside with `--linkage`, and it is the"
+                " measurement ADR 0003 declined it without."
+            )
+        return lines
     if beats(chain, settled):
         lines.append(
             f"  the chain still beats {chosen.linkage} linkage on both counts, on the"
@@ -698,11 +949,23 @@ def chained(scored: dict[Setting, Tally], chosen: Setting) -> list[str]:
     return lines
 
 
-def check(number: int, subjects: Sequence[Case], points: Points, chosen: Setting) -> list[str]:
-    """One later round, read as a check on the setting and never as evidence for it.
+def check(
+    number: int,
+    subjects: Sequence[Case],
+    points: Points,
+    chosen: Setting,
+    floor: float = PRECISION,
+) -> list[str]:
+    """One other round, read as a check on the setting and never as evidence for it.
+
+    Other and not later: the newest round is what chooses now, so the rounds
+    replayed here are the earlier ones -- see `rounds`. What they check is
+    unchanged, and so is why they cannot vote: rounds one and two were answered
+    under a stricter floor than the one being asked about, which makes them a
+    check worth having and evidence that would answer the wrong question.
 
     The setting is not re-chosen here. What is asked is the narrower question a
-    check can answer: does the setting the earlier round picked still reproduce
+    check can answer: does the setting the choosing slice picked still reproduce
     what the reader says, on sets it did not pick from -- and does the rule ADR
     0003 declined go wrong on sets drawn to make it.
 
@@ -733,12 +996,106 @@ def check(number: int, subjects: Sequence[Case], points: Points, chosen: Setting
         f"\nheld      precision {percent(held.precision)}, recall"
         f" {percent(held.recall)}, {len(held.wrong)}/{len(sure)} cases wrong"
     )
-    lines += chained(scored, chosen)
+    lines += chained(scored, chosen, floor)
     lines.append(
         "\nwhere each rule goes wrong on this round's labels, at the chosen strictness"
     )
     lines += diagnosis(scored)
     return lines
+
+
+def holdout(
+    subjects: Sequence[Case], points: Points, chosen: Setting, floor: float
+) -> list[str]:
+    """The quarter of the newest round held back, scored against a pick it did not make.
+
+    This is the confirmation a second sitting used to provide, taken out of the
+    same round rather than out of another evening. The slice never entered the
+    sweep, so the number it returns is a check and not an echo -- see `partition`
+    for why the split is a hash of the answer's key and not a draw.
+
+    **A pick that fails its check is printed as failing.** The report does not
+    re-choose from the checking slice and then present that as the answer: the
+    slice would stop being a check the moment it chose, and the failure is the
+    finding. What failing means here is the same thing it means everywhere else in
+    this report -- the precision floor -- and the concentration is printed beside
+    it because a pick can clear the floor and still put every one of its mistakes
+    into one stack.
+    """
+    sure = confident(subjects)
+    lines = [
+        f"\nthe held-back quarter of this round, {len(subjects)} answers"
+        f" ({len(sure)} confident) that never entered the sweep"
+    ]
+    if not sure:
+        return [*lines, "  no confident answer was held back, so the pick is unchecked"]
+    tally = sweep(sure, points, (chosen.strictness,), (chosen.linkage,))[chosen]
+    lines.append(
+        f"  {chosen.linkage} linkage at strictness {chosen.strictness}:"
+        f" precision {percent(tally.precision)}, recall {percent(tally.recall)},"
+        f" worst case {tally.concentration} wrongly stacked,"
+        f" {len(tally.wrong)}/{len(sure)} cases wrong"
+    )
+    if tally.precision is None:
+        lines.append(
+            "  it stacked nothing at all here, so the slice cannot confirm or deny it"
+        )
+    elif tally.precision >= floor:
+        lines.append(
+            f"  which clears the same {floor:.0%} floor it was chosen under, on labels"
+            " that had no part in choosing it: the pick checks out."
+        )
+    else:
+        lines.append(
+            f"  which is under the {floor:.0%} floor it was chosen to clear. **The pick"
+            " fails its own check.** It is reported rather than re-chosen -- the slice"
+            " would stop being a check the moment it picked -- and what it says is that"
+            " the choosing slice did not have enough in it to settle this."
+        )
+    lines.append("\nwhere the pick goes wrong on the held-back labels")
+    lines += diagnosis({chosen: tally})
+    return lines
+
+
+def report_choice(
+    scored: dict[Setting, Tally],
+    chosen: Setting,
+    floor: float,
+    cases_scored: int | None = None,
+) -> None:
+    """The chosen setting and, in one line, why it and not the one above it.
+
+    **It is not always the best recall and the line must not say it is.** The
+    tie-break hands back a setting a hair behind the top one whenever that one
+    buries its mistakes in a single stack, and a reader comparing this line against
+    the table has to be able to see that rather than conclude the table is wrong.
+    So where the pick gave up recall, this names what it gave up and what it bought.
+    """
+    best = scored[chosen]
+    scope = "" if cases_scored is None else f", {len(best.wrong)}/{cases_scored} cases wrong"
+    print(
+        f"\nchosen    {chosen.linkage} linkage at strictness {chosen.strictness}: "
+        f"precision {percent(best.precision)}, recall {percent(best.recall)}, "
+        f"worst case {best.concentration} wrongly stacked{scope}"
+    )
+    top = max(
+        (
+            tally.recall or 0.0
+            for tally in scored.values()
+            if tally.precision is not None and tally.precision >= floor
+        ),
+        default=0.0,
+    )
+    if best.recall is not None and best.recall < top:
+        print(
+            f"          not the best recall clearing the {floor:.0%} floor -- that is"
+            f" {percent(top)} -- but within a hair of it and less concentrated:"
+            f" {best.concentration} wrongly stacked in its worst case"
+        )
+    else:
+        print(
+            f"          the best recall of everything clearing a {floor:.0%} precision floor"
+        )
 
 
 def report(
@@ -764,13 +1121,27 @@ def report(
     if not split:
         return None
 
-    # The earliest round is the evidence and every later one is a check on what it
-    # chose. See `rounds` for why that is a split and not a preference.
-    first, *later = split
-    evidently = split[first]
-    sure, band = confident(evidently), grey(evidently)
-    print(f"\nround {first}, the evidence the setting is chosen from")
-    print(*made_of(evidently, points), sep="\n")
+    # The **newest** round is the evidence and every earlier one is a check on what
+    # it chose -- see `rounds` for why the inversion, and the module docstring for
+    # why it was deliberate. Three quarters of that round choose and the other
+    # quarter checks the pick afterwards.
+    *earlier, newest = split
+    choosing, checking = partition(split[newest])
+    sure, band = confident(choosing), grey(choosing)
+    print(
+        f"\nround {newest}, the evidence the setting is chosen from --"
+        f" {len(choosing)} answers, with {len(checking)} of the round held back"
+    )
+    print(*made_of(choosing, points), sep="\n")
+
+    if len(sure) < ENOUGH:
+        print(
+            f"\nchosen    nothing: {len(sure)} confident answers in round {newest}'s"
+            f" choosing slice and {ENOUGH} is the least this report will choose from."
+            " A sitting this short is settled by a handful of long bursts rather than"
+            " by the library -- label more and run it again."
+        )
+        return None
 
     scored = sweep(sure, points, strictnesses, linkages)
     print("\nconfident labels")
@@ -782,23 +1153,18 @@ def report(
         print(
             f"  {setting.linkage:<10} {setting.strictness:>10}   "
             f"precision {percent(tally.precision)}   recall {percent(tally.recall)}"
+            f"   worst case {tally.concentration:>5}"
         )
 
     chosen = choose(scored, floor)
     if chosen is None:
         print(
             f"\nchosen    nothing: no setting reaches {floor:.0%} precision on round"
-            f" {first}'s labels, so there is no recommendation to make and nothing for a"
-            " later round to check"
+            f" {newest}'s choosing slice, so there is no recommendation to make and"
+            " nothing for the held-back quarter or an earlier round to check"
         )
         return None
-    best = scored[chosen]
-    print(
-        f"\nchosen    {chosen.linkage} linkage at strictness {chosen.strictness}: "
-        f"precision {percent(best.precision)}, recall {percent(best.recall)}, "
-        f"{len(best.wrong)}/{len(sure)} cases wrong"
-    )
-    print(f"          the best recall of everything clearing a {floor:.0%} precision floor")
+    report_choice(scored, chosen, floor, len(sure))
     print(*softening(scored, chosen.strictness), sep="\n")
 
     print("\nthe grey band, scored the same way and never fitted to")
@@ -810,8 +1176,12 @@ def report(
     print("\nwhere each setting goes wrong, over the confident labels")
     print(*diagnosis(scored), sep="\n")
 
-    for number in later:
-        print(*check(number, split[number], points, chosen), sep="\n")
+    print(*holdout(checking, points, chosen, floor), sep="\n")
+
+    # Every other round, replayed. Earlier and not later now: rounds one and two
+    # answered a stricter question, so they check the pick rather than make it.
+    for number in earlier:
+        print(*check(number, split[number], points, chosen, floor), sep="\n")
     return chosen
 
 
