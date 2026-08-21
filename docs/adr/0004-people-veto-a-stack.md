@@ -1,6 +1,7 @@
 # Stacking is vetoed by who is in the frame
 
-**Status: accepted 2026-08-12, not yet implemented.** Extends
+**Status: accepted 2026-08-12. The rule is not implemented; the evidence it reads is** — see
+"What the pass records" below, which landed 2026-08-22. Extends
 [ADR 0003](0003-stack-on-verified-match.md) and supersedes nothing in it: the Match is still
 the evidence a stack is built on, and this document is a rule that sits on top of it. 0003's
 own objective changed at the same time — see "The objective changed" there — and the two
@@ -107,6 +108,48 @@ frame's people. Marked once per person, not once per appearance.
 **No names.** The rule needs only *these two faces are one person*. Naming is a feature the
 reader intends to add later, and the cluster list is deliberately the thing it will be built
 on; nothing here waits for it.
+
+## What the pass records
+
+`python -m photolib.people` is the evidence half of this rule and it landed before the rule
+did. **Nothing above is implemented by it**: no stack is split, no cover moves, and no query
+reads a row it writes. What it does is make every clause above answerable.
+
+**Three models, all local, all fetched once.** No photograph leaves the disk and no name is
+attached to any cluster.
+
+| what | model | where from |
+|---|---|---|
+| bodies — *is there somebody* | Faster R-CNN ResNet50 FPN v2, COCO weights, 167 MB | `torchvision`, cached by `torch.hub` |
+| faces — *where* | YuNet 2023mar, 233 KB of ONNX | `opencv/opencv_zoo` at `47534e2`, digest checked |
+| faces — *who*, 128 dimensions | SFace 2021dec, 37 MB of ONNX | the same commit, digest checked |
+
+The zoo files are pinned to one commit and verified against a recorded digest, because "the
+file at that URL today" is not a model identity and a silently different one is a silently
+different population. Both are read through the OpenCV `photolib.matches` already depends on,
+so faces cost no new dependency; `torch` was already the fingerprint pass's alone. **Neither
+is an import of the website**, which reads stored numbers only.
+
+**Three tables, migration 012.** `frame_body` holds one row per frame the detector examined —
+how many bodies, and the largest one's share — so that *checked and nobody here* stays a
+different fact from *never checked*, which is `candidate_pair`'s `screened_out` distinction.
+`face` holds one row per detected face: its share and its vector. `face_person` holds the
+clustering, keyed by the threshold as `stack_member` is keyed by strictness and linkage, so
+another threshold is another population and re-clustering never re-runs the detector.
+
+**The measurement is stored and the verdict is derived.** Every box records its share of the
+frame's height and nothing records whether that share was enough — so the prominence floor
+this document says is measured rather than picked really can be, from these rows and without
+another pass. It is provisional at 0.10 and `photolib.people.FLOOR` is the only line that
+reads it.
+
+**A person is content-addressed**, named by its least face as `<sha256>:<idx>`, which is
+`stack_member`'s reason: `archive.pipeline.group` reassigns every tile id on each Apply to
+grid without changing a byte. The clustering is **complete linkage** — two clusters join only
+when every face of one is within the threshold of every face of the other — because single
+linkage walks a resemblance from one individual to another across a crowd of near-misses,
+which is the failure this document exists to avoid rather than to reproduce. The default
+threshold is SFace's own published 0.363.
 
 ## The cover, and the surprise it introduces
 

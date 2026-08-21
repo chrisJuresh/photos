@@ -442,6 +442,36 @@ Each population costs about 5 MB of catalog.
 python -m photolib.membership
 ```
 
+To find **the people** — the fourth pass of that shape, and the first that looks at anybody.
+It gives every published, EXIF-dated, non-video tile two facts and changes nothing a reader
+can see: **whether somebody is in it**, read off *bodies* so that the back of a head counts
+and a landscape does not, and **which persons are in it**, from face detection, face
+embedding and clustering, a *person* being one cluster of faces the pass decided are the
+same individual. It exists because ADR 0003's worst stacks are of one place where the
+difference is who is in them, which neither the Match nor the fingerprint has any notion of.
+Three models, all local, all fetched once into `torch.hub`'s cache and none of them an
+import of the website: torchvision's **Faster R-CNN ResNet50 FPN v2** at its COCO weights
+for bodies, and **YuNet** with **SFace** — 233 KB and 37 MB of ONNX from a pinned commit of
+`opencv/opencv_zoo`, checked against a recorded digest — for faces and their 128-dimension
+vectors. No photograph leaves the disk and **no name is attached to any cluster**: the pass
+produces "person 4f2a…", not "Chris". **The measurement is stored and the verdict is
+derived**, `candidate_pair.screen`'s discipline: every box records its share of the frame's
+height and nothing records whether that share was enough, so the prominence floor — 0.10 and
+written down as provisional — moves by re-reading rows. The clustering is **complete
+linkage**, because a person is not a chain, and its **threshold is part of the key** as
+strictness and linkage are in `stack_member`, so `--threshold` adds a population rather than
+overwriting one and re-clusters without re-detecting: the vector lives in `face` and the
+person in `face_person`. A frame it looked at and found nobody in gets a row saying so, which
+is how "checked and empty" stays different from "never checked". It reads the substrate tree
+and the catalog, both on the NVMe, never opens `G:`, and does not attach `state.sqlite3`.
+Resumable in its two stages, idempotent, refuses while a writer holds the catalog, and it
+names the tiles whose substrate is missing rather than letting them become frames with no
+answer. Nothing reads any of these rows yet.
+
+```bash
+python -m photolib.people
+```
+
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
 it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
 then drops the facet vocabulary and every `total` the server had memoised — no restart.
