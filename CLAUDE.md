@@ -296,6 +296,69 @@ nothing re-labelled.
 python -m harness.label --open
 ```
 
+**The same page has a second mode, and it asks about people rather than stacks.** ADR 0004's
+nesting rule applied to every face a detector finds is destructive — a tourist wandering
+through frames three and four of a nine-frame burst breaks it into three — so the guard is the
+reader saying which persons they actually photographed. The obvious guard was a prominence
+floor, and the reader asked for it to be measured against their own judgement rather than
+picked: *a stranger versus a person I wanted to photograph*, which is a judgement about intent
+that no detector can see. So the verdict is the primary evidence and the floor is demoted to
+whatever `harness.floor` below says it is worth.
+
+One person at a time, drawn as a **montage of the frames their faces were found in** — not
+face crops, because `migrations/012_people.sql` stores a face's share of the frame's height and
+its embedding and **no box**, so there is nothing stored to crop from; each frame is captioned
+with which face of it this is and how tall, which is what tells a guest at a party from a
+stranger in the background of the same party. `f` is somebody photographed, `s` is a stranger,
+`u` is **not sure** — a cluster that could not be made out, an answer rather than a skip — and
+`2` says the cluster is **obviously two different people**, which is a report about the
+clustering rather than about a person: it feeds neither the floor nor the rule and exists so a
+clustering failure is visible. `h`/`l` move between people and `k`/`j`/`g`/`0` say how much of
+the montage is on screen, the stack mode's own vocabulary. The answer *is* the keystroke, so it
+records and moves on; `h` is how a misclick is revised.
+
+**The list is ordered by how much the answer would change**, which is what makes stopping early
+the expected behaviour rather than a loss: for each person, the number of stacks they appear in
+*some* frames of and not others. A person in every frame of every stack they touch scores zero
+and is never asked about at all — whichever way the reader answers, every frame gains or loses
+them together — and the highest scorer is the person whose verdict splits the most stacks. It
+is a pure function over two mappings, so the order is an assertion rather than a browsing
+session, and the counter says how many are judged and how many are left that would change
+anything. With two thousand persons at the default threshold, *once per person* has to mean
+once per person **worth asking about**.
+
+**An unjudged person is a friend**, and that is what makes stopping safe: the grid at zero
+answers is the grid the people rule produces on its own, so every answer moves it from there
+rather than repairing it. The default lives in `harness.people.counts` and deliberately not in
+the table — a row saying friend is the reader's answer and no row is nobody's, and a table that
+could not tell them apart would report silence as a judgement. Verdicts go to the same
+`labels.sqlite3` in a `person_verdict` table of their own, **keyed on the person and the
+clustering** — `stack_member`'s discipline one layer up, because a person is named by its least
+face and re-clustering at another threshold can hand the same name to a different set of faces.
+The splits are counted at `browse.STACK_SETTING` and not at a knob, so a verdict is priced
+against the grid the reader is actually looking at.
+
+To price the **prominence floor** from those answers — the other thing ADR 0004 left open, and
+the one it expects to lose. It prints, separately for the friends and the strangers, the
+distribution of their box shares and the overlap between them; whether **any** floor separates
+them at all; every candidate floor's error counts, kept apart because they are different
+failures — a friend left out shrinks a frame's people and can only **merge**, a stranger let in
+can only **split** — and **the persons each floor gets wrong**, so a bad value is diagnosable
+rather than merely scored. Where nothing separates them it says so plainly and recommends
+keeping the floor where it stands as a cheap pre-filter, which is the outcome this report was
+designed to survive: prominence is a proxy for what the reader was asked, and a proxy that does
+not work is abandoned rather than tuned. The stack-change column is **how many stacks hold a
+frame whose people set differs** from the standing floor's, not how many stacks would split —
+the nesting rule is not implemented, so that is the tightest honest measure there is, and it is
+priced from `photolib.people.FLOOR` where the floor actually stands. There are no arguments and
+the sweep is not a knob. It reads the catalog and `labels.sqlite3`, both on the NVMe, holds
+both connections read-only, opens no substrate and never touches `G:`, so it writes nothing at
+all.
+
+```bash
+python -m harness.floor
+```
+
 To turn those answers into the two numbers the grid inherits — the **calibration report**.
 It replays every label against a sweep of strictness values and all three linkage rules,
 and says how well each setting reproduces what the reader actually said. **Precision and

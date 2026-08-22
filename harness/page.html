@@ -4,6 +4,10 @@
 <link rel="stylesheet" href="/page.css">
 <header>
   <h1>labelling harness <span class="warn">not the website</span></h1>
+  <p class="modes">
+    <button id="mode-stacks" class="mode" type="button">stacks</button>
+    <button id="mode-people" class="mode" type="button">people</button>
+  </p>
   <p id="count" class="count">drawing the first set…</p>
 </header>
 
@@ -14,24 +18,44 @@
 
 <footer>
   <p id="said" class="said"></p>
-  <p class="keys">
-    <kbd>space</kbd> record and go on ·
-    <kbd>u</kbd> not sure ·
-    <kbd>k</kbd> <kbd>j</kbd> see more or less of what surrounds the stack ·
-    <kbd>g</kbd> <kbd>0</kbd> the whole run, or back to one either side ·
-    <kbd>h</kbd> back to revise · <kbd>l</kbd> on to the next set ·
-    <kbd>backspace</kbd> clear the marks
-  </p>
-  <p class="keys">
-    click a frame of the stack to say it does not belong ·
-    then <kbd>p</kbd> different people · <kbd>m</kbd> a different moment ·
-    <kbd>c</kbd> not close enough
-  </p>
-  <p class="keys">
-    click a neighbour to say it should have been included ·
-    drag across several to mark them together ·
-    each is recorded as it is made
-  </p>
+  <div id="keys-stacks">
+    <p class="keys">
+      <kbd>space</kbd> record and go on ·
+      <kbd>u</kbd> not sure ·
+      <kbd>k</kbd> <kbd>j</kbd> see more or less of what surrounds the stack ·
+      <kbd>g</kbd> <kbd>0</kbd> the whole run, or back to one either side ·
+      <kbd>h</kbd> back to revise · <kbd>l</kbd> on to the next set ·
+      <kbd>backspace</kbd> clear the marks
+    </p>
+    <p class="keys">
+      click a frame of the stack to say it does not belong ·
+      then <kbd>p</kbd> different people · <kbd>m</kbd> a different moment ·
+      <kbd>c</kbd> not close enough
+    </p>
+    <p class="keys">
+      click a neighbour to say it should have been included ·
+      drag across several to mark them together ·
+      each is recorded as it is made
+    </p>
+  </div>
+  <div id="keys-people" hidden>
+    <p class="keys">
+      <kbd>f</kbd> somebody I photographed ·
+      <kbd>s</kbd> a stranger who wandered in ·
+      <kbd>u</kbd> not sure — I cannot make this cluster out ·
+      <kbd>2</kbd> this is obviously two different people
+    </p>
+    <p class="keys">
+      <kbd>h</kbd> back to revise · <kbd>l</kbd> on to the next person ·
+      <kbd>k</kbd> <kbd>j</kbd> see more or fewer of their faces ·
+      <kbd>g</kbd> <kbd>0</kbd> every face, or back to the first few
+    </p>
+    <p class="keys">
+      each answer holds everywhere that person appears, and stopping is free —
+      the list is ordered so that the people whose answer would change your
+      stacks come first
+    </p>
+  </div>
 </footer>
 
 <script src="/page.js"></script>
