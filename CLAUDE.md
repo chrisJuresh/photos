@@ -477,6 +477,15 @@ nothing to retry in the process: the pass stores the frames it had in hand, clus
 and exits 2 saying that everything it counted is stored and a re-run resumes there. Re-running
 it is the whole of the answer from this side; the fault is the driver's. Nothing reads any of
 these rows yet.
+Measured: 23,904 frames, the last 22,432 of them in one uninterrupted pass of 35m39s at
+10.5/s on an RTX 3080 Ti — eleven times the fingerprint pass's cost per frame, which is what
+three models instead of one costs. Two tiles have no substrate and are named; nothing failed
+to decode. **9,268 frames hold a body and 6,176 hold one at or above the provisional 0.10
+floor**; 4,049 frames hold a face, 8,037 faces in all, clustered at 0.363 in 5.6s into
+**2,043 persons** — the largest of 120 faces, the median of 3, and 330 seen exactly once.
+That last figure is what #54 was waiting for: the reader is being asked about two thousand
+persons and not two hundred. The rows are cheap where the Match rows were not — 8,037
+128-dimension vectors is 4 MB of a 2,531 MB catalog.
 
 ```bash
 python -m photolib.people

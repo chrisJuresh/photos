@@ -150,6 +150,29 @@ is one figure per frame. Faces are the other question, *who*, and each of them i
 who. The two confidence floors the detectors themselves run at are part of the model's version
 rather than read-time constants, because what falls under one is never stored.
 
+**What it found, over the whole library.** The pass has now run: 23,904 frames examined, two
+tiles named as having no substrate, nothing that would not decode.
+
+| | |
+|---|---|
+| frames holding a body at all | 9,268 |
+| frames holding one at or above the provisional 0.10 floor | 6,176 |
+| frames holding a face | 4,049 |
+| faces | 8,037 |
+| persons at the default 0.363 | 2,043 |
+| appearances per person | largest 120, median 3, 330 seen once |
+
+Two of those numbers price the rules above rather than merely describing the library. **The
+nobody clause reaches a quarter of the population**: 6,176 frames of 23,904 hold somebody
+prominent, so the veto has something to say about a quarter of what the grid draws and is
+silent about the rest, which is the shape a rule about people should have. And **there are two
+thousand persons, not two hundred** — so any design that asks the reader a question per person
+is asking two thousand questions, and #54's "once per person" has to mean once per person
+*worth asking about*. The 330 seen exactly once are where to start looking: a singleton cluster
+is either somebody who really was photographed once or a face the clustering failed to join to
+its person, the counts alone cannot tell those apart, and under the nesting rule either of them
+splits a stack on the evidence of one embedding.
+
 **A person is content-addressed**, named by its least face as `<sha256>:<idx>`, which is
 `stack_member`'s reason: `archive.pipeline.group` reassigns every tile id on each Apply to
 grid without changing a byte. The clustering is **complete linkage** — two clusters join only
