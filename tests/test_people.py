@@ -307,6 +307,74 @@ def test_a_substrate_that_will_not_decode_is_named_not_fatal(corpus: Corpus) -> 
     assert set(corpus.frames()) == {good}
 
 
+# --- the device failing under the pass ---------------------------------------
+
+
+def faulting_after(count: int, message: str = "CUDA error: an illegal memory access"):
+    """A detector whose device dies on the frame after `count` of them.
+
+    Which is what a display driver reset looks like from in here: not this frame's
+    fault, and not the next frame's either, because the context is gone.
+    """
+    asked = []
+
+    def detect(frame):
+        asked.append(frame)
+        if len(asked) > count:
+            raise RuntimeError(message)
+        return somebody(0.3)
+
+    detect.asked = asked  # how many frames it was shown, fault included
+    return detect
+
+
+def test_a_device_that_fails_keeps_the_frames_already_looked_at(corpus: Corpus) -> None:
+    for seed in "1234":
+        corpus.add(seed)
+    todo, _ = corpus.worklist()
+
+    result = corpus.examine(todo, detect=faulting_after(3), batch=2)
+
+    # The first batch of two committed; the third frame was detected and the fourth
+    # faulted, so the batch it faulted in still stores the one frame it had in hand.
+    assert result["written"] == 3
+    assert set(corpus.frames()) == set(todo[:3])
+    assert "illegal memory access" in result["faulted"]
+
+
+def test_a_device_that_fails_stops_the_pass_rather_than_every_frame(
+    corpus: Corpus,
+) -> None:
+    """A poisoned context fails identically on every frame after it, so walking on
+    would be twenty thousand copies of one message and an hour spent collecting them."""
+    for seed in "1234":
+        corpus.add(seed)
+    detect = faulting_after(1)
+
+    result = corpus.examine(corpus.worklist()[0], detect=detect, batch=1)
+
+    assert result["written"] == 1
+    assert len(detect.asked) == 2  # the one it looked at, and the one it died on
+    assert result["unreadable"] == []  # a device fault is not the substrate's fault
+
+
+def test_a_pass_the_device_ended_resumes_at_the_frame_it_ended_on(
+    corpus: Corpus,
+) -> None:
+    shas = {corpus.add(seed) for seed in "1234"}
+    corpus.examine(corpus.worklist()[0], detect=faulting_after(2), batch=1)
+
+    resumed, _ = corpus.worklist()
+    assert len(resumed) == 2
+    assert corpus.examine(resumed, detect=lambda frame: somebody(0.3))["faulted"] is None
+    assert set(corpus.frames()) == shas
+
+
+def test_a_finished_pass_reports_no_fault(corpus: Corpus) -> None:
+    corpus.add("1")
+    assert corpus.examine(corpus.worklist()[0])["faulted"] is None
+
+
 # --- the stored share, not the verdict ---------------------------------------
 
 
@@ -644,6 +712,31 @@ def test_run_reports_a_substrate_that_would_not_decode(
 
     assert people.run(synthetic_config(tmp_path, migrated), detect=lambda f: NOBODY) == 1
     assert corrupt in capsys.readouterr().out
+
+
+def test_run_says_the_device_failed_and_clusters_nothing(
+    corpus: Corpus, tmp_path: Path, migrated, capsys
+) -> None:
+    """The persons of the fraction the pass reached are not this library's persons,
+    so the report that would name them is not printed."""
+    for seed in "123":
+        corpus.add(seed)
+    corpus.conn.close()
+
+    code = people.run(synthetic_config(tmp_path, migrated), detect=faulting_after(1))
+
+    report = capsys.readouterr().out
+    assert code == 2
+    assert "the detector's device failed" in report
+    assert "illegal memory access" in report
+    assert "persons" not in report
+
+    conn = candidates.catalog(migrated[0])
+    try:
+        assert len(examined(conn)) == 1  # and the one frame it did look at is stored
+        assert conn.execute("SELECT count(*) FROM face_person").fetchone()[0] == 0
+    finally:
+        conn.close()
 
 
 def test_run_refuses_without_a_substrate_tree(tmp_path: Path, migrated) -> None:

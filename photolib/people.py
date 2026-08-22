@@ -54,6 +54,16 @@ reading of every vector at once and is redone when a vector has no person at the
 threshold in hand. `--threshold` clusters into a new population without re-detecting
 anything, because the threshold is part of `face_person`'s key and not of `face`'s.
 
+**A device fault is one of those interruptions and is reported as one.** The card
+this pass runs on is also the one drawing the desktop, and Windows resets that driver
+when a graphics command outstays its timeout -- which kills every CUDA context on the
+card, mid-pass and through no fault of the frame being looked at. There is nothing to
+retry in this process, because a lost context poisons every call after it, so the
+frames in hand are stored and the pass stops and says the device failed, rather than
+ending in a traceback that leaves it unclear whether anything was kept. It exits 2
+there, and clusters nothing: a clustering of the fraction of the vectors the pass
+reached would be reported as this library's persons without being them.
+
 Nothing reads any of these rows yet.
 """
 
@@ -545,9 +555,15 @@ def examine_all(
     One transaction per batch, so an interruption costs the batch in flight and
     nothing before it. Decoding runs on a pool because a 1536px webp costs more to
     read than either model costs to run, exactly as it does in `fingerprints`.
+
+    A detector that fails on the device rather than on the frame ends the walk and
+    is returned as `faulted`, for the module docstring's reason. The frames already
+    detected in the batch it failed in are stored on the way out, so the fault costs
+    the frame it happened on and nothing else.
     """
     written = faces = 0
     unreadable: list[tuple[str, str]] = []
+    faulted: str | None = None
     started = announced = time.perf_counter()
 
     with ThreadPoolExecutor(max(workers, 1)) as pool:
@@ -557,8 +573,21 @@ def examine_all(
             for sha256, (frame, reason) in zip(chunk, pool.map(_decode, paths)):
                 if reason is not None:
                     unreadable.append((sha256, reason))
-                else:
+                    continue
+                try:
                     rows.append((sha256, detect(frame)))
+                except RuntimeError as exc:
+                    # The detector's device has failed, which on this machine means
+                    # the display driver was reset under the pass: Windows resets it
+                    # when a graphics command outstays the TDR timeout, and every
+                    # CUDA context on the GPU dies with it. Unlike a substrate that
+                    # will not decode this is not the frame's fault and not
+                    # survivable, because a lost context poisons every call after
+                    # it -- so the frames in hand are stored and the pass stops
+                    # rather than reporting 22,000 identical failures. What it costs
+                    # is the resume unit and no more.
+                    faulted = str(exc)
+                    break
             if rows:
                 conn.execute("BEGIN")
                 conn.executemany(
@@ -580,6 +609,9 @@ def examine_all(
                 written += len(rows)
                 faces += sum(len(f.faces) for _, f in rows)
 
+            if faulted is not None:
+                break
+
             now = time.perf_counter()
             if now - announced >= progress_seconds:
                 announced = now
@@ -593,6 +625,7 @@ def examine_all(
         "written": written,
         "faces": faces,
         "unreadable": unreadable,
+        "faulted": faulted,
         "elapsed_s": time.perf_counter() - started,
     }
 
@@ -742,6 +775,18 @@ def run(
             print(f"corrupt   {len(unreadable):,} substrates that would not decode")
             for sha256, reason in unreadable:
                 print(f"          {sha256}  {reason}")
+            if result["faulted"] is not None:
+                # Nothing is clustered and nothing is counted, because a clustering
+                # is a reading of every vector at once and there is no reading of a
+                # fraction: the persons it named would be the persons of however far
+                # the pass got, reported as though they were the library's.
+                print(
+                    "\nfaulted   the detector's device failed, so the pass stopped where it"
+                    " is. Every frame counted above is stored and re-running resumes"
+                    " from there."
+                )
+                print(f"          {result['faulted'].splitlines()[0]}")
+                return 2
         else:
             print("\nnothing to examine: every tile with a substrate has been looked at")
 
