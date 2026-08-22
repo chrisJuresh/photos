@@ -455,9 +455,11 @@ for bodies, and **YuNet** with **SFace** — 233 KB and 37 MB of ONNX from a pin
 `opencv/opencv_zoo`, checked against a recorded digest — for faces and their 128-dimension
 vectors. No photograph leaves the disk and **no name is attached to any cluster**: the pass
 produces "person 4f2a…", not "Chris". **The measurement is stored and the verdict is
-derived**, `candidate_pair.screen`'s discipline: every box records its share of the frame's
-height and nothing records whether that share was enough, so the prominence floor — 0.10 and
-written down as provisional — moves by re-reading rows. The clustering is **complete
+derived**, `candidate_pair.screen`'s discipline: a box records its share of the frame's height
+and nothing records whether that share was enough, so the prominence floor — 0.10 and written
+down as provisional — moves by re-reading rows. Every *face*'s share is kept, because each face
+is a different who; of the bodies only the largest, because *is somebody here* is the whole of
+what a body is asked and the largest answers it at any floor. The clustering is **complete
 linkage**, because a person is not a chain, and its **threshold is part of the key** as
 strictness and linkage are in `stack_member`, so `--threshold` adds a population rather than
 overwriting one and re-clusters without re-detecting: the vector lives in `face` and the

@@ -114,10 +114,10 @@ class Corpus:
             self.conn, todo, self.substrates, detect or (lambda frame: NOBODY), **kwargs
         )
 
-    def frames(self) -> dict[str, tuple[int, float, int]]:
+    def frames(self) -> dict[str, tuple[int, float]]:
         return {
             row[0]: row[1:]
-            for row in self.conn.execute("SELECT sha256, bodies, share, faces FROM frame_body")
+            for row in self.conn.execute("SELECT sha256, bodies, share FROM frame_body")
         }
 
     def faces(self) -> list[tuple[str, int, float]]:
@@ -246,7 +246,7 @@ def test_a_frame_with_nobody_in_it_is_recorded_as_looked_at(corpus: Corpus) -> N
     sha256 = corpus.add("1")
     corpus.examine(corpus.worklist()[0], detect=lambda frame: NOBODY)
 
-    assert corpus.frames() == {sha256: (0, 0.0, 0)}
+    assert corpus.frames() == {sha256: (0, 0.0)}
     assert corpus.faces() == []
     assert corpus.worklist() == ([], [])
 
@@ -324,21 +324,36 @@ def test_a_face_below_the_provisional_floor_is_stored_with_its_share(
 
 
 def test_the_frame_records_the_largest_body_and_how_many(corpus: Corpus) -> None:
-    """At any floor, the largest body answers "is somebody in this frame"."""
+    """At any floor, the largest body answers "is somebody in this frame", which is
+    the whole of what a body is asked and the reason the others are only counted."""
     sha256 = corpus.add("1")
     corpus.examine(
         corpus.worklist()[0], detect=lambda frame: Found(bodies=[0.2, 0.6, 0.4], faces=[])
     )
 
-    assert corpus.frames() == {sha256: (3, pytest.approx(0.6), 0)}
+    assert corpus.frames() == {sha256: (3, pytest.approx(0.6))}
 
 
-def test_every_face_of_a_frame_is_stored_and_indexed(corpus: Corpus) -> None:
+def test_every_face_of_a_frame_is_stored_and_indexed_by_prominence(
+    corpus: Corpus,
+) -> None:
+    """Each face is a different who, so each keeps its own share -- and `idx` is
+    the place in the frame by descending share rather than the detector's own
+    output order, so 0 is the most prominent face there."""
     sha256 = corpus.add("1")
-    corpus.examine(corpus.worklist()[0], detect=lambda frame: somebody(0.4, 0.3, 0.2))
+    corpus.examine(
+        corpus.worklist()[0],
+        detect=lambda frame: Found(
+            bodies=[0.9],
+            faces=[Face(share=share, vector=vector(1.0)) for share in (0.2, 0.4, 0.3)],
+        ),
+    )
 
-    assert [idx for _, idx, _ in corpus.faces()] == [0, 1, 2]
-    assert corpus.frames()[sha256][2] == 3
+    assert corpus.faces() == [
+        (sha256, 0, pytest.approx(0.4)),
+        (sha256, 1, pytest.approx(0.3)),
+        (sha256, 2, pytest.approx(0.2)),
+    ]
 
 
 def test_the_stored_vector_is_what_the_detector_produced(corpus: Corpus) -> None:
@@ -406,6 +421,25 @@ def test_a_person_is_named_by_its_least_face() -> None:
     assignment = cluster({late: _at(1.0), early: _at(0.0)}, THRESHOLD)
 
     assert set(assignment.values()) == {early}
+
+
+def test_a_person_survives_every_tile_id_being_reassigned(corpus: Corpus) -> None:
+    """The content-addressing claim, made against the thing that breaks ids:
+    `archive.pipeline.group` rebuilds `photo` on every Apply to grid and hands out
+    fresh ones. The bytes do not move, so neither does any person."""
+    corpus.add("1")
+    corpus.add("2")
+    corpus.examine(corpus.worklist()[0], detect=_two_faces([_at(0.0), _at(1.0)]))
+    cluster_all(corpus.conn)
+    before = corpus.persons()
+
+    corpus.conn.execute("UPDATE photo SET id = id + 1000")
+    corpus.conn.commit()
+    corpus.conn.execute("DELETE FROM face_person")
+    cluster_all(corpus.conn)
+
+    assert corpus.persons() == before
+    assert len(set(before.values())) == 1
 
 
 def test_a_different_threshold_is_a_different_population(corpus: Corpus) -> None:

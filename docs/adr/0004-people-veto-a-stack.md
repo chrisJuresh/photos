@@ -137,11 +137,18 @@ different fact from *never checked*, which is `candidate_pair`'s `screened_out` 
 clustering, keyed by the threshold as `stack_member` is keyed by strictness and linkage, so
 another threshold is another population and re-clustering never re-runs the detector.
 
-**The measurement is stored and the verdict is derived.** Every box records its share of the
+**The measurement is stored and the verdict is derived.** A box records its share of the
 frame's height and nothing records whether that share was enough — so the prominence floor
 this document says is measured rather than picked really can be, from these rows and without
 another pass. It is provisional at 0.10 and `photolib.people.FLOOR` is the only line that
 reads it.
+
+Every *face*'s share is kept individually and of the bodies only the largest, which is a
+narrowing on purpose. The nobody clause asks one thing of a body — *is somebody in this frame*
+— and at any floor the largest body answers it, so the distribution the floor is chosen from
+is one figure per frame. Faces are the other question, *who*, and each of them is a different
+who. The two confidence floors the detectors themselves run at are part of the model's version
+rather than read-time constants, because what falls under one is never stored.
 
 **A person is content-addressed**, named by its least face as `<sha256>:<idx>`, which is
 `stack_member`'s reason: `archive.pipeline.group` reassigns every tile id on each Apply to

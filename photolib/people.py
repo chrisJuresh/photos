@@ -82,6 +82,10 @@ from photolib.substrates import present
 # because they are one answer: a frame's people are what all three said together,
 # and a change to any of them is a change to the population.
 MODEL = "fasterrcnn_v2+yunet+sface"
+# Bumped when the weights, the preprocessing or either confidence floor below
+# change. All three decide which detections exist at all, so all three are part of
+# what "this model said" means: a sub-threshold detection is not stored, so moving a
+# floor cannot be answered by a re-read the way moving `FLOOR` can.
 VERSION = "1"
 DIM = 128  # SFace's embedding
 
@@ -98,7 +102,10 @@ THRESHOLD = 0.363
 # is stored and nothing stored is derived from this number.
 FLOOR = 0.10
 
-BODY_SCORE = 0.7  # a person, at the detector's own confidence
+# The two confidence floors, which are part of `VERSION` and not read-time knobs:
+# what falls under them is never stored, so unlike `FLOOR` they cannot be moved by
+# re-reading rows.
+BODY_SCORE = 0.7  # a person, at the body detector's own confidence
 FACE_SCORE = 0.7  # a face, at YuNet's
 PERSON = 1  # of the COCO categories the body detector was trained on
 
@@ -147,8 +154,8 @@ ORDER BY p.rep_sha256
 _EXAMINED = "SELECT sha256 FROM frame_body WHERE model = ? AND version = ?"
 
 _INSERT_FRAME = """
-INSERT OR REPLACE INTO frame_body (model, version, sha256, bodies, share, faces)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT OR REPLACE INTO frame_body (model, version, sha256, bodies, share)
+VALUES (?, ?, ?, ?, ?)
 """
 
 _INSERT_FACE = """
@@ -235,15 +242,26 @@ class Found:
     """What one detector saw in one frame. Empty is an answer and not a gap."""
 
     bodies: list[float]  # each body's share of the frame's height
-    faces: list[Face]  # in descending share, which is what makes `idx` mean something
+    faces: list[Face]  # in whatever order the detector found them; `indexed` orders
 
     @property
-    def share(self) -> float:
+    def indexed(self) -> list[tuple[int, Face]]:
+        """The faces by descending share, which is what `idx` means.
+
+        Ordered here rather than by the detector, so that `idx` is a fact about the
+        photograph and not about a model's output conventions: 0 is the most
+        prominent face in the frame whichever detector found it.
+        """
+        return list(enumerate(sorted(self.faces, key=lambda face: -face.share)))
+
+    @property
+    def largest(self) -> float:
         """The largest body's share, or zero where there is no body.
 
-        The largest rather than every one of them, because the question these rows
-        exist to answer is *is somebody in this frame*, and at any floor the largest
-        body answers it.
+        The largest is all that is stored, and deliberately: *is somebody in this
+        frame* is what a body is asked, and at any floor the largest body answers
+        it. Each face's share is kept individually, because there the question is
+        who, and each face is a different who.
         """
         return max(self.bodies, default=0.0)
 
@@ -283,7 +301,11 @@ def weights(rel: str, digest: str, pin: str = ZOO) -> Path:
         )
     found = hashlib.sha256(target.read_bytes()).hexdigest()
     if found != digest:
-        raise PeopleRefused(f"{target} hashes to {found}, not the pinned {digest}")
+        # Unlinked before refusing, or a download truncated once refuses for ever:
+        # the cache would keep answering with the broken file and the next run would
+        # not re-fetch it.
+        target.unlink()
+        raise PeopleRefused(f"{target.name} hashed to {found}, not the pinned {digest}")
     return target
 
 
@@ -330,14 +352,14 @@ def load_detector() -> Detector:
         bgr = np.ascontiguousarray(frame[:, :, ::-1])
         detect.setInputSize((frame.shape[1], frame.shape[0]))
         _, rows = detect.detect(bgr)
-        faces = [
-            Face(share=float(row[3]) / height, vector=unit(embed.feature(embed.alignCrop(bgr, row))[0]))
-            for row in ([] if rows is None else rows)
-        ]
-        return Found(
-            bodies=[float(box[3] - box[1]) / height for box in people],
-            faces=sorted(faces, key=lambda face: -face.share),
-        )
+        faces = []
+        for row in [] if rows is None else rows:
+            # Aligned on YuNet's five landmarks rather than cropped to its box,
+            # which is what the landmarks are returned for: SFace was trained on
+            # faces squared up this way and embeds a tilted one as a stranger.
+            aligned = embed.alignCrop(bgr, row)
+            faces.append(Face(share=float(row[3]) / height, vector=unit(embed.feature(aligned)[0])))
+        return Found(bodies=[float(box[3] - box[1]) / height for box in people], faces=faces)
 
     return found
 
@@ -419,15 +441,19 @@ def cluster(
                 offer(a, b)
 
     while queue:
-        _, a, b = heapq.heappop(queue)
-        # Stale: one side has since been absorbed into the other, or into a third.
-        # An entry that was not complete when it was pushed cannot become complete
-        # in place -- a merge that touches either side makes a new cluster and a new
-        # entry -- so nothing is lost by dropping one.
+        negated, a, b = heapq.heappop(queue)
+        # Three ways an entry goes stale, and all three are dropped rather than
+        # repaired, because every merge re-offers the whole neighbourhood of the
+        # cluster it made: one side has been absorbed, the pair is no longer
+        # complete, or -- the one that is easy to miss -- **the pair is still
+        # complete but has got worse**, because a merge on either side brought in a
+        # face further away than the two this entry was queued for. Honouring the
+        # queued figure there would make the merges in the wrong order, which is a
+        # different clustering and not merely a slower one.
         if a not in members or b not in members or b not in joined[a]:
             continue
-        edges, _ = joined[a][b]
-        if edges != len(members[a]) * len(members[b]):
+        edges, worst = joined[a][b]
+        if worst != -negated or edges != len(members[a]) * len(members[b]):
             continue
         kept = min(a, b)
         _absorb(members, joined, kept, max(a, b))
@@ -461,12 +487,17 @@ def _absorb(
     joined[kept].pop(gone, None)
 
 
-def _above(matrix: np.ndarray, threshold: float, chunk: int = 2048) -> Iterator[tuple[int, int, float]]:
+def _above(
+    matrix: np.ndarray, threshold: float, chunk: int = 1024
+) -> Iterator[tuple[int, int, float]]:
     """Every pair of vectors at or above `threshold`, in blocks rather than at once.
 
     A dense similarity matrix over this library's faces would be gigabytes; the
     pairs that clear the threshold are a small fraction of it, and they are all the
-    clustering ever looks at.
+    clustering ever looks at. The block size is a memory figure and not a speed one
+    -- the multiply is the same work whatever it is cut into -- so it is small
+    enough that one block stays in the hundred-megabyte range at any face count this
+    library will reach.
     """
     for start in range(0, len(matrix), chunk):
         block = matrix[start : start + chunk] @ matrix.T
@@ -533,7 +564,7 @@ def examine_all(
                 conn.executemany(
                     _INSERT_FRAME,
                     [
-                        (model, version, sha256, len(f.bodies), f.share, len(f.faces))
+                        (model, version, sha256, len(f.bodies), f.largest)
                         for sha256, f in rows
                     ],
                 )
@@ -542,7 +573,7 @@ def examine_all(
                     [
                         (model, version, sha256, idx, face.share, to_blob(face.vector))
                         for sha256, f in rows
-                        for idx, face in enumerate(f.faces)
+                        for idx, face in f.indexed
                     ],
                 )
                 conn.execute("COMMIT")

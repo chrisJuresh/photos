@@ -11,10 +11,10 @@
 --
 -- **The measurement is stored and the verdict is derived**, which is
 -- 009_candidate_pair.sql's discipline turned the other way up. There it was the
--- one derived value that needed guarding; here there is none: every box records
--- its share of the frame and nothing records whether that share was enough. The
+-- one derived value that needed guarding; here there is none: a box records its
+-- share of the frame and nothing records whether that share was enough. The
 -- prominence floor is a read-time constant precisely so that choosing it later is
--- a query over these rows rather than another twenty-minute pass.
+-- a query over these rows rather than another forty-minute pass.
 --
 -- The model's identity is part of the key, for 008_fingerprint.sql's reason: a
 -- change of model adds a population instead of overwriting one, and no query can
@@ -31,27 +31,39 @@
 -- a pass whose absence of an answer and whose answer of *no* look alike cannot be
 -- resumed, and cannot be believed either.
 --
--- `bodies` counts what was found and `share` is the largest one's, because the
--- question these rows will be asked is *is somebody in this frame*, which the
--- largest body answers at whatever floor is chosen. Presence is read off bodies
--- rather than faces so that a person photographed from behind is still somebody:
--- the back of a head has no face and is not a landscape.
+-- `bodies` counts what was found and `share` is **the largest one's, and only the
+-- largest one's**, which is a deliberate narrowing rather than a lost column. The
+-- question these rows exist to answer is *is somebody in this frame*, ADR 0004's
+-- nobody clause, and at any floor the largest body answers it -- so the
+-- distribution the floor will be chosen from is the distribution of these, one per
+-- frame, and the second-largest body in a frame whose largest already clears the
+-- floor changes no answer anybody is going to ask. Every *face*'s share is kept
+-- individually below, because there the question is who, and each of them is a
+-- different who.
+--
+-- Presence is read off bodies rather than faces so that a person photographed from
+-- behind is still somebody: the back of a head has no face and is not a landscape.
 CREATE TABLE main.frame_body (
   model   TEXT NOT NULL,          -- the detector's identity, on every row it wrote
-  version TEXT NOT NULL,          -- bumped when the weights or the preprocessing change
+  version TEXT NOT NULL,          -- bumped when the weights, the preprocessing or a
+                                  -- confidence floor change: all three decide which
+                                  -- detections exist at all, so all three are the model
   sha256  TEXT NOT NULL REFERENCES file(sha256),
   bodies  INTEGER NOT NULL CHECK (bodies >= 0),        -- 0 is an answer, not a gap
   share   REAL NOT NULL CHECK (share >= 0.0),          -- the largest body's height
-  faces   INTEGER NOT NULL CHECK (faces >= 0),         -- how many `face` rows it has
   PRIMARY KEY (model, version, sha256)
 );
 
 -- One row per detected face: where it was and what it looked like.
 --
--- `idx` is the face's position in the detector's own output for that frame, which
--- is what makes a face nameable at all. Together with the sha256 it is the face's
--- name, and the pair is content-addressed for the reason above: a rebuild that
--- reassigns every tile id leaves both halves untouched.
+-- `idx` is the face's place in the frame ordered by descending share, so 0 is the
+-- most prominent face there. Ordered rather than taken from the detector's own
+-- output because that order is the detector's business and this one is a fact about
+-- the photograph: it survives a detector that returns its findings in another
+-- sequence, and it makes the face a row is about identifiable from the row.
+-- Together with the sha256 it is the face's name, and the pair is content-addressed
+-- for the reason above: a rebuild that reassigns every tile id leaves both halves
+-- untouched.
 --
 -- `share` is the box's height as a fraction of the frame's, stored and never
 -- applied. `vector` is the embedding, little-endian float32 and L2-normalised on
