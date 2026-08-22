@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 11
+LATEST = 12
 
 
 def test_applies_from_empty(pair):
@@ -29,9 +29,10 @@ def test_applies_from_empty(pair):
     # Phase 5's grouping, which is derived from all of them, the fingerprints the
     # match pass screens with, which are re-derivable from the substrates, the
     # candidate pairs it screens, which are re-derivable from those, the Matches it
-    # verifies the survivors with, likewise, and the stack each tile is assigned to,
-    # which is a reading of those Matches at one setting.
-    # Decisions stay in state, and migrations 005 to 011 add nothing there.
+    # verifies the survivors with, likewise, the stack each tile is assigned to,
+    # which is a reading of those Matches at one setting, and who is in each frame,
+    # which is re-derivable from the substrates as everything since 008 is.
+    # Decisions stay in state, and migrations 005 to 012 add nothing there.
     assert table_names(catalog) == {
         "schema_version",
         "origin",
@@ -53,6 +54,9 @@ def test_applies_from_empty(pair):
         "candidate_pair",
         "pair_match",
         "stack_member",
+        "frame_body",
+        "face",
+        "face_person",
     }
     assert table_names(state) == {"schema_version", "triage_rule", "triage_override"}
 
