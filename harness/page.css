@@ -46,6 +46,24 @@ p { margin: 4px 0 0; }
 .count, .about, .said, .keys { color: var(--dim); }
 .count strong, .about strong { color: var(--ink); font-weight: 600; }
 
+/* Which question the reader is answering. Two buttons rather than a key, because
+   every free key in this harness means something inside a mode and a switch that
+   collided with an answer would be the one mistake that cannot be undone by
+   pressing it again. They are focusable, so the keyboard still reaches them. */
+.modes { display: flex; gap: 6px; }
+
+.mode {
+  padding: 2px 10px;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+}
+.mode:hover { border-color: #5a5a5a; color: var(--ink); }
+.mode.on { border-color: var(--in); color: var(--ink); }
+
 kbd {
   padding: 0 4px;
   border: 1px solid #3a3a3a;
@@ -197,5 +215,19 @@ main {
 }
 .frame.marked-out .caption { color: var(--out); }
 .frame.marked-in .caption { color: var(--in); }
+
+/* One person's faces, and the whole stage: there is nothing beside a person the
+   way there are neighbours beside a stack, so the box takes the room rather than a
+   share of it. Solid-bordered like `.box.member` is, because these frames *are*
+   the claim being judged and not context around one. */
+.box.montage {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A face is not a control -- the answer is a keystroke about the person, so there
+   is nothing here to press and the cursor should not suggest there is. */
+.frame.face { cursor: default; }
+.frame.face:hover { border-color: transparent; }
 
 .done { padding: 24px 0; font-size: 15px; }

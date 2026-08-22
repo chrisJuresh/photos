@@ -1,7 +1,8 @@
 # Stacking is vetoed by who is in the frame
 
 **Status: accepted 2026-08-12. The rule is not implemented; the evidence it reads is** — see
-"What the pass records" below, which landed 2026-08-22. Extends
+"What the pass records" and "Who the reader says they photographed" below, which landed
+2026-08-22. Extends
 [ADR 0003](0003-stack-on-verified-match.md) and supersedes nothing in it: the Match is still
 the evidence a stack is built on, and this document is a rule that sits on top of it. 0003's
 own objective changed at the same time — see "The objective changed" there — and the two
@@ -97,13 +98,26 @@ compose instead of fight, and it is why the people pass runs two detectors rathe
 
 **A prominence floor exists and is measured, not picked.** Somebody counts only above some
 share of the frame, or a person forty metres away in the background of one frame of a bracket
-would split it. The value is settled by a later ticket from the reader's own friend-or-stranger
-answers rather than chosen, and until then it is provisional at roughly a tenth of the frame's
-height.
+would split it. The value is settled from the reader's own friend-or-stranger answers rather
+than chosen, and until they have given some it is provisional at roughly a tenth of the frame's
+height. **The floor was demoted before it was measured** — see "The floor is a pre-filter"
+below, which is what collecting those answers turned out to establish.
 
 **A stranger never counts.** A person the reader has marked as a stranger is somebody who
 appears in their photographs without having been photographed, and is excluded from every
 frame's people. Marked once per person, not once per appearance.
+
+**An unjudged person is a friend.** The reader will not judge two thousand persons and is not
+asked to, so silence has to mean something: it means the person counts. That is the direction
+every other decision here leans, and it is what makes stopping early safe rather than
+undefined — **the grid at zero answers is the grid this rule produces on its own**, so every
+answer the reader gives moves it from there rather than repairing it.
+
+The default is deliberately **not stored**. A person with no row is absent from the verdict
+table and `harness.people.counts` is the one place that reads the absence, because a row saying
+*friend* is the reader's answer and no row at all is nobody's: a table that could not tell them
+apart would report silence as a judgement, and the count of what the reader actually thinks is
+the whole evidence base here.
 
 **No names.** The rule needs only *these two faces are one person*. Naming is a feature the
 reader intends to add later, and the cluster list is deliberately the thing it will be built
@@ -180,6 +194,70 @@ when every face of one is within the threshold of every face of the other — be
 linkage walks a resemblance from one individual to another across a crowd of near-misses,
 which is the failure this document exists to avoid rather than to reproduce. The default
 threshold is SFace's own published 0.363.
+
+## Who the reader says they photographed
+
+`python -m harness.label --open` has a second mode, landed 2026-08-22, and it is where *a
+stranger never counts* stops being a clause and becomes rows. One person at a time, the reader
+says **friend** or **stranger** once, and it holds everywhere that person appears. Nothing
+above is applied by it either: no stack moves and no cover moves.
+
+**The verdict is the primary evidence and prominence is the proxy.** The reader's own words for
+what they wanted to distinguish were *a stranger versus a person I wanted to photo*, and the
+wording is the reasoning: the distinction is about **intent**, which no detector can see. A
+stranger can be large and close and a friend small and distant, so a threshold fitted to
+per-appearance boxes would encode the proxy permanently. That is why this mode exists at all
+rather than a script that picks a floor.
+
+**Ordered by how much the answer would change.** For each person, the number of stacks they
+appear in *some* frames of and not others — a pure function over stored numbers, and the stack
+sampler's least-decisive draw pointed at a different population. A person in every frame of
+every stack they touch scores zero and is **never asked about**, because every frame of that
+stack gains or loses them together and the rule above draws it identically either way. So the
+two thousand persons are not two thousand questions, and stopping early is the expected
+behaviour rather than an abandonment.
+
+**Four answers, and the fourth is about the clustering.** `friend`, `stranger`, `unsure` — a
+cluster the reader could not make out, which is an answer and not a skip — and `two-people`,
+which says the cluster is obviously two individuals. That last one feeds neither the floor nor
+the rule: it exists so that a clustering failure is **visible** instead of being forced into a
+judgement about somebody, and so that the count of them is what justifies a ticket to split
+them rather than an intuition. Acting on it is out of scope here.
+
+**Keyed on the person and the clustering**, which is `stack_member`'s discipline one layer up.
+A person is named by its least face, so re-clustering at another threshold can hand the same
+name to a different set of faces; a verdict that did not say which clustering it was about
+would be a judgement about a name rather than about somebody.
+
+**The montage is frames, not face crops, and that is a schema consequence rather than a
+choice.** `face` stores a box's *share of the frame's height* and its embedding and **no
+coordinates** — see "The measurement is stored and the verdict is derived" above, which is the
+decision that produced it — so there is nothing stored to crop from. Cropping would mean a
+column and a re-run of the whole detection pass. What is drawn instead is the frames the faces
+came from, several at once, each captioned with which face of that frame this is and how tall
+it was. That is enough for the reader's stated question — a guest at a party against a stranger
+in the background of the same party — and it is worth recording as the cost of storing a share
+instead of a box.
+
+## The floor is a pre-filter
+
+`python -m harness.floor` is the measurement the clause above promised, and it is allowed to
+answer **no**. It reports the friends' and the strangers' box shares separately, whether any
+value separates them, each candidate floor's two error counts — kept apart, because a friend
+left out shrinks a frame's people and can only *merge* while a stranger let in can only *split*
+— and the persons each floor gets wrong.
+
+**Where no floor separates them, the recommendation is to change nothing**: keep the floor
+where it stands as a cheap pre-filter and let the friend-or-stranger verdict do the work. That
+is not a fallback, it is the outcome this arrangement was designed to survive, and it follows
+from the paragraph above: if the distinction is about intent then a proxy for size may simply
+have nothing to say, and a report that returned the least-bad value would be dressing that
+failure as an answer.
+
+Its stack-change column is **how many stacks hold a frame whose people set differs** from the
+standing floor's — not how many stacks would split. The nesting rule at the top of this
+document is not implemented, so a count of splits is not available to be reported; what changes
+is the *input* the rule reads, which is the tightest honest measure there is until it lands.
 
 ## The cover, and the surprise it introduces
 

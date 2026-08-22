@@ -1,6 +1,12 @@
 // The labelling harness's client. Vanilla and unbundled — `ui/` is the website's
 // client and this is not part of it, so it carries none of that toolchain.
 //
+// **Two modes over one page.** The stack mode asks whether a stack is drawn right
+// and the people mode asks whether a person is somebody the reader photographed;
+// they share the header, the stage, the substrate route and the labels file, and
+// they share nothing else. Everything below the mode switch is one or the other,
+// and the stack mode's half is unchanged by the people mode existing.
+//
 // Everything the sitting has been dealt arrives in one response, so going back to
 // revise an answer is a local move. Two things talk to the server: recording an
 // answer, and asking for one more set. Both answer with the sitting again, which is
@@ -18,6 +24,11 @@ let at = 0;
 // should not leave the counter stuck above what the next set can show.
 let wanted = 1;
 const marks = new Map(); // index -> { out: Set, in: Set, why: Map }
+
+// Which question the reader is answering. It rides in the location hash so a
+// reload comes back to the mode they were in -- the alternative is storage, and a
+// page with one reader at one keyboard has somewhere simpler to put one word.
+let mode = location.hash === "#people" ? "people" : "stacks";
 
 const beside = (set) => Math.max(set.before.length, set.after.length);
 const showing = (set) => Math.min(wanted, beside(set));
@@ -389,9 +400,10 @@ function finished() {
 // different answer. Debounced, because a drag is a hundred of these.
 let settling = null;
 window.addEventListener("resize", () => {
-  if (!sample || !sample.sets[at]) return;
+  const drawing = mode === "people" ? crowd && crowd.persons[who] : sample && sample.sets[at];
+  if (!drawing) return;
   clearTimeout(settling);
-  settling = setTimeout(draw, 150);
+  settling = setTimeout(mode === "people" ? drawPerson : draw, 150);
 });
 
 // A drag marks a run of frames in one go, because a stack of a dozen near
@@ -426,6 +438,7 @@ function setMark(button, marked) {
 let taken = false;
 
 stage.addEventListener("pointerdown", (event) => {
+  if (mode !== "stacks") return;
   const button = event.target.closest(".frame");
   taken = false;
   if (!button || event.button !== 0) return;
@@ -462,6 +475,7 @@ for (const ending of ["pointerup", "pointercancel"]) {
 // makes dragging work and it swallows the common case, so this is the same
 // answer for a press that never came from a pointer at all.
 stage.addEventListener("click", (event) => {
+  if (mode !== "stacks") return;
   if (taken) {
     taken = false;
     return;
@@ -519,8 +533,12 @@ function why(reason) {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (!sample) return;
   if (event.ctrlKey || event.altKey || event.metaKey) return;
+  if (mode === "people") {
+    pressedInPeople(event);
+    return;
+  }
+  if (!sample) return;
   if (event.key === "Backspace") {
     event.preventDefault();
     marks.set(at, { out: new Set(), in: new Set(), why: new Map() });
@@ -567,14 +585,285 @@ function widen(by) {
   redraw();
 }
 
-(async () => {
-  // The first set arrives with this response: the server draws one when the sitting
-  // has none, so opening the page is the first request and there is nothing to wait
-  // for behind it.
-  sample = await (await fetch("/api/sets")).json();
+// --- the people mode --------------------------------------------------------
+//
+// One person at a time, drawn as a montage of the frames their faces were found
+// in, and the reader says once whether they are somebody photographed or somebody
+// who wandered in. The answer holds everywhere that person appears, which is what
+// makes it worth asking: `harness.people` orders the list by how many stacks the
+// answer would move, so the reader judges the people who matter and can stop long
+// before the list ends.
+//
+// **The frames, and not face crops.** `migrations/012_people.sql` stores a face's
+// share of the frame's height and its embedding, and no box — so there is nothing
+// stored to crop from, and a caption saying which face of the frame this is and how
+// big it was is the whole of what can honestly be drawn around it.
+
+let crowd = null; // the /api/persons payload
+let who = 0;
+// How many of this person's faces are on screen. Their own `wanted`, kept apart
+// from the stack mode's so switching modes does not carry a widened view across
+// into a question it means nothing in.
+let faces = 0;
+
+// The four answers, in the reader's own words. `harness.people.VERDICTS` is the
+// same four under the names the column stores, which are the keys here.
+const SAYS = {
+  friend: "somebody you photographed",
+  stranger: "a stranger who wandered in",
+  unsure: "not sure — the cluster could not be made out",
+  "two-people": "obviously two different people — a clustering failure",
+};
+
+const modes = {
+  stacks: document.getElementById("mode-stacks"),
+  people: document.getElementById("mode-people"),
+};
+
+const legends = {
+  stacks: document.getElementById("keys-stacks"),
+  people: document.getElementById("keys-people"),
+};
+
+function subject() {
+  return crowd && crowd.persons[who];
+}
+
+// A face is not a control. The answer is a keystroke about the person and never a
+// click on one of their appearances, so this is a div and not the button the stack
+// mode's frames are: there is nothing here to press.
+function faceOf(face, of) {
+  const holder = document.createElement("div");
+  holder.className = "frame face";
+
+  const image = document.createElement("img");
+  image.src = `/d/${face.sha}.webp`;
+  image.alt = "";
+  image.loading = "lazy";
+  image.decoding = "async";
+  holder.append(image);
+
+  const caption = document.createElement("span");
+  caption.className = "caption";
+  // Which face of the frame, and how much of the frame it was. The only stored
+  // facts about where it is -- so this is what tells the reader which of three
+  // people in a party photograph is the one being judged, and it is also the
+  // number `harness.floor` prices a prominence floor against.
+  caption.textContent =
+    of > 1
+      ? `face ${face.idx + 1} of ${of} here · ${(face.share * 100).toFixed(0)}% tall`
+      : `${(face.share * 100).toFixed(0)}% tall`;
+  holder.append(caption);
+  return holder;
+}
+
+function drawPerson() {
+  const one = subject();
+  const shown = Math.min(faces, one.faces.length);
+  const here = new Map();
+  for (const face of one.faces) here.set(face.sha, (here.get(face.sha) || 0) + 1);
+
+  const holder = document.createElement("div");
+  holder.className = "box montage";
+  for (const face of one.faces.slice(0, shown)) {
+    holder.append(faceOf(face, here.get(face.sha)));
+  }
+  holder.style.setProperty("--share", shown);
+  stage.replaceChildren(holder);
+  holder.style.setProperty(
+    "--columns",
+    columns(shown, holder.clientWidth, holder.clientHeight)
+  );
+
+  about.replaceChildren(
+    // No denominator on the person, for the reason the stack mode gives none on
+    // the set: the list is ordered so stopping early is expected, and "3 of 412"
+    // reads as a quota rather than as a queue.
+    `person ${who + 1} · `,
+    strong(
+      one.splits === 1
+        ? "1 stack would be drawn differently"
+        : `${one.splits} stacks would be drawn differently`
+    ),
+    ` at strictness ${crowd.strictness} under ${LINKAGES[crowd.linkage] || crowd.linkage}` +
+      ` linkage · showing ${shown} of ${one.faces.length}` +
+      ` ${one.faces.length === 1 ? "face" : "faces"} · clustered at ${crowd.threshold}`
+  );
+  said.textContent = one.answer
+    ? `answered: ${SAYS[one.answer]} — press again to revise it`
+    : "not answered yet";
+  peopleCount();
+}
+
+// Two numbers, because the reader asked for two: how many they have judged, and
+// how many are left whose answer would change anything. The second is what says
+// when stopping is free -- it reaches zero and there is nothing left to buy.
+function peopleCount() {
+  count.replaceChildren(
+    strong("people"),
+    " · ",
+    strong(`${crowd.judged}`),
+    crowd.judged === 1 ? " person judged" : " people judged",
+    " · ",
+    strong(`${crowd.left}`),
+    " left whose answer would change a stack · stop whenever you like"
+  );
+}
+
+async function judgePerson(verdict) {
+  const one = subject();
+  const response = await fetch("/api/person", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ person: one.person, verdict }),
+  });
+  if (!response.ok) {
+    said.textContent = `the harness refused that answer (${response.status})`;
+    return;
+  }
+  crowd = await response.json();
+  // The verdict is filed either way -- that is the server's business and it is
+  // done. What must not happen is drawing a montage over a stack question, so a
+  // reader who switched modes while this was in flight gets no redraw.
+  if (mode !== "people") return;
+  // On to the next, because the answer *is* the keystroke here: there is no second
+  // press that means "finished with this one", so recording and advancing are the
+  // same act. `h` is how a misclick is revised.
+  if (who < crowd.persons.length - 1) toPerson(1);
+  else drawPerson();
+}
+
+function toPerson(by) {
+  who = Math.min(Math.max(who + by, 0), crowd.persons.length - 1);
+  // The montage resets to the first few for each person, because how far the
+  // reader widened it for somebody with ninety faces says nothing about the next
+  // person, who may have three.
+  faces = crowd.montage;
+  drawPerson();
+}
+
+// More or fewer of their faces, with no ceiling -- the stack mode's `widen` and its
+// reasoning: every ceiling picked for a view here has been hit.
+//
+// **Counted from what is on screen rather than from what was asked for**, which is
+// `widen`'s own correction and it is needed here for a sharper reason: the montage
+// opens at twelve and the median person has three faces, so the asked-for number is
+// usually above the available one. A press counted from twelve would spend itself
+// closing that gap -- the first widen visibly did nothing and the next narrow then
+// jumped from every face to one.
+function widenFaces(by) {
+  const one = subject();
+  const current = Math.min(faces, one.faces.length);
+  // `by` may be Infinity, which is every face, or -Infinity, which is back to one.
+  const next = Math.min(Math.max(current + by, 1), one.faces.length);
+  if (next === current) return;
+  faces = next;
+  redrawPerson();
+}
+
+// One draw per animation frame, `redraw`'s reason and its measurement: a held key
+// repeats about thirty times a second and a montage can hold a hundred and twenty
+// frames, so drawing once per press is quadratic work on a growing DOM.
+let settlingPerson = false;
+function redrawPerson() {
+  if (settlingPerson) return;
+  settlingPerson = true;
+  requestAnimationFrame(() => {
+    settlingPerson = false;
+    drawPerson();
+  });
+}
+
+const PEOPLE_KEYS = {
+  f: () => judgePerson("friend"),
+  s: () => judgePerson("stranger"),
+  u: () => judgePerson("unsure"),
+  2: () => judgePerson("two-people"),
+  l: () => toPerson(1),
+  h: () => toPerson(-1),
+  ArrowRight: () => toPerson(1),
+  ArrowLeft: () => toPerson(-1),
+  // One at a time, the stack mode's step and for its reason: the median person
+  // here has three faces, so a coarser step would take every narrow straight to
+  // one. The person with a hundred and twenty is what `g` is for.
+  k: () => widenFaces(1),
+  j: () => widenFaces(-1),
+  g: () => widenFaces(Infinity),
+  0: () => widenFaces(-Infinity),
+  "=": () => widenFaces(1),
+  "+": () => widenFaces(1),
+  "-": () => widenFaces(-1),
+  _: () => widenFaces(-1),
+};
+
+function pressedInPeople(event) {
+  if (!subject()) return;
+  const pressed = PEOPLE_KEYS[event.key] || PEOPLE_KEYS[event.key.toLowerCase()];
+  if (!pressed) return;
+  event.preventDefault();
+  pressed();
+}
+
+function nobody() {
+  stage.replaceChildren();
+  const done = document.createElement("p");
+  done.className = "done";
+  done.textContent =
+    "nobody to judge: either the people pass has not run, or no person appears in" +
+    " some frames of a stack and not others — which would mean the case this mode" +
+    " exists to catch does not happen in this library.";
+  stage.append(done);
+  about.textContent = "";
+  said.textContent = "";
+  count.textContent = "no people to judge";
+}
+
+// --- the two modes ----------------------------------------------------------
+
+async function into(next) {
+  mode = next;
+  // Assigning the hash rather than pushing state: a mode is where the reader is
+  // and not somewhere they navigated to, so the back button should leave the
+  // harness rather than walk the modes.
+  history.replaceState(
+    null,
+    "",
+    next === "people" ? "#people" : location.pathname + location.search
+  );
+  for (const [name, button] of Object.entries(modes)) {
+    button.classList.toggle("on", name === mode);
+    button.setAttribute("aria-pressed", String(name === mode));
+  }
+  for (const [name, block] of Object.entries(legends)) block.hidden = name !== mode;
+  if (mode === "people") {
+    if (!crowd) crowd = await (await fetch("/api/persons")).json();
+    // The switch may have moved again while that was in flight -- the first entry
+    // into either mode is a fetch, and two clicks fit inside one. Whoever set
+    // `mode` last is the mode the reader is in, so a resumed continuation that no
+    // longer matches it draws nothing rather than drawing over the other mode.
+    if (mode !== "people") return;
+    if (!crowd.persons.length) return nobody();
+    faces = faces || crowd.montage;
+    drawPerson();
+    return;
+  }
+  if (!sample) {
+    // The first set arrives with this response: the server draws one when the
+    // sitting has none, so opening the page is the first request and there is
+    // nothing to wait for behind it.
+    sample = await (await fetch("/api/sets")).json();
+  }
+  if (mode !== "stacks") return;
   if (!sample.sets.length) {
     count.textContent = "no sets to judge";
+    stage.replaceChildren();
+    about.textContent = "";
     return;
   }
   step(0);
-})();
+}
+
+modes.stacks.addEventListener("click", () => into("stacks"));
+modes.people.addEventListener("click", () => into("people"));
+
+into(mode);

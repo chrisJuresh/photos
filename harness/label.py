@@ -92,6 +92,7 @@ from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from harness import people
 from photolib import candidates, matches
 from photolib.config import load, substrate_path
 
@@ -1055,10 +1056,16 @@ def store(path: Path) -> sqlite3.Connection:
     as `photolib.grid` has, because there is exactly one reader at one keyboard
     and every use of it goes through `LabelServer`'s lock. `check_same_thread` is
     off because that is what the lock is for.
+
+    **Both modes' tables**, because there is one labels file: the stack answers
+    here and the person verdicts `harness.people` owns, created through this so the
+    harness has one open and one thing to keep. The person table has no widening to
+    carry: it is newer than every shape `_carry_over` knows about.
     """
     conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute(SCHEMA)
+    people.ensure(conn)
     carried = _carry_over(conn)
     if carried:
         print(carried)
@@ -1175,6 +1182,13 @@ SUBSTRATE_ROUTE = re.compile(r"^/d/([0-9a-f]{64})\.webp$")
 
 MAX_ANSWER_BODY = 8 * 1024
 
+# How many of a person's faces the montage draws before the reader asks for more.
+# Enough to recognise somebody by rather than all of them: the largest cluster here
+# holds 120 faces and a wall of 120 frames is not a montage, it is the library. The
+# most prominent come first -- see `people.order` -- and `k` widens it with no
+# ceiling, `harness.label`'s own answer to every ceiling it has picked being hit.
+MONTAGE = 12
+
 # Copied from `photolib.grid` rather than imported from it, because the arrow this
 # package keeps points one way and a shared constant is a shared name: the shipped
 # server must not hold anything this directory reaches for. The copy is small and is
@@ -1210,6 +1224,8 @@ class LabelServer(ThreadingHTTPServer):
         round: int = ROUND,
         strictness: int = STRICTNESS,
         linkage: str = DEFAULT_LINKAGE,
+        persons: Sequence[people.Person] = (),
+        clustering: people.Clustering | None = None,
     ):
         self.drawing = drawing
         # The sets this sitting has been dealt, which is the sampler's own list and
@@ -1228,6 +1244,14 @@ class LabelServer(ThreadingHTTPServer):
         self.round = round
         self.strictness = strictness
         self.linkage = linkage
+        # The other mode. The persons worth asking about, ranked once at startup
+        # and held, because the ranking is global -- how much a verdict changes is
+        # counted across every stack -- so there is no set of it to draw lazily the
+        # way a stack question is drawn. `clustering` is which population they are,
+        # and it is what a verdict is filed under.
+        self.persons = tuple(persons)
+        self.clustering = clustering or people.Clustering()
+        self.asked = {one.person: one for one in self.persons}
         # Every touch of the labels database goes through this, which is what
         # lets one connection serve threaded requests -- see `store`.
         self._lock = threading.Lock()
@@ -1271,6 +1295,63 @@ class LabelServer(ThreadingHTTPServer):
         if self.drawing.draw() is None:
             self.spent = True
         return self._payload()
+
+    # --- the people mode ------------------------------------------------------
+
+    def whom(self) -> dict:
+        """The persons worth asking about, with what the reader has said so far."""
+        with self._lock:
+            return self._people()
+
+    def decide(self, person: str, verdict: str) -> dict:
+        """Record one verdict about one person and hand back the list it changed.
+
+        One lock over the write and the read that follows it, `judge`'s reason: the
+        counter the reader is shown is the count as of their own press.
+        """
+        with self._lock:
+            people.record(self.labels, person, verdict, clustering=self.clustering)
+            return self._people()
+
+    def _people(self) -> dict:
+        """Every person worth asking about, all at once.
+
+        All of it rather than one at a time, which is the opposite of how a stack
+        question is dealt and is right for the opposite reason. A stack question is
+        drawn from the catalog and there is no next one until the reader asks; the
+        person list is a ranking over the whole population and computing it at all
+        means computing the end of it, so holding it back would buy nothing and
+        would make going back to revise a request.
+
+        The shares ride along because they are the only stored fact about where a
+        face was -- `migrations/012_people.sql` keeps no box -- so they are what a
+        caption can say, and the reader's check that the face being judged is the
+        one they think it is.
+        """
+        given = people.verdicts(self.labels, self.clustering)
+        judged, left = people.progress(self.persons, given)
+        return {
+            "persons": [
+                {
+                    "person": one.person,
+                    "splits": one.splits,
+                    "faces": [
+                        {"sha": face.sha256, "idx": face.idx, "share": face.share}
+                        for face in one.faces
+                    ],
+                    "answer": given.get(one.person),
+                }
+                for one in self.persons
+            ],
+            "montage": MONTAGE,
+            "judged": judged,
+            "left": left,
+            "threshold": self.clustering.threshold,
+            # What the splits were counted over, so the page can say which grid a
+            # verdict is being priced against rather than implying every grid.
+            "strictness": people.STACK_SETTING["strictness"],
+            "linkage": people.STACK_SETTING["linkage"],
+        }
 
     def _payload(self) -> dict:
         """Everything this sitting has been dealt, with what the reader said about it.
@@ -1367,6 +1448,8 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._static(path)
         elif path == "/api/sets":
             self._json(200, self.server.payload())
+        elif path == "/api/persons":
+            self._json(200, self.server.whom())
         elif substrate:
             self._frame(substrate.group(1))
         else:
@@ -1389,6 +1472,8 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._json(200, self.server.deal())
         elif path == "/api/answer":
             self._answer()
+        elif path == "/api/person":
+            self._verdict()
         else:
             self.close_connection = True
             self._respond(404)
@@ -1498,6 +1583,30 @@ class LabelHandler(BaseHTTPRequestHandler):
             ),
         )
 
+    def _verdict(self) -> None:
+        """Record one judgement about one person. The people mode's only write.
+
+        The body names a person rather than describing one, `_answer`'s discipline:
+        it is matched against the list this server is serving, so a verdict about
+        somebody who is not being asked about -- a name off another clustering, or a
+        person whose answer changes nothing -- is a 404 rather than a row.
+        """
+        payload = self._json_body()
+        if payload is None:
+            return
+        person = payload.get("person")
+        if not isinstance(person, str):
+            self._json(400, {"error": "person"})
+            return
+        if person not in self.server.asked:
+            self._json(404, {"error": "person"})
+            return
+        verdict = payload.get("verdict")
+        if verdict not in people.VERDICTS:
+            self._json(400, {"error": "verdict"})
+            return
+        self._json(200, self.server.decide(person, verdict))
+
     def _json_body(self) -> dict | None:
         """A validated JSON object body, or None having already answered.
 
@@ -1595,6 +1704,13 @@ def main(argv: list[str] | None = None) -> int:
         linkage=args.linkage,
         already=already,
     )
+    # The other mode's population, ranked once here rather than on request: the
+    # ranking is over every stack, so there is no part of it that could be computed
+    # later. It costs two queries whether or not the reader switches modes, and if
+    # the people pass has not run it is empty rather than an error -- the page says
+    # so, and the stack mode is untouched either way.
+    clustering = people.Clustering()
+    persons = people.asking(conn, clustering)
 
     server = LabelServer(
         ("127.0.0.1", args.port),
@@ -1605,6 +1721,8 @@ def main(argv: list[str] | None = None) -> int:
         round=args.round,
         strictness=args.strictness,
         linkage=args.linkage,
+        persons=persons,
+        clustering=clustering,
     )
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"labelling harness on {url}")
@@ -1625,6 +1743,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  labels          {labels_db}")
     print(f"  substrates      {config.substrate_root}")
     print(f"  answers given   {len(given)} in this round")
+    judged, left = people.progress(persons, people.verdicts(labels, clustering))
+    print(
+        f"  people mode     {len(persons)} persons whose verdict would move a stack,"
+        f" {judged} judged, {left} left"
+    )
+    if not persons:
+        print(
+            "                  nothing to judge there: either"
+            " `python -m photolib.people` has not run, or"
+            " `python -m photolib.membership` has not"
+        )
     if args.open:
         import webbrowser
 
