@@ -468,7 +468,15 @@ is how "checked and empty" stays different from "never checked". It reads the su
 and the catalog, both on the NVMe, never opens `G:`, and does not attach `state.sqlite3`.
 Resumable in its two stages, idempotent, refuses while a writer holds the catalog, and it
 names the tiles whose substrate is missing rather than letting them become frames with no
-answer. Nothing reads any of these rows yet.
+answer. **A driver reset is one of those interruptions and the pass says so**: the card it
+runs on is the one drawing the desktop, Windows resets that driver when a graphics command
+outstays its timeout, and every CUDA context on the card dies with it — which is what ended
+a run 320 frames in on 2026-08-22, in the same minute as six `nvlddmkm` resets and after two
+graphics bugchecks the same night. A lost context poisons every call after it, so there is
+nothing to retry in the process: the pass stores the frames it had in hand, clusters nothing,
+and exits 2 saying that everything it counted is stored and a re-run resumes there. Re-running
+it is the whole of the answer from this side; the fault is the driver's. Nothing reads any of
+these rows yet.
 
 ```bash
 python -m photolib.people
