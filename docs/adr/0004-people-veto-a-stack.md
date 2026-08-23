@@ -312,6 +312,63 @@ the stored vectors at another threshold without re-detecting anything — `face`
 embedding and `face_person` the assignment, which is what makes the threshold a knob rather than
 a rebuild.
 
+### What the sweep settled: the threshold is the wrong knob
+
+`python -m harness.recluster` is that re-cluster, priced rather than performed, and it lost
+the way the floor did — **the threshold stays at 0.363 and no new population is written.**
+
+**The sweep runs upwards, because the threshold is a similarity.** `face_person`'s threshold
+is the cosine at or above which two faces are one person, so a *lower* value merges more.
+[#71](https://github.com/chrisJuresh/photos/issues/71) asked for "a sweep of thresholds below
+0.363", which is the direction that makes the failure worse; the sweep runs from 0.363 up to
+0.600, and the standing row reproduces the stored assignment's 2,043 persons exactly, which is
+the report's own check that it is pricing the clustering the pass performs.
+
+**Both populations come apart together.** Over every judged cluster, 0.450 takes 64 of the 69
+flagged clusters apart — and fragments 36 of the 50 friends the reader has said *are* one
+person. There is no value where the first number is the larger: 0.400 buys 34 and breaks 16,
+0.500 buys all 69 and breaks 47. A friend split in two is one individual reading as two
+persons, which is a frame's people set that no longer nests and therefore a stack split
+wrongly, so a value that does more of that than it repairs is not an improvement however many
+clusters it splits. The two counts are reported apart and never totalled, for
+`harness.floor`'s reason.
+
+**And most of the failure is under the floor already.** Only **16 of the 69** flagged clusters
+carry a box that reaches 0.10; the other 53 are in no frame's people whatever they hold, so no
+clustering of them moves a stack. Their much-quoted 288 stack-touches are **27** counted over
+the boxes that reach the floor. Scored over that population — the one the rule actually reads
+— the knob is worse still: at 0.450 it takes 6 of those 16 apart and fragments 22 of the 42
+friends that reach the floor, and at 0.600, the tightest value swept, 8 of the 16 are still one
+person and 37 friends have come apart.
+
+**So the third of the queue that was unanswerable was mostly a queue problem rather than a
+clustering problem.** `harness.people.splits` orders the questions over every face a person
+has, and the floor is applied nowhere in it: of the 1,731 persons the harness would ask about,
+**279** have a box that reaches 0.10. The reader was shown sub-floor noise because the ordering
+does not read the floor the rule will, which is why a third of what they were shown could not
+be answered. Fixing that is [#73](https://github.com/chrisJuresh/photos/issues/73) and it is
+not a clustering change at all.
+
+**The size cut is the knob that works, and this is not the ticket that turns it.** Asked for
+numbers rather than a change, the report clusters at 0.363 over only the faces whose stored
+share reaches a cut. **0.02 is the largest cut that drops no box of any answered friend**: it
+takes 9 flagged clusters out of the population entirely, splits 27 more, and brings the
+population from 2,043 persons to 1,397. That is 36 of the 69 addressed for **2** fragmented
+friends, where the threshold could not buy 34 without breaking 16 — because the flagged
+clusters' median box is 0.018 against the friends' 0.137, and a size is the axis the two
+populations actually separate on.
+
+**Those 2 keep every box they had**, which is worth recording as a property of the method
+rather than a rounding error: complete linkage's merge order depends on every cluster at once,
+so dropping *another* person's small faces can move where this one's joins are made. A cut is
+therefore not only a filter on the population — it is a different agglomeration — and the two
+columns of that table can disagree. Acting on any of it means the cut joining `face_person`'s
+key, and that is [#74](https://github.com/chrisJuresh/photos/issues/74) rather than a constant
+edited in passing.
+
+**The 202 answers stand.** Nothing was re-clustered, so no verdict was orphaned and the
+sitting was not spent twice.
+
 ## The cover, and the surprise it introduces
 
 **Most people first, then the existing rule among the frames tied at the top** — the sharpest
