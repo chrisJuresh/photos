@@ -259,6 +259,59 @@ standing floor's — not how many stacks would split. The nesting rule at the to
 document is not implemented, so a count of splits is not available to be reported; what changes
 is the *input* the rule reads, which is the tightest honest measure there is until it lands.
 
+### What the answers settled
+
+One sitting, 2026-08-23, over the head of the ordered list: **202 persons answered of the 1,731
+worth asking about** — 83 strangers, 50 friends, 69 clusters called two people, and no `unsure`.
+`python -m harness.floor` over those answers returned the result this arrangement was built to
+survive: **no floor separates a stranger from a friend.**
+
+The two populations are strongly *ordered* and still not separable. The friends are 1,584 boxes,
+median 0.137 of the frame's height, quartiles 0.070/0.224, from 0.022 to 0.861; the strangers
+are 471 boxes, median 0.015, quartiles 0.012/0.021, from 0.009 to 0.368. The medians are a
+factor of nine apart and the tails cross anyway: 109 stranger boxes reach the smallest friend
+box, and 1,395 friend boxes fall inside the largest stranger box. That is the *intent* argument
+above arriving as numbers — a stranger can be large and close, and seven of them were.
+
+**So the floor stays at 0.10 and stays a pre-filter**, and the per-person view is why it is
+worth keeping rather than merely harmless. **76 of the 83 strangers have no box that reaches
+0.10 at all**, so the floor disposes of 92% of them without being asked; only 7 carry a box
+above it, and those 7 are 26 stack-touches, which is precisely the work the verdict exists to
+do. The cost is 8 of the 50 friends, whose every box is under the floor and who are therefore
+absent from every frame's people — and that failure can only *merge*, which is the direction
+this document prefers everywhere else.
+
+**Moving it is worse in both directions.** 0.04 has the fewest total errors — 82 friend boxes
+out against 43 stranger boxes in, where 0.10 has 624 and 15 — but the two errors are not the
+same failure, and totalling them is the mistake the report refuses to make: 0.04 nearly triples
+the stranger boxes let in, and a stranger let in is the *split* the guard exists to prevent.
+Raising it buys almost nothing: the last stranger box only clears at 0.38, by which point 1,404
+friend boxes have gone with it.
+
+**The sample is the head of an impact-ordered list and not a random draw**, so it over-represents
+persons who appear in many stacks with large faces — which is to say it over-represents friends
+in the box distribution. A later round is a different sample and not a continuation of this one.
+The finding survives the bias in the direction that matters: a sample skewed towards large
+friend boxes should make separation *easier*, and it did not appear.
+
+### A third of the clusters were not one person
+
+**69 of the 202 answered were flagged `two-people`** — the fourth answer, doing the job it was
+put there for. At clustering threshold 0.363 that is a third of everything the reader was shown,
+and it is a large enough count to be evidence rather than an impression. Those clusters carry 288
+stack-touches between them, and their median box is 0.018 — the strangers' size, not the
+friends' — which is the likely mechanism: at under two per cent of the frame's height there are
+too few pixels for SFace to place a face anywhere meaningful, so the clustering merges whatever
+lands in the same noise. The reader also reported clusters holding a person, several passers-by
+*and* a hand, so what this column actually recorded includes detections that are not faces at
+all.
+
+It feeds neither the floor nor the rule, exactly as decided above. Acting on it is
+[#71](https://github.com/chrisJuresh/photos/issues/71), which re-clusters from
+the stored vectors at another threshold without re-detecting anything — `face` holds the
+embedding and `face_person` the assignment, which is what makes the threshold a knob rather than
+a rebuild.
+
 ## The cover, and the surprise it introduces
 
 **Most people first, then the existing rule among the frames tied at the top** — the sharpest
