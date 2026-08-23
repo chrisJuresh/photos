@@ -359,6 +359,15 @@ all.
 python -m harness.floor
 ```
 
+Its output is ADR 0004's "What the answers settled", and it lost as expected: over the reader's
+202 answers of 2026-08-23 — 83 strangers, 50 friends, 69 clusters called two people — **no floor
+separates the two populations.** The medians are a factor of nine apart (friends 0.137 of the
+frame's height over 1,584 boxes, strangers 0.015 over 471) and the tails cross anyway, so 0.10
+stays where it is and stays a pre-filter: it disposes of 76 of the 83 strangers without being
+asked, and the 7 that carry a box above it are what the verdict is for. Moving it is worse in
+both directions, which the ADR shows. The third of the queue the reader flagged as more than one
+person is [#71](https://github.com/chrisJuresh/photos/issues/71) and not a floor problem.
+
 To turn those answers into the two numbers the grid inherits — the **calibration report**.
 It replays every label against a sweep of strictness values and all three linkage rules,
 and says how well each setting reproduces what the reader actually said. **Precision and
@@ -519,8 +528,9 @@ for bodies, and **YuNet** with **SFace** — 233 KB and 37 MB of ONNX from a pin
 vectors. No photograph leaves the disk and **no name is attached to any cluster**: the pass
 produces "person 4f2a…", not "Chris". **The measurement is stored and the verdict is
 derived**, `candidate_pair.screen`'s discipline: a box records its share of the frame's height
-and nothing records whether that share was enough, so the prominence floor — 0.10 and written
-down as provisional — moves by re-reading rows. Every *face*'s share is kept, because each face
+and nothing records whether that share was enough, so the prominence floor — 0.10, measured
+against the reader's own answers and kept as a pre-filter rather than a verdict — moves by
+re-reading rows. Every *face*'s share is kept, because each face
 is a different who; of the bodies only the largest, because *is somebody here* is the whole of
 what a body is asked and the largest answers it at any floor. The clustering is **complete
 linkage**, because a person is not a chain, and its **threshold is part of the key** as
