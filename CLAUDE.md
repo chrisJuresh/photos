@@ -368,6 +368,48 @@ asked, and the 7 that carry a box above it are what the verdict is for. Moving i
 both directions, which the ADR shows. The third of the queue the reader flagged as more than one
 person is [#71](https://github.com/chrisJuresh/photos/issues/71) and not a floor problem.
 
+To price a **tighter clustering** against those same answers — the third of the reader's
+sitting that came back flagged `two-people`, which is the count that fourth answer was put
+there to produce. **It is the measurement and never the pass**: every row is a clustering of
+the stored vectors by `photolib.people.cluster` itself, so what is priced is what a pass would
+write, and both connections are read-only — `harness.floor`'s posture kept whole.
+**The sweep runs upwards**, because `face_person`'s threshold is the cosine at or above which
+two faces are one person and a *lower* value merges more; the standing row is first and the
+report says whether it reproduces the stored assignment, which is its own check that it is
+pricing the clustering the pass performs. **Two counts, apart and never totalled**, for the
+floor report's reason: a flagged cluster coming apart is the failure being fixed, and a
+judged friend coming apart is the reader's own answer being contradicted — one individual
+reading as two persons is a frame's people set that no longer nests, which is a stack split
+wrongly. So a threshold is worth moving to only when it buys more of the first than the
+second, and where none does the recommendation is to change nothing. **It is scored twice** —
+over every judged cluster, which is the population the reader was shown, and over the ones
+carrying a box that reaches `FLOOR`, which is the population the nesting rule reads, because
+a person whose every box is under the floor is in no frame's people and no clustering of them
+moves a stack. The last table answers the other question ticket 71 asked with numbers rather
+than a change: a **size cut** on the stored share, clustered at the standing threshold. There
+are no arguments and neither sweep is a knob. It reads the catalog and `labels.sqlite3`, both
+on the NVMe, opens no substrate, never touches `G:` and writes nothing; it is a minute or two
+of CPU and no disk to speak of.
+
+```bash
+python -m harness.recluster
+```
+
+Its output is ADR 0004's "What the sweep settled", and the knob lost: **no threshold takes
+more flagged clusters apart than it breaks friends the reader has answered.** 0.450 splits 64
+of the 69 and fragments 36 of the 50; 0.400 splits 34 and fragments 16. So **0.363 stands and
+no new population was written**, and the 202 answers are intact. Two things came out of it
+that were not a clustering problem at all. Only **16 of the 69** flagged clusters carry a box
+reaching 0.10, so their 288 stack-touches are **27** the rule can feel — and of the 1,731
+persons the harness would ask about, **279** have a box that reaches the floor, because
+`harness.people.splits` counts over every face and applies the floor nowhere. That is
+[#73](https://github.com/chrisJuresh/photos/issues/73). And a size cut of **0.02** drops no
+box of any answered friend while taking 9 flagged clusters out of the population and splitting
+27 more — 36 of the 69 for 2 fragmented friends, which is the exchange the threshold could not
+offer, and is [#74](https://github.com/chrisJuresh/photos/issues/74). Those 2 keep every box
+they had: a cut is a different agglomeration and not only a filter, because complete linkage's
+merge order depends on every cluster at once, so the table's two friend columns can disagree.
+
 To turn those answers into the two numbers the grid inherits — the **calibration report**.
 It replays every label against a sweep of strictness values and all three linkage rules,
 and says how well each setting reproduces what the reader actually said. **Precision and
