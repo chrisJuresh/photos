@@ -63,7 +63,7 @@ from harness import label, people, screen
 from harness.people import JUDGED
 from photolib import candidates
 from photolib.config import load
-from photolib.people import FLOOR, MODEL, THRESHOLD, VERSION
+from photolib.people import FLOOR, MODEL, NO_CUT, THRESHOLD, VERSION
 
 # Read from `photolib.people` and never copied, so the report cannot come to price
 # a move away from a value the pass is not standing at. ADR 0004 calls that line
@@ -424,7 +424,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no labels at {labels_db}: run python -m harness.label first")
         return 1
 
-    clustering = people.Clustering(MODEL, VERSION, THRESHOLD)
+    # `NO_CUT` and not the shipped cut: this report prices a floor against the
+    # answers the reader has given, and those were given about the population
+    # clustered over every face there was. Reading a cut population instead would
+    # score their answers against clusters they were never shown.
+    clustering = people.Clustering(MODEL, VERSION, THRESHOLD, NO_CUT)
     labels = screen.labels_read_only(labels_db)
     try:
         given = people.verdicts(labels, clustering)
@@ -444,7 +448,8 @@ def main(argv: list[str] | None = None) -> int:
     if not held:
         print(
             f"no persons in {config.catalog_db} at {MODEL} version {VERSION},"
-            f" threshold {THRESHOLD}: run python -m photolib.people first"
+            f" threshold {THRESHOLD}, cut {NO_CUT}: run python -m photolib.people"
+            f" --cut {NO_CUT} first"
         )
         return 1
     if not stacks:
@@ -459,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"catalog     {config.catalog_db}")
     print(f"labels      {labels_db}")
     print(
-        f"clustering  {MODEL} version {VERSION}, threshold {THRESHOLD}"
+        f"clustering  {MODEL} version {VERSION}, threshold {THRESHOLD}, cut {NO_CUT}"
         f" -- {len(held):,} persons, {faces:,} faces"
     )
     print(f"floor       {PROVISIONAL} of the frame's height, read here and not moved")

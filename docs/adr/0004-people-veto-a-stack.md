@@ -148,8 +148,9 @@ is an import of the website**, which reads stored numbers only.
 how many bodies, and the largest one's share — so that *checked and nobody here* stays a
 different fact from *never checked*, which is `candidate_pair`'s `screened_out` distinction.
 `face` holds one row per detected face: its share and its vector. `face_person` holds the
-clustering, keyed by the threshold as `stack_member` is keyed by strictness and linkage, so
-another threshold is another population and re-clustering never re-runs the detector.
+clustering, keyed by the threshold **and by the size cut** (migration 013) as `stack_member`
+is keyed by strictness and linkage, so another value of either is another population and
+re-clustering never re-runs the detector.
 
 **The measurement is stored and the verdict is derived.** A box records its share of the
 frame's height and nothing records whether that share was enough — so the prominence floor
@@ -385,6 +386,52 @@ edited in passing.
 
 **The 202 answers stand.** Nothing was re-clustered, so no verdict was orphaned and the
 sitting was not spent twice.
+
+### What the cut settled: 0.02, and in the key
+
+[#74](https://github.com/chrisJuresh/photos/issues/74) is that ticket and it landed.
+`photolib.people.CUT` is provisional at 0.02 and the pass clusters only the faces whose
+stored share reaches it; `--cut` points it at another value. The reason is the table above
+and nothing new: the largest cut that drops no box of any answered friend, addressing 36 of
+the 69 flagged clusters for 2 fragmented friends, where no threshold could buy 34 without
+breaking 16. The 0.02 population is not in the catalog yet — the rows there are the uncut
+ones, stamped 0.0 by the migration — and writing it is a run of the pass that examines
+nothing: 5,826 faces in 1,397 persons, on the table's own count.
+
+**It is a column and not a `WHERE`**, which is the one thing about it that is not a
+restatement of the measurement. `FLOOR` can be moved by re-reading rows because nothing
+stored is derived from it. A cut cannot, because the clustering is the thing it changes: two
+faces merged because a third small one sat between them stay merged whatever a later reader
+filters, and complete linkage's merge order depends on every cluster at once, so a cut is a
+different agglomeration and not a subset of an old one. Migration 013 grows `face_person`'s
+primary key by it and stamps the rows already there 0.0 — `photolib.people.NO_CUT`, no cut, a
+real value of the column — so the population every answer in `labels.sqlite3` was given about
+stays readable as itself. `harness.floor` and `harness.recluster` read that population by
+name, for that reason.
+
+**The cut is not the floor**, and they are deliberately two constants at provisionally
+similar values. `FLOOR` decides whether a person is in a frame's *people*; the cut decides
+whether a face is evidence about *who somebody is*. The same report prices 0.10 here at 624
+of the friends' boxes and 0.02 at none.
+
+**A face under the cut keeps its row.** Nothing re-detects, nothing is deleted, and the share
+and the vector stay where they were — the face simply has no person at that cut, which is
+`face_person`'s existing shape. So a cut costs a matrix multiply and not a pass.
+
+**The answers still stand.** `person_verdict` is *not* keyed by the cut, and that asymmetry is
+deliberate: a verdict about a person carries across a re-clustering so that a sitting is not
+spent twice, which is the whole reason the measurement above could be made from labels given
+before the cut existed.
+
+**And that carry-across cuts both ways, which is the one thing left open here.** A person is
+named by its least face, so the same name can survive a cut holding fewer faces. Answering
+about it again *replaces* the earlier answer, because the key cannot tell the two apart — and
+`harness.floor` and `harness.recluster` read the uncut population, so an answer given about
+the cut cluster would be scored against the uncut one's boxes. Nothing has been answered at
+0.02 yet, so nothing is wrong today; the fix is a verdict keyed by the cut with the uncut
+answer read as a default rather than as the answer, and it is
+[#78](https://github.com/chrisJuresh/photos/issues/78) rather than this ticket, whose scope
+stopped at the population. **It comes before the next sitting at the harness**, not after.
 
 ## The cover, and the surprise it introduces
 

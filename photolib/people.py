@@ -22,6 +22,18 @@ nothing records whether that share was enough, so moving the prominence floor is
 re-read of these rows rather than another pass. `FLOOR` below is provisional and is
 the only place that reads it.
 
+**The one number that cannot work that way is the size cut**, and that is why it is
+in the key rather than beside it. Only the faces whose stored share reaches `CUT`
+are clustered, because at under two per cent of a frame's height there are too few
+pixels for SFace to place a face anywhere meaningful and complete linkage merges
+whatever lands in the same noise -- the failure
+`docs/adr/0004-people-veto-a-stack.md` found the reader flagging a third of their
+queue over. A later reader cannot filter it away afterwards: two faces merged
+because a third small one sat between them stay merged, and the merge order depends
+on every cluster at once, so a cut is a different agglomeration and not a subset of
+an old one. A face under it keeps its row in `face` and simply has no person at that
+cut.
+
 Three models, all local, all fetched once and cached beside DINOv2's weights in
 `torch.hub`'s own checkpoint directory. **No photograph leaves this disk**, and no
 name is attached to any cluster -- the pass produces "person 4f2a...", not "Chris".
@@ -50,9 +62,10 @@ neither collide with anything reading the vault nor endanger the triage decision
 
 Resumable in two stages and idempotent, in the shape `photolib.fingerprints`
 established. Detection is resumed by the frames carrying no row; clustering is a
-reading of every vector at once and is redone when a vector has no person at the
-threshold in hand. `--threshold` clusters into a new population without re-detecting
-anything, because the threshold is part of `face_person`'s key and not of `face`'s.
+reading of every vector at once and is redone when a vector the cut keeps has no
+person at the threshold in hand. `--threshold` and `--cut` cluster into a new
+population without re-detecting anything, because both are part of `face_person`'s
+key and neither is part of `face`'s.
 
 **A device fault is one of those interruptions and is reported as one.** The card
 this pass runs on is also the one drawing the desktop, and Windows resets that driver
@@ -111,6 +124,33 @@ THRESHOLD = 0.363
 # tickets settle it from the reader's own answers, and they can, because every share
 # is stored and nothing stored is derived from this number.
 FLOOR = 0.10
+
+# The least box a face has to be to be evidence about *who somebody is*: under this
+# it is clustered into nobody. Provisional, and carried with the measurement that
+# chose it -- `harness.recluster` clustered at 0.363 over the faces reaching each
+# candidate value and 0.02 is the largest that drops no box of any friend the reader
+# answered about. It takes 9 of the 69 clusters they flagged as several passers-by
+# out of the population entirely and splits 27 more, for 2 fragmented friends, where
+# no threshold could buy 34 without breaking 16: the flagged clusters' median box is
+# 0.018 against the friends' 0.137, so a size is the axis the two populations
+# separate on and a similarity is not.
+#
+# **Not `FLOOR`, and deliberately a second constant** at provisionally the same kind
+# of value: `FLOOR` decides whether a person is in a frame's *people*, this decides
+# whether a face says anything about who somebody is. The same report prices 0.10
+# here at 624 of those friends' boxes and 0.02 at none.
+#
+# **Unlike `FLOOR` it cannot be moved by re-reading rows**, which is why it is part
+# of `face_person`'s key: the clustering is the thing it changes. Two faces merged
+# because a third small one sat between them stay merged whatever a later reader
+# filters, and complete linkage's merge order depends on every cluster at once, so a
+# cut is a different agglomeration and not a subset of an old one.
+CUT = 0.02
+
+# What a population clustered before the cut existed was cut at: nothing. A real
+# value of the column rather than a stand-in for one -- every face there was, which
+# is the population every answer in `labels.sqlite3` was given about.
+NO_CUT = 0.0
 
 # The two confidence floors, which are part of `VERSION` and not read-time knobs:
 # what falls under them is never stored, so unlike `FLOOR` they cannot be moved by
@@ -175,13 +215,16 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 _VECTORS = "SELECT sha256, idx, vector FROM face WHERE model = ? AND version = ?"
 
+_SHARES = "SELECT sha256, idx, share FROM face WHERE model = ? AND version = ?"
+
 _ASSIGNED = """
-SELECT sha256, idx FROM face_person WHERE model = ? AND version = ? AND threshold = ?
+SELECT sha256, idx FROM face_person
+WHERE model = ? AND version = ? AND threshold = ? AND cut = ?
 """
 
 _INSERT_PERSON = """
-INSERT OR REPLACE INTO face_person (model, version, threshold, sha256, idx, person)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT OR REPLACE INTO face_person (model, version, threshold, cut, sha256, idx, person)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 """
 
 _PEOPLED = """
@@ -190,7 +233,7 @@ SELECT count(*) FROM frame_body WHERE model = ? AND version = ? AND share >= ?
 
 _APPEARANCES = """
 SELECT person, count(*) FROM face_person
-WHERE model = ? AND version = ? AND threshold = ? GROUP BY person
+WHERE model = ? AND version = ? AND threshold = ? AND cut = ? GROUP BY person
 """
 
 
@@ -398,6 +441,19 @@ def _unname(key: str) -> tuple[str, int]:
     """A face's name back into the two columns it is stored under."""
     sha256, idx = key.rsplit(":", 1)
     return sha256, int(idx)
+
+
+def reaching(boxes: Mapping[str, float], cut: float = CUT) -> set[str]:
+    """The faces a cut clusters: the ones whose stored box share reaches it.
+
+    Pure over the stored shares and separate from `cluster`, which stays pure over
+    vectors and knows nothing about how big anything was. The two compose in
+    `cluster_all` and in `harness.recluster`, which prices this predicate at every
+    candidate value and reads it from here rather than keeping its own.
+
+    At or above, which is `FLOOR`'s convention and the threshold's.
+    """
+    return {face for face, share in boxes.items() if share >= cut}
 
 
 def cluster(
@@ -640,49 +696,77 @@ def vectors(
     }
 
 
+def shares(
+    conn: sqlite3.Connection, *, model: str = MODEL, version: str = VERSION
+) -> dict[str, float]:
+    """Every stored face's box share, by name. What the cut is applied to."""
+    return {
+        name(sha256, idx): share
+        for sha256, idx, share in conn.execute(_SHARES, (model, version))
+    }
+
+
 def assigned(
     conn: sqlite3.Connection,
     threshold: float = THRESHOLD,
+    cut: float = CUT,
     *,
     model: str = MODEL,
     version: str = VERSION,
 ) -> set[str]:
-    """Every face already given a person at one threshold."""
+    """Every face already given a person at one threshold and cut."""
     return {
         name(sha256, idx)
-        for sha256, idx in conn.execute(_ASSIGNED, (model, version, threshold))
+        for sha256, idx in conn.execute(_ASSIGNED, (model, version, threshold, cut))
     }
 
 
 def cluster_all(
     conn: sqlite3.Connection,
     threshold: float = THRESHOLD,
+    cut: float = CUT,
     *,
     model: str = MODEL,
     version: str = VERSION,
 ) -> dict:
-    """Give every face a person at one threshold, or say there is nothing to do.
+    """Give every big enough face a person, or say there is nothing to do.
 
     Redone whole rather than resumed in parts, because a clustering is a reading of
     every vector at once: a face detected after the last one ran does not join a
-    person, it changes which persons there are. So the resume unit is the threshold,
-    and the question asked is whether every face has an answer at it.
+    person, it changes which persons there are. So the resume unit is the threshold
+    and the cut together, and the question asked is whether every face the cut keeps
+    has an answer at them.
+
+    **Asked of the population and not of every stored face**, which is the trap the
+    cut introduces: a face under it is never owed a person, so a resume that
+    counted one as owed would re-cluster on every run.
     """
     started = time.perf_counter()
     stored = vectors(conn, model=model, version=version)
-    owed = set(stored) - assigned(conn, threshold, model=model, version=version)
+    big = reaching(shares(conn, model=model, version=version), cut)
+    population = {key: vector for key, vector in stored.items() if key in big}
+    under = len(stored) - len(population)
+    owed = population.keys() - assigned(conn, threshold, cut, model=model, version=version)
     if not owed:
-        return {"faces": len(stored), "persons": 0, "written": 0, "elapsed_s": 0.0}
+        return {
+            "faces": len(population),
+            "under": under,
+            "persons": 0,
+            "written": 0,
+            "elapsed_s": 0.0,
+        }
 
-    persons = cluster(stored, threshold)
+    persons = cluster(population, threshold)
     rows = [
-        (model, version, threshold, *_unname(key), person) for key, person in persons.items()
+        (model, version, threshold, cut, *_unname(key), person)
+        for key, person in persons.items()
     ]
     conn.execute("BEGIN")
     conn.executemany(_INSERT_PERSON, rows)
     conn.execute("COMMIT")
     return {
-        "faces": len(stored),
+        "faces": len(population),
+        "under": under,
         "persons": len(set(persons.values())),
         "written": len(rows),
         "elapsed_s": time.perf_counter() - started,
@@ -695,6 +779,7 @@ def cluster_all(
 def appearances(
     conn: sqlite3.Connection,
     threshold: float = THRESHOLD,
+    cut: float = CUT,
     *,
     model: str = MODEL,
     version: str = VERSION,
@@ -706,7 +791,7 @@ def appearances(
     ten of a hundred.
     """
     return sorted(
-        (count for _, count in conn.execute(_APPEARANCES, (model, version, threshold))),
+        (count for _, count in conn.execute(_APPEARANCES, (model, version, threshold, cut))),
         reverse=True,
     )
 
@@ -727,11 +812,17 @@ def run(
     *,
     detect: Detector | None = None,
     threshold: float = THRESHOLD,
+    cut: float = CUT,
     limit: int | None = None,
 ) -> int:
     config = config or load()
     if not config.substrate_root.is_dir():
         raise PeopleRefused(f"substrate tree not found: {config.substrate_root}")
+    # Checked here rather than left to the column's own CHECK, because that one fires
+    # after the detection pass has run and committed: a mistyped cut would cost half
+    # an hour of GPU and end in a traceback rather than a refusal.
+    if cut < NO_CUT:
+        raise PeopleRefused(f"a cut is a share of the frame's height, so not {cut}")
 
     # `candidates.catalog` rather than `db.connect`, for its own two reasons: the
     # triage decisions have no business being reachable from an experiment, and
@@ -753,6 +844,7 @@ def run(
         )
         print(f"substrate {config.substrate_root}")
         print(f"floor     {FLOOR} of the frame's height, provisional and read-time only")
+        print(f"cut       {cut} of it, the least face clustered, and part of the key")
         if limit is not None:
             todo = todo[:limit]
         print(f"todo      {len(todo):,} tiles to examine")
@@ -790,19 +882,22 @@ def run(
         else:
             print("\nnothing to examine: every tile with a substrate has been looked at")
 
-        grouped = cluster_all(conn, threshold)
+        grouped = cluster_all(conn, threshold, cut)
         if grouped["written"]:
             print(
                 f"clustered {grouped['written']:,} faces at {threshold} in "
-                f"{grouped['elapsed_s']:.1f}s"
+                f"{grouped['elapsed_s']:.1f}s, {grouped['under']:,} left under the cut"
             )
         else:
-            print(f"clustered nothing new: every face has a person at {threshold}")
+            print(
+                f"clustered nothing new: every face reaching {cut} has a person at"
+                f" {threshold}"
+            )
 
         peopled = conn.execute(_PEOPLED, (MODEL, VERSION, FLOOR)).fetchone()[0]
         looked = len(examined(conn))
         print(f"\nsomebody  {peopled:,} of {looked:,} frames hold a body at or above {FLOOR}")
-        print(f"persons   {spread(appearances(conn, threshold))}")
+        print(f"persons   {spread(appearances(conn, threshold, cut))}")
         return 0 if not unreadable else 1
     finally:
         conn.close()
@@ -821,10 +916,18 @@ def main(argv: list[str] | None = None) -> int:
         " (default: %(default)s)",
     )
     parser.add_argument(
+        "--cut",
+        type=float,
+        default=CUT,
+        help="the least box share clustered, and part of the key for the same reason:"
+        " a face under it is evidence about nobody, and another value is another"
+        " population (default: %(default)s)",
+    )
+    parser.add_argument(
         "--limit", type=int, help="examine at most this many, for a throughput measurement"
     )
     args = parser.parse_args(argv)
-    return run(threshold=args.threshold, limit=args.limit)
+    return run(threshold=args.threshold, cut=args.cut, limit=args.limit)
 
 
 if __name__ == "__main__":

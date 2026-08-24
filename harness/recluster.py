@@ -8,8 +8,9 @@ answered came back flagged**, a third of everything the reader was shown, and ev
 of them is a question they cannot answer as asked.
 
 **This is the measurement that decides what to do about it, and it is not the pass.**
-`face` holds the embedding and `face_person` the assignment, keyed by the threshold, so
-another threshold is another population and re-clustering re-detects nothing -- which is
+`face` holds the embedding and `face_person` the assignment, keyed by the threshold and the
+size cut, so another value of either is another population and re-clustering re-detects
+nothing -- which is
 what makes the threshold a knob rather than a rebuild. Every row here is read from the
 stored vectors and the clustering is `photolib.people.cluster` itself, imported rather
 than reproduced, so what is priced is what a pass would write. **Nothing is written**:
@@ -46,10 +47,12 @@ counted all 69 equally would price a failure the grid cannot feel.
 
 Ticket 71 asks whether the small detections should be dropped by a size cut rather than
 re-clustered, and says changing the detector is not its business. So the last table
-prices a cut on the *stored share* -- a read-time filter, `FLOOR`'s kind of number and
-not the detector's -- by clustering only the faces that reach it. It is a measurement and
-not a proposal: acting on it means a column in `face_person`'s key, which is a ticket of
-its own.
+prices a cut on the *stored share* -- `FLOOR`'s kind of number and not the detector's --
+by clustering only the faces that reach it. It was a measurement and not a proposal, and
+the proposal it lost to is ticket 74: `photolib.people.CUT` is that column of
+`face_person`'s key and `reaching` is this predicate, read from there rather than kept
+here. So the table still prices every value the pass could be pointed at, and the row it
+recommends is the one the pass now stands at.
 
     python -m harness.recluster
 
@@ -72,7 +75,18 @@ from harness import label, people, screen
 from harness.people import JUDGED
 from photolib import candidates
 from photolib.config import load
-from photolib.people import FLOOR, MODEL, THRESHOLD, VERSION, cluster, name, vectors
+from photolib.people import (
+    CUT,
+    FLOOR,
+    MODEL,
+    NO_CUT,
+    THRESHOLD,
+    VERSION,
+    cluster,
+    name,
+    reaching,
+    vectors,
+)
 
 # Read from `photolib.people` and never copied, for `harness.floor.PROVISIONAL`'s
 # reason: the report prices a move away from where the pass stands, so it has to
@@ -87,9 +101,13 @@ PROVISIONAL = FLOOR
 SWEEP = (STANDING, 0.40, 0.425, 0.45, 0.475, 0.50, 0.55, 0.60)
 
 # The candidate size cuts, in shares of the frame's height. Zero is *no cut*, which
-# is the standing population again, and the last is the prominence floor itself --
-# the value at which the clustering would read exactly the faces the rule does.
-CUTS = (0.0, 0.02, 0.03, 0.04, 0.05, PROVISIONAL)
+# is the standing population again; `photolib.people.CUT` is the value this table
+# recommended and the pass now stands at; and the last is the prominence floor itself
+# -- the value at which the clustering would read exactly the faces the rule does.
+# Sorted and deduplicated rather than written out, because two of the six are read
+# from `photolib.people` and a later move of either would otherwise price one value
+# twice and print the table out of the order a reader scans it in.
+CUTS = tuple(sorted({0.0, CUT, 0.03, 0.04, 0.05, PROVISIONAL}))
 
 # The flagged clusters are the subject: they are the only ones anybody has said
 # anything about, and a sweep scored over every person would be a report about
@@ -297,12 +315,7 @@ def recommend(rows: Sequence[Row]) -> float | None:
     return min(qualifying) if qualifying else None
 
 
-# --- the size cut, priced and not proposed ------------------------------------
-
-
-def kept(shares: Mapping[str, float], value: float) -> set[str]:
-    """The faces a size cut keeps: the ones whose stored share reaches it."""
-    return {face for face, share in shares.items() if share >= value}
+# --- the size cut, priced and now the pass's own -------------------------------
 
 
 def dropped(
@@ -502,8 +515,9 @@ def _cuts(cuts: Sequence[Cut]) -> list[str]:
         return []
     lines = [
         "\ncut       a size cut on the stored share instead of a tighter threshold,"
-        f" clustered at {STANDING}. A measurement and not a proposal: acting on it"
-        " means a column in `face_person`'s key.",
+        f" clustered at {STANDING}. This is where `photolib.people.CUT` came from:"
+        " the cut is a column of `face_person`'s key, so every row here is a"
+        " population the pass can be pointed at.",
         "            cut     faces   persons   flagged gone   apart   whole"
         "   friend boxes dropped   friends apart",
     ]
@@ -610,7 +624,7 @@ def cutting(
     """Every candidate size cut, clustered at the standing threshold."""
     priced = []
     for value in CUTS:
-        surviving = kept(shares, value)
+        surviving = reaching(shares, value)
         tighter = cluster(
             {face: vector for face, vector in stored.items() if face in surviving},
             STANDING,
@@ -634,7 +648,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no labels at {labels_db}: run python -m harness.label first")
         return 1
 
-    clustering = people.Clustering(MODEL, VERSION, STANDING)
+    # `NO_CUT`, because the standing row of both tables has to reproduce the stored
+    # assignment the reader answered about, and that one was clustered over every face
+    # there was. A cut population read here would price cuts against a cut.
+    clustering = people.Clustering(MODEL, VERSION, STANDING, NO_CUT)
     labels = screen.labels_read_only(labels_db)
     try:
         given = people.verdicts(labels, clustering)
@@ -652,7 +669,8 @@ def main(argv: list[str] | None = None) -> int:
     if not held_by_person:
         print(
             f"no persons in {config.catalog_db} at {MODEL} version {VERSION},"
-            f" threshold {STANDING}: run python -m photolib.people first"
+            f" threshold {STANDING}, cut {NO_CUT}: run"
+            f" python -m photolib.people --cut {NO_CUT} first"
         )
         return 1
     if not given:
@@ -690,7 +708,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"catalog     {config.catalog_db}")
     print(f"labels      {labels_db}")
     print(
-        f"clustering  {MODEL} version {VERSION}, threshold {STANDING}"
+        f"clustering  {MODEL} version {VERSION}, threshold {STANDING}, cut {NO_CUT}"
         f" -- {len(held_by_person):,} persons, {len(stored):,} faces"
     )
     print(f"judged      {len(given):,} persons the reader has answered about")

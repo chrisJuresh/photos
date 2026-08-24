@@ -1347,6 +1347,9 @@ class LabelServer(ThreadingHTTPServer):
             "judged": judged,
             "left": left,
             "threshold": self.clustering.threshold,
+            # And the cut, for the same reason: a verdict carries across one, so the
+            # reader has to be able to see which population they are answering about.
+            "cut": self.clustering.cut,
             # What the splits were counted over, so the page can say which grid a
             # verdict is being priced against rather than implying every grid.
             "strictness": people.STACK_SETTING["strictness"],

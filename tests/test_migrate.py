@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 12
+LATEST = 13
 
 
 def test_applies_from_empty(pair):
@@ -162,6 +162,47 @@ def test_refuses_a_database_ahead_of_the_files(pair, tmp_path):
 
     with pytest.raises(migrate.MigrationRefused, match=f"record version {LATEST} but only 1"):
         migrate.apply(catalog, state, migrations_dir=older)
+
+
+def test_the_cut_carries_the_population_clustered_before_it_existed(pair, tmp_path):
+    """013 grows `face_person`'s primary key by the size cut. The rows already
+    there were clustered over every face there was, so they are stamped 0.0 --
+    `photolib.people.NO_CUT`, a real value of the column -- and stay readable as
+    the old cut's rather than being thrown away with the table they were in."""
+    catalog, state = pair
+    before = tmp_path / "before_the_cut"
+    before.mkdir()
+    for _, path in migrate.discover()[:12]:
+        shutil.copy(path, before)
+    assert migrate.apply(catalog, state, migrations_dir=before) == 12
+
+    conn = db.connect(catalog, state)
+    try:
+        conn.execute(
+            "INSERT INTO file (sha256, size, ext, kind, state, feature_ver)"
+            " VALUES ('a', 1, '.jpg', 'image', 'published', '{}')"
+        )
+        conn.execute(
+            "INSERT INTO face (model, version, sha256, idx, share, vector)"
+            " VALUES ('m', '1', 'a', 0, 0.5, x'00')"
+        )
+        conn.execute(
+            "INSERT INTO face_person (model, version, threshold, sha256, idx, person)"
+            " VALUES ('m', '1', 0.363, 'a', 0, 'a:0')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert migrate.apply(catalog, state) == LATEST
+
+    conn = db.connect(catalog, state)
+    try:
+        assert conn.execute(
+            "SELECT threshold, cut, person FROM face_person"
+        ).fetchall() == [(0.363, 0.0, "a:0")]
+    finally:
+        conn.close()
 
 
 def test_refuses_gapped_numbering(tmp_path: Path):
