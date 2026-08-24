@@ -691,19 +691,19 @@ def main(argv: list[str] | None = None) -> int:
         for faces in held_by_person.values()
         for face in faces
     }
-    # The stacks a verdict could split, counted twice: over every face, and over the
-    # faces that reach the floor. `people.splits` is imported rather than reproduced,
-    # so this is the same number the harness ordered its questions by.
+    # The stacks a verdict could split, counted twice. `reach` is `people.frames`
+    # and `people.splits` called as the harness calls them, so it is the queue
+    # itself rather than a measurement standing beside it -- and `PROVISIONAL` is
+    # `FLOOR`, which `tests/test_recluster.py` pins, so naming it below names the
+    # floor that count was taken at. `frames_of` is the unfiltered contrast -- what
+    # a sitting before ticket 73 was spent on -- which the queue line prints and
+    # every `Subject` carries beside its `reach`.
     frames_of = {
         person: [face.sha256 for face in faces]
         for person, faces in held_by_person.items()
     }
-    reaching_frames = {
-        person: [face.sha256 for face in faces if face.share >= PROVISIONAL]
-        for person, faces in held_by_person.items()
-    }
     touches = people.splits(frames_of, stacks)
-    reach = people.splits(reaching_frames, stacks)
+    reach = people.splits(people.frames(held_by_person), stacks)
 
     print(f"catalog     {config.catalog_db}")
     print(f"labels      {labels_db}")
@@ -713,12 +713,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"judged      {len(given):,} persons the reader has answered about")
     # The queue both ways, because the gap is why the flagged clusters were asked
-    # about at all: `people.splits` counts a person's stacks over every face they
-    # have, and a face under the floor is in no frame's people.
+    # about at all. `people.frames` reads the floor now -- ticket 73 -- so the first
+    # number is what the harness asks about and the second is what a sitting before
+    # that read spent itself on.
     print(
-        f"queue       {sum(1 for one in touches.values() if one):,} persons the harness"
-        f" would ask about, {sum(1 for one in reach.values() if one):,} of them with a"
-        f" box that reaches {PROVISIONAL}"
+        f"queue       {sum(1 for one in reach.values() if one):,} persons the harness"
+        f" would ask about at the floor of {PROVISIONAL},"
+        f" {sum(1 for one in touches.values() if one):,} counted over every face"
+        " whatever its size"
     )
     print("sweeping    thresholds, upwards from where it stands:")
     every, reads = sweep(stored, faces_of, shares, given)

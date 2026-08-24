@@ -39,6 +39,21 @@ the stack exactly as it did. Those are never asked about. A person in three fram
 of a nine-frame burst is the whole question, and the highest scorer is the person
 whose verdict splits the most stacks.
 
+**The floor decides which of a person's frames the splits are counted over.** A
+face under `photolib.people.FLOOR` is in no frame's people, so a person whose every
+box is under it cannot move a stack whichever way the reader answers -- and a count
+over every face asked about them anyway: 1,731 questions where 279 could change
+something, which is a third of a sitting spent on sub-floor noise. `frames` is
+where that filter lives, because it is what `splits` counts over. It is not a
+pruning of the queue and can also fill it: somebody in all three frames of a stack
+and large in only one is a frame's people set that differs across it, which is the
+whole question.
+
+**Only the splits read the floor.** The montage is drawn from every face -- a small
+face is still something to recognise somebody by -- and so is `rank`'s tie-break,
+which counts how much the reader has to recognise them by and is therefore a count
+of what is drawn.
+
 It is **a pure function over stored numbers** -- two mappings, no database and no
 photograph -- so the order the reader is asked in is an assertion rather than a
 browsing session.
@@ -81,7 +96,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from photolib.browse import STACK_SETTING
-from photolib.people import CUT, MODEL, THRESHOLD, VERSION
+from photolib.people import CUT, FLOOR, MODEL, THRESHOLD, VERSION
 
 # The four things the reader can say. Three answers and a report: `friend` and
 # `stranger` are the judgement ADR 0004 asks for, `unsure` is a cluster they could
@@ -198,7 +213,9 @@ def splits(
     a face in one of those is evidence about nothing here.
 
     Pure over two mappings, which is what makes the order the reader is asked in
-    assertable without a database or a photograph.
+    assertable without a database or a photograph. **Which frames a person has here
+    is `frames`' business**, and it hands over the ones whose face reaches the
+    prominence floor, that being the population the nesting rule reads.
     """
     held = Counter(stacks.values())
     return {
@@ -253,7 +270,9 @@ def order(
     It is optional because the ordering of *persons* does not turn on it -- the tie
     breaks on how many faces there are and not on how big they were -- so the pure
     tests of the order need not construct it. Without it a frame stands for one
-    face at index 0, which is a montage of the right frames at unknown shares.
+    face at index 0, which is a montage of the frames it was handed at unknown
+    shares; `asking` hands over `frames`, so those are the above-floor ones and the
+    montage a reader sees is `boxes`' every face.
     """
     scored = splits(appearances, stacks)
     held = boxes or {}
@@ -460,9 +479,24 @@ def found(conn: sqlite3.Connection, clustering: Clustering) -> dict[str, list[Fa
 
 
 def frames(held: Mapping[str, Sequence[Face]]) -> dict[str, list[str]]:
-    """Each person's frames, which is what `splits` counts over."""
+    """Each person's frames **at the floor**, which is what `splits` counts over.
+
+    A face under `photolib.people.FLOOR` is in no frame's people, so the frames a
+    split is counted over are the frames of the faces that reach it: that is the
+    population the nesting rule reads, and the module docstring is where what a
+    count over every face cost the reader is written down.
+
+    A person whose every box is under it keeps their key and scores zero, and
+    `order` already never asks about a zero. **The montage is not filtered** -- a
+    small face is still something to recognise somebody by, and `boxes` hands over
+    every face they have.
+
+    The floor is read here and never copied, so moving that one line moves the queue
+    and there is nothing to regenerate.
+    """
     return {
-        person: [face.sha256 for face in faces] for person, faces in held.items()
+        person: [face.sha256 for face in faces if face.share >= FLOOR]
+        for person, faces in held.items()
     }
 
 

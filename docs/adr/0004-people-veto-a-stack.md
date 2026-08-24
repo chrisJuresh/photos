@@ -218,6 +218,20 @@ stack gains or loses them together and the rule above draws it identically eithe
 two thousand persons are not two thousand questions, and stopping early is the expected
 behaviour rather than an abandonment.
 
+**Counted over the faces that reach the floor.** A face under it is in no frame's people, so
+a person whose every box is under it cannot move a stack whichever way the reader answers.
+Counting the splits over every face therefore fills the queue with persons the floor has
+already disposed of — 1,731 questions where a count at the floor leaves 279, which is what the
+reader's first sitting was mostly spent on. So the frames a split is counted over are the
+frames of the above-floor faces, and a person with none scores zero and is never asked about,
+which is the rule above and not a new one. **It is not only a pruning.** Somebody in every
+frame of a stack and above the floor in one of them is a frame's people set that differs across
+it, so the two populations are not nested and the count at the floor is the question rather
+than a subset of it. **The montage is not filtered**: a small face is still something to
+recognise somebody by, and so is the tie-break on how many faces there are, so only the splits
+read the floor. It is `photolib.people.FLOOR`, read and never copied, so moving it moves the
+queue and no stored row changes — which is what the share was stored for.
+
 **Four answers, and the fourth is about the clustering.** `friend`, `stranger`, `unsure` — a
 cluster the reader could not make out, which is an answer and not a skip — and `two-people`,
 which says the cluster is obviously two individuals. That last one feeds neither the floor nor
@@ -343,12 +357,15 @@ friends that reach the floor, and at 0.600, the tightest value swept, 8 of the 1
 person and 37 friends have come apart.
 
 **So the third of the queue that was unanswerable was mostly a queue problem rather than a
-clustering problem.** `harness.people.splits` orders the questions over every face a person
-has, and the floor is applied nowhere in it: of the 1,731 persons the harness would ask about,
-**279** have a box that reaches 0.10. The reader was shown sub-floor noise because the ordering
-does not read the floor the rule will, which is why a third of what they were shown could not
-be answered. Fixing that is [#73](https://github.com/chrisJuresh/photos/issues/73) and it is
-not a clustering change at all.
+clustering problem.** `harness.people.splits` ordered the questions over every face a person
+had, and the floor was applied nowhere in it: it would ask about **1,731** persons where the
+same count over the boxes that reach 0.10 leaves **279**. The reader was shown sub-floor noise
+because the ordering did not read the floor the rule reads, which is why a third of what they
+were shown could not be answered. That was
+[#73](https://github.com/chrisJuresh/photos/issues/73), which has landed: the splits are
+counted over the above-floor faces now, so 279 is the queue and the montage is unchanged. It
+was not a clustering change at all, and the numbers above are measured at a size cut of 0.00
+and will move if #74 lands.
 
 **The size cut is the knob that works, and this is not the ticket that turns it.** Asked for
 numbers rather than a change, the report clusters at 0.363 over only the faces whose stored
