@@ -26,7 +26,7 @@ import pytest
 
 from harness import people
 from photolib import browse
-from photolib.people import MODEL, THRESHOLD, VERSION
+from photolib.people import FLOOR, MODEL, THRESHOLD, VERSION
 
 
 def opened(path: Path) -> sqlite3.Connection:
@@ -430,13 +430,14 @@ def test_the_stacks_come_back_at_the_setting_the_grid_draws(conn) -> None:
 def test_the_list_the_reader_is_asked_is_read_off_the_catalog(conn) -> None:
     """End to end over the two queries and the pure function: `BEN` wanders through
     one frame of a stack of three and `ANNE` is in all of it, so only `BEN` is
-    asked about."""
+    asked about. His one box clears the floor, deliberately -- what is under test
+    here is the read, and the floor is the section below."""
     peopled(
         conn,
         (ANNE, A, 0, 0.40),
         (ANNE, B, 0, 0.38),
         (ANNE, C, 0, 0.42),
-        (BEN, B, 1, 0.06),
+        (BEN, B, 1, 0.16),
     )
     grouped(conn, (A, B, C))
 
@@ -446,6 +447,103 @@ def test_the_list_the_reader_is_asked_is_read_off_the_catalog(conn) -> None:
     assert [(face.sha256, face.idx) for face in asked[0].faces] == [(B, 1)]
 
 
+# --- the floor the nesting rule reads -----------------------------------------
+#
+# `photolib.people.FLOOR` is where a box starts counting as somebody, and a face
+# under it is in no frame's people. So it is the population the splits have to be
+# counted over: a person the floor disposes of cannot move a stack whichever way
+# the reader answers, and the queue that asks about them anyway is spending the
+# reader's sitting on nothing. The montage is drawn from every face still -- a small
+# face is something to recognise somebody by, it is only not evidence a stack moves.
+
+
+def faced(*rows: tuple[str, int, float]) -> list[people.Face]:
+    """One person's faces, `found`'s own shape."""
+    return [people.Face(sha256, idx, share) for sha256, idx, share in rows]
+
+
+def test_the_frames_a_split_is_counted_over_are_the_ones_the_floor_reads() -> None:
+    """The seam: `frames` is what `splits` counts over, so the filter is here and
+    the pure arithmetic over two mappings stays pure."""
+    held = {ANNE: faced((A, 0, FLOOR), (B, 0, FLOOR / 4), (C, 0, 0.42))}
+
+    assert people.frames(held) == {ANNE: [A, C]}
+
+
+def test_a_person_whose_every_box_is_under_the_floor_counts_over_no_frames() -> None:
+    """The person is still a key and their score is zero, which is `order`'s
+    existing rule for who is never asked about rather than a new one."""
+    held = {ANNE: faced((A, 0, FLOOR / 4), (B, 1, 0.01))}
+
+    assert people.frames(held) == {ANNE: []}
+    assert people.splits(people.frames(held), stacked((A, B, C))) == {ANNE: 0}
+
+
+def test_a_person_the_floor_disposes_of_is_never_asked_about(conn) -> None:
+    """`BEN` wanders through one frame of `ANNE`'s stack of three, too small to be
+    in that frame's people at all. The nesting rule cannot feel his verdict, so the
+    queue does not spend a question on him."""
+    peopled(
+        conn,
+        (ANNE, A, 0, 0.40),
+        (ANNE, B, 0, 0.38),
+        (ANNE, C, 0, 0.42),
+        (BEN, B, 1, FLOOR / 4),
+    )
+    grouped(conn, (A, B, C))
+
+    assert people.asking(conn, HERE) == []
+
+
+def test_a_person_with_one_box_reaching_the_floor_is_asked_about(conn) -> None:
+    """One box is enough: it puts them in that frame's people and not in the
+    others', which is the whole shape the verdict turns on."""
+    peopled(
+        conn,
+        (ANNE, A, 0, 0.40),
+        (ANNE, B, 0, 0.38),
+        (ANNE, C, 0, 0.42),
+        (BEN, B, 1, FLOOR / 4),
+        (BEN, C, 1, FLOOR),
+    )
+    grouped(conn, (A, B, C))
+
+    assert [(one.person, one.splits) for one in people.asking(conn, HERE)] == [(BEN, 1)]
+
+
+def test_the_montage_still_holds_the_faces_under_the_floor(conn) -> None:
+    """A sub-floor face is still something to recognise somebody by, so only the
+    *ordering* reads the floor -- `order`'s boxes are every face they have."""
+    peopled(
+        conn,
+        (ANNE, A, 0, 0.40),
+        (ANNE, B, 0, 0.38),
+        (ANNE, C, 0, 0.42),
+        (BEN, B, 1, FLOOR / 4),
+        (BEN, C, 1, FLOOR),
+    )
+    grouped(conn, (A, B, C))
+
+    asked = people.asking(conn, HERE)
+
+    assert [(face.sha256, face.share) for face in asked[0].faces] == [
+        (C, FLOOR),
+        (B, FLOOR / 4),
+    ]
+
+
+def test_a_person_the_floor_reads_in_some_frames_and_not_others_is_the_question(
+    conn,
+) -> None:
+    """The filter is not a pruning of the queue: it can put somebody in it. `ANNE`
+    is in all three frames and large in only one, so the frame's people differ
+    across the stack and the answer moves it -- over every face she scored zero."""
+    peopled(conn, (ANNE, A, 0, 0.40), (ANNE, B, 0, 0.01), (ANNE, C, 0, 0.01))
+    grouped(conn, (A, B, C))
+
+    assert [(one.person, one.splits) for one in people.asking(conn, HERE)] == [(ANNE, 1)]
+
+
 # --- what it reads, and what it does not --------------------------------------
 
 
@@ -453,6 +551,13 @@ def test_the_setting_the_stacks_are_read_at_is_the_one_the_grid_draws() -> None:
     """The splits are counted over stacks, so which population of stacks matters:
     reading another setting's would price a verdict against a grid nobody sees."""
     assert people.STACK_SETTING == browse.STACK_SETTING
+
+
+def test_the_floor_the_queue_reads_is_the_one_the_nesting_rule_reads() -> None:
+    """Read from the one line that holds it and never copied, so that moving it
+    moves the queue and nothing has to be regenerated: the queue and the rule
+    cannot come to disagree about who counts."""
+    assert people.FLOOR is FLOOR
 
 
 def spoken(module) -> set[str]:

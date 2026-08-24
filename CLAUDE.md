@@ -327,6 +327,17 @@ session, and the counter says how many are judged and how many are left that wou
 anything. With two thousand persons at the default threshold, *once per person* has to mean
 once per person **worth asking about**.
 
+**The splits are counted over the faces that reach `photolib.people.FLOOR`**, which is the
+population the nesting rule reads: a face under the floor is in no frame's people, so a person
+whose every box is under it cannot move a stack whichever way the reader answers and is
+therefore never asked about — the third of the reader's first sitting that came back
+unanswerable was mostly that. It is not only a pruning and can also fill the queue: somebody in
+all three frames of a stack and large in only one is a frame's people set that differs across
+it, which is the whole question. The floor is read and never copied, so moving that one line
+moves the queue and nothing is regenerated. **Only the splits read it**: the montage is drawn
+from every face, and so is the tie-break, which counts how much the reader has to recognise
+somebody by.
+
 **An unjudged person is a friend**, and that is what makes stopping safe: the grid at zero
 answers is the grid the people rule produces on its own, so every answer moves it from there
 rather than repairing it. The default lives in `harness.people.counts` and deliberately not in
@@ -400,15 +411,16 @@ more flagged clusters apart than it breaks friends the reader has answered.** 0.
 of the 69 and fragments 36 of the 50; 0.400 splits 34 and fragments 16. So **0.363 stands and
 no new population was written**, and the 202 answers are intact. Two things came out of it
 that were not a clustering problem at all. Only **16 of the 69** flagged clusters carry a box
-reaching 0.10, so their 288 stack-touches are **27** the rule can feel — and of the 1,731
-persons the harness would ask about, **279** have a box that reaches the floor, because
-`harness.people.splits` counts over every face and applies the floor nowhere. That is
-[#73](https://github.com/chrisJuresh/photos/issues/73). And a size cut of **0.02** drops no
-box of any answered friend while taking 9 flagged clusters out of the population and splitting
-27 more — 36 of the 69 for 2 fragmented friends, which is the exchange the threshold could not
-offer, and is [#74](https://github.com/chrisJuresh/photos/issues/74). Those 2 keep every box
-they had: a cut is a different agglomeration and not only a filter, because complete linkage's
-merge order depends on every cluster at once, so the table's two friend columns can disagree.
+reaching 0.10, so their 288 stack-touches are **27** the rule can feel — and the queue was
+**1,731** persons where a count at the floor makes it **279**. That was
+[#73](https://github.com/chrisJuresh/photos/issues/73), which has landed — the splits read the
+floor now, so 279 is the queue and this report prints both numbers. And a size
+cut of **0.02** drops no box of any answered friend while taking 9 flagged clusters out of the
+population and splitting 27 more — 36 of the 69 for 2 fragmented friends, which is the exchange
+the threshold could not offer, and is [#74](https://github.com/chrisJuresh/photos/issues/74).
+Those 2 keep every box they had: a cut is a different agglomeration and not only a filter,
+because complete linkage's merge order depends on every cluster at once, so the table's two
+friend columns can disagree.
 
 To turn those answers into the two numbers the grid inherits — the **calibration report**.
 It replays every label against a sweep of strictness values and all three linkage rules,
