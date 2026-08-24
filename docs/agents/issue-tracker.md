@@ -33,6 +33,39 @@ Create a GitHub issue.
 
 Run `gh issue view <number> --comments`.
 
+## Blockers are written down, not worked out again
+
+**Any time the open issues are read as a set — a list, a review, "what is next", choosing what
+to work on — decide whether any of them blocks another, and record the answer on the issues.**
+Not in the reply. A reply is gone by the next session; step 2 of "Working a ticket" reads
+`issue_dependencies_summary.blocked_by`, which only ever returns what somebody wrote down, so an
+ordering constraint that was noticed and not recorded is one the next agent builds straight
+through.
+
+The edge is GitHub's native dependency, for the reason "Wayfinding operations" gives below: it
+is the representation the UI shows and the one `gh` can be asked about. The blocker's numeric
+**database id** is what the endpoint takes, never the `#number`.
+
+```bash
+gh api repos/chrisJuresh/photos/issues/<blocker> --jq .id
+gh api --method POST repos/chrisJuresh/photos/issues/<blocked>/dependencies/blocked_by -F issue_id=<blocker-db-id>
+```
+
+Then **comment the reason on both**, because the edge carries none: a `blocked_by` count says
+that somebody decided this and never what they decided it from, and the next reader's only
+alternative is to re-derive it from two ticket bodies.
+
+**The bar is an ordering constraint and not a shared file.** A blocker is a ticket whose output
+the other one has to store, be keyed by, or be judged against — a column that must exist before
+another ticket writes a key naming it, a measurement another ticket's acceptance test is read
+against. Two tickets that merely land in the same module are a **rebase**: say so in a comment,
+name the file, and leave both unblocked. Blocking a startable ticket costs a sitting; the two
+are not symmetrical mistakes.
+
+**Say it when the answer is no, too.** "Checked, and these three do not block each other" is
+worth a comment for the same reason the edge is: otherwise the next session cannot tell an
+independent ticket from an unexamined one, and pays to work it out again.
+
 ## Working a ticket
 
 When a request names a ticket — `#7`, an issue URL, "the overlay one" — do all of this
