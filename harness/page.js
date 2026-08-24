@@ -687,7 +687,8 @@ function drawPerson() {
     ),
     ` at strictness ${crowd.strictness} under ${LINKAGES[crowd.linkage] || crowd.linkage}` +
       ` linkage · showing ${shown} of ${one.faces.length}` +
-      ` ${one.faces.length === 1 ? "face" : "faces"} · clustered at ${crowd.threshold}`
+      ` ${one.faces.length === 1 ? "face" : "faces"} · clustered at ${crowd.threshold}` +
+      ` over boxes from ${crowd.cut}`
   );
   said.textContent = one.answer
     ? `answered: ${SAYS[one.answer]} — press again to revise it`

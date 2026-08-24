@@ -386,10 +386,13 @@ over every judged cluster, which is the population the reader was shown, and ove
 carrying a box that reaches `FLOOR`, which is the population the nesting rule reads, because
 a person whose every box is under the floor is in no frame's people and no clustering of them
 moves a stack. The last table answers the other question ticket 71 asked with numbers rather
-than a change: a **size cut** on the stored share, clustered at the standing threshold. There
-are no arguments and neither sweep is a knob. It reads the catalog and `labels.sqlite3`, both
-on the NVMe, opens no substrate, never touches `G:` and writes nothing; it is a minute or two
-of CPU and no disk to speak of.
+than a change: a **size cut** on the stored share, clustered at the standing threshold — and
+that is the one that won, so `photolib.people.CUT` is where the cut now lives and `reaching`
+is this predicate, read from there rather than kept here. Both this report and
+`harness.floor` read the **uncut** population by name, `NO_CUT`, because that is the one the
+reader's answers were given about. There are no arguments and neither sweep is a knob. It
+reads the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate, never touches
+`G:` and writes nothing; it is a minute or two of CPU and no disk to speak of.
 
 ```bash
 python -m harness.recluster
@@ -409,6 +412,8 @@ box of any answered friend while taking 9 flagged clusters out of the population
 offer, and is [#74](https://github.com/chrisJuresh/photos/issues/74). Those 2 keep every box
 they had: a cut is a different agglomeration and not only a filter, because complete linkage's
 merge order depends on every cluster at once, so the table's two friend columns can disagree.
+That one landed: the cut is a column of `face_person`'s key at migration 013 and the pass
+stands at 0.02.
 
 To turn those answers into the two numbers the grid inherits — the **calibration report**.
 It replays every label against a sweep of strictness values and all three linkage rules,
@@ -575,10 +580,19 @@ against the reader's own answers and kept as a pre-filter rather than a verdict 
 re-reading rows. Every *face*'s share is kept, because each face
 is a different who; of the bodies only the largest, because *is somebody here* is the whole of
 what a body is asked and the largest answers it at any floor. The clustering is **complete
-linkage**, because a person is not a chain, and its **threshold is part of the key** as
-strictness and linkage are in `stack_member`, so `--threshold` adds a population rather than
-overwriting one and re-clusters without re-detecting: the vector lives in `face` and the
-person in `face_person`. A frame it looked at and found nobody in gets a row saying so, which
+linkage**, because a person is not a chain, and its **threshold and its size cut are part of
+the key** as strictness and linkage are in `stack_member`, so `--threshold` and `--cut` add a
+population rather than overwriting one and re-cluster without re-detecting: the vector lives
+in `face` and the person in `face_person`. **Only the faces reaching `CUT` are clustered** —
+0.02, provisional, and the one number here that could not be a read-time filter, because the
+clustering is the thing it changes: at under two per cent of a frame's height there are too
+few pixels to place a face and complete linkage merges whatever lands in the same noise,
+which is what the reader was flagging a third of their queue over. It is the largest cut that
+drops no box of any friend they answered about, and it is **not `FLOOR`** — that decides
+whether a person is in a frame's people, this decides whether a face says anything about who
+somebody is, and 0.10 here would cost 624 of those friends' boxes. A face under it keeps its
+share and its vector and simply has no person at that cut.
+A frame it looked at and found nobody in gets a row saying so, which
 is how "checked and empty" stays different from "never checked". It reads the substrate tree
 and the catalog, both on the NVMe, never opens `G:`, and does not attach `state.sqlite3`.
 Resumable in its two stages, idempotent, refuses while a writer holds the catalog, and it
@@ -600,7 +614,10 @@ floor**; 4,049 frames hold a face, 8,037 faces in all, clustered at 0.363 in 5.6
 **2,043 persons** — the largest of 120 faces, the median of 3, and 330 seen exactly once.
 That last figure is what #54 was waiting for: the reader is being asked about two thousand
 persons and not two hundred. The rows are cheap where the Match rows were not — 8,037
-128-dimension vectors is 4 MB of a 2,531 MB catalog.
+128-dimension vectors is 4 MB of a 2,531 MB catalog. **Those persons are the uncut
+population**, clustered before `CUT` existed and stamped 0.0 by migration 013; the 0.02
+population is owed a run, which examines nothing and costs a matrix multiply, and
+`harness.recluster` predicts 5,826 faces in 1,397 persons when it happens.
 
 ```bash
 python -m photolib.people

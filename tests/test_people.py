@@ -21,9 +21,11 @@ from PIL import Image
 from photolib import candidates, people
 from photolib.config import Config, substrate_path
 from photolib.people import (
+    CUT,
     DIM,
     FLOOR,
     MODEL,
+    NO_CUT,
     THRESHOLD,
     VERSION,
     Face,
@@ -36,6 +38,7 @@ from photolib.people import (
     name,
     photograph_shas,
     read,
+    reaching,
     spread,
     worklist,
 )
@@ -125,13 +128,21 @@ class Corpus:
             "SELECT sha256, idx, share FROM face ORDER BY sha256, idx"
         ).fetchall()
 
-    def persons(self, threshold: float = THRESHOLD) -> dict[str, str]:
+    def persons(self, threshold: float = THRESHOLD, cut: float = CUT) -> dict[str, str]:
         return {
             name(sha256, idx): person
             for sha256, idx, person in self.conn.execute(
-                "SELECT sha256, idx, person FROM face_person WHERE threshold = ?", (threshold,)
+                "SELECT sha256, idx, person FROM face_person"
+                " WHERE threshold = ? AND cut = ?",
+                (threshold, cut),
             )
         }
+
+
+def key_of(conn: sqlite3.Connection, table: str) -> list[str]:
+    """One table's primary key, in order. What "part of the key" is asserted over."""
+    columns = [row for row in conn.execute(f"PRAGMA table_info({table})") if row[5]]
+    return [row[1] for row in sorted(columns, key=lambda row: row[5])]
 
 
 @pytest.fixture
@@ -540,6 +551,122 @@ def test_clustering_an_empty_library_is_not_an_error() -> None:
     assert cluster({}, THRESHOLD) == {}
 
 
+# --- the cut: which faces are evidence about who somebody is -----------------
+
+
+def test_a_face_under_the_cut_is_in_no_person() -> None:
+    """The cut narrows the population before the agglomeration sees it, so a box
+    too small to place a face in is in nobody rather than in whoever else landed
+    in the same noise."""
+    faces = {"a:0": vector(1.0), "b:0": vector(1.0)}
+    boxes = {"a:0": 0.4, "b:0": CUT / 2}
+
+    assert reaching(boxes) == {"a:0"}
+    assert cluster({key: faces[key] for key in reaching(boxes)}, THRESHOLD) == {"a:0": "a:0"}
+
+
+def test_a_face_exactly_at_the_cut_is_evidence() -> None:
+    """At or above, which is `FLOOR`'s convention and the threshold's: the cut is
+    the least share that still says something about who somebody is."""
+    assert reaching({"a:0": CUT, "b:0": CUT - 0.001}) == {"a:0"}
+
+
+def test_nothing_is_cut_at_no_cut() -> None:
+    """The value the population clustered before the cut existed was made at, and
+    a real setting rather than a stand-in for one: `face.share` is greater than
+    zero by construction, so every face reaches it."""
+    assert reaching({"a:0": 1e-6}, NO_CUT) == {"a:0"}
+
+
+def test_a_cut_is_a_different_agglomeration_and_not_a_filter() -> None:
+    """The finding ADR 0004 records as a property of the method rather than a
+    rounding error: complete linkage's merge order depends on every cluster at
+    once, so dropping *another* person's small faces moves where this one's joins
+    are made. Here two faces are one person while a fourth small one is in the
+    population and come apart once it is cut -- which is why the cut has to be a
+    written population and could never be a filter over an assignment already
+    made.
+
+    At 60 degrees: a agrees with b and with c, b does not agree with c, and the
+    small face agrees with c alone. So c pairs off with the small face first and
+    leaves a free to take b; cut the small face and c takes a instead.
+    """
+    a, b, c, small = (name(sha_of(seed), 0) for seed in "1234")
+    faces = dict(zip((a, b, c, small), (_at(0.0), _at(58.0), _at(-40.0), _at(-70.0))))
+    boxes = {a: 0.4, b: 0.4, c: 0.4, small: CUT / 2}
+    threshold = 0.5
+
+    whole = cluster(faces, threshold)
+    tight = cluster({key: faces[key] for key in reaching(boxes)}, threshold)
+
+    assert whole[a] == whole[b]
+    assert tight[a] != tight[b]
+
+
+def test_the_cut_is_part_of_the_key(corpus: Corpus) -> None:
+    """User story 3: a population clustered at one cut can never be compared
+    against another, which is `stack_member`'s discipline and the reason this is a
+    column and not a `WHERE`."""
+    assert key_of(corpus.conn, "face_person") == [
+        "model",
+        "version",
+        "threshold",
+        "cut",
+        "sha256",
+        "idx",
+    ]
+
+
+def test_a_different_cut_is_a_different_population(corpus: Corpus) -> None:
+    sha256 = corpus.add("1")
+    corpus.examine(corpus.worklist()[0], detect=lambda frame: somebody(0.4, CUT / 2))
+    cluster_all(corpus.conn, THRESHOLD, NO_CUT)
+    cluster_all(corpus.conn, THRESHOLD, CUT)
+
+    assert set(corpus.persons(cut=NO_CUT)) == {name(sha256, 0), name(sha256, 1)}
+    assert set(corpus.persons(cut=CUT)) == {name(sha256, 0)}
+
+
+def test_a_face_under_the_cut_keeps_its_row_and_gets_no_person(corpus: Corpus) -> None:
+    """Nothing re-detects and nothing is deleted: the face keeps its share and its
+    vector and simply has no person at this cut, which is `face_person`'s existing
+    shape rather than a new one."""
+    tiny = CUT / 2
+    sha256 = corpus.add("1")
+    corpus.examine(corpus.worklist()[0], detect=lambda frame: somebody(0.4, tiny))
+    result = cluster_all(corpus.conn)
+
+    assert corpus.faces() == [
+        (sha256, 0, pytest.approx(0.4)),
+        (sha256, 1, pytest.approx(tiny)),
+    ]
+    assert set(corpus.persons()) == {name(sha256, 0)}
+    assert (result["faces"], result["written"], result["under"]) == (1, 1, 1)
+
+
+def test_a_second_clustering_at_the_same_cut_writes_nothing(corpus: Corpus) -> None:
+    """The trap the cut introduces: a face under it is never owed a person, so a
+    resume asking about every stored face would re-cluster on every run."""
+    corpus.add("1")
+    corpus.examine(corpus.worklist()[0], detect=lambda frame: somebody(0.4, CUT / 2))
+    cluster_all(corpus.conn)
+
+    assert cluster_all(corpus.conn)["written"] == 0
+
+
+def test_a_new_cut_re_examines_nothing_and_moves_no_face_row(corpus: Corpus) -> None:
+    """User story 4: a cut is a matrix multiply and not a rebuild. The share and
+    the vector live in `face`, which the cut is not part of the key of."""
+    corpus.add("1")
+    corpus.examine(corpus.worklist()[0], detect=lambda frame: somebody(0.4, CUT / 2))
+    cluster_all(corpus.conn, THRESHOLD, CUT)
+    before = corpus.faces()
+
+    assert corpus.worklist() == ([], [])
+    assert cluster_all(corpus.conn, THRESHOLD, NO_CUT)["written"] == 2
+    assert corpus.faces() == before
+
+
 # --- the two stages ----------------------------------------------------------
 
 
@@ -735,6 +862,25 @@ def test_run_says_the_device_failed_and_clusters_nothing(
     try:
         assert len(examined(conn)) == 1  # and the one frame it did look at is stored
         assert conn.execute("SELECT count(*) FROM face_person").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_run_refuses_a_cut_below_zero_before_looking_at_anything(
+    corpus: Corpus, tmp_path: Path, migrated
+) -> None:
+    """Before, and not after: the column's own CHECK fires once the detection pass
+    has run and committed, so a mistyped cut would cost the pass and end in a
+    traceback instead of a refusal."""
+    corpus.add("1")
+    corpus.conn.close()
+
+    with pytest.raises(PeopleRefused, match="a share of the frame's height"):
+        people.run(synthetic_config(tmp_path, migrated), detect=lambda f: NOBODY, cut=-0.5)
+
+    conn = candidates.catalog(migrated[0])
+    try:
+        assert examined(conn) == set()  # the tile was there to look at and was not
     finally:
         conn.close()
 

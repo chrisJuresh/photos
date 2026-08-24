@@ -81,7 +81,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from photolib.browse import STACK_SETTING
-from photolib.people import MODEL, THRESHOLD, VERSION
+from photolib.people import CUT, MODEL, THRESHOLD, VERSION
 
 # The four things the reader can say. Three answers and a report: `friend` and
 # `stranger` are the judgement ADR 0004 asks for, `unsure` is a cluster they could
@@ -110,11 +110,24 @@ class Clustering:
     clustering as well as the person -- `stack_member`'s discipline one layer up --
     and a person under a threshold nobody has answered about reads as unjudged
     rather than inheriting an answer about different faces.
+
+    `cut` is the fourth column of that key and is here for the same reason: a
+    population clustered over the faces reaching one size is not the population
+    clustered over another, so a report that read both would be describing two
+    clusterings as one. It is **not** part of `person_verdict`'s key below, and that
+    asymmetry is deliberate: the answers the reader has already given carry across a
+    cut so that a sitting is not spent twice, which is the whole reason
+    `harness.recluster` could price one from labels given before it existed. It also
+    means a second answer about a same-named cluster at another cut *replaces* the
+    first, and the reports read the uncut population -- so
+    [#78](https://github.com/chrisJuresh/photos/issues/78) keys the verdict by the
+    cut and reads the uncut one as a default, and it comes before the next sitting.
     """
 
     model: str = MODEL
     version: str = VERSION
     threshold: float = THRESHOLD
+    cut: float = CUT
 
 
 @dataclass(frozen=True)
@@ -415,7 +428,7 @@ FROM face_person fp
 JOIN face f
   ON f.model = fp.model AND f.version = fp.version
  AND f.sha256 = fp.sha256 AND f.idx = fp.idx
-WHERE fp.model = ? AND fp.version = ? AND fp.threshold = ?
+WHERE fp.model = ? AND fp.version = ? AND fp.threshold = ? AND fp.cut = ?
 """
 
 _MEMBERSHIP = f"""
@@ -439,7 +452,8 @@ def found(conn: sqlite3.Connection, clustering: Clustering) -> dict[str, list[Fa
     """
     held: dict[str, list[Face]] = {}
     for person, sha256, idx, share in conn.execute(
-        _APPEARANCES, (clustering.model, clustering.version, clustering.threshold)
+        _APPEARANCES,
+        (clustering.model, clustering.version, clustering.threshold, clustering.cut),
     ):
         held.setdefault(person, []).append(Face(sha256, idx, share))
     return held

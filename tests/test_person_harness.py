@@ -26,7 +26,7 @@ import pytest
 
 from harness import people
 from photolib import browse
-from photolib.people import MODEL, THRESHOLD, VERSION
+from photolib.people import CUT, MODEL, NO_CUT, THRESHOLD, VERSION
 
 
 def opened(path: Path) -> sqlite3.Connection:
@@ -209,7 +209,7 @@ def test_an_unjudged_person_is_a_friend() -> None:
 # --- where the answers go -----------------------------------------------------
 
 
-HERE = people.Clustering(MODEL, VERSION, THRESHOLD)
+HERE = people.Clustering(MODEL, VERSION, THRESHOLD, CUT)
 
 
 @pytest.fixture
@@ -384,9 +384,9 @@ def peopled(conn: sqlite3.Connection, *rows: tuple[str, str, int, float]) -> Non
             (MODEL, VERSION, sha256, idx, share),
         )
         conn.execute(
-            "INSERT INTO face_person (model, version, threshold, sha256, idx, person)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (MODEL, VERSION, THRESHOLD, sha256, idx, person),
+            "INSERT INTO face_person (model, version, threshold, cut, sha256, idx,"
+            " person) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (MODEL, VERSION, THRESHOLD, CUT, sha256, idx, person),
         )
     conn.commit()
 
@@ -414,11 +414,13 @@ def test_the_catalog_hands_back_each_persons_own_faces(conn) -> None:
 
 
 def test_another_clustering_hands_back_nothing(conn) -> None:
-    """The threshold is part of `face_person`'s key, so reading another value is
-    reading a population nobody has clustered rather than this one."""
+    """The threshold and the cut are both part of `face_person`'s key, so reading
+    another value of either is reading a population nobody has clustered rather
+    than this one."""
     peopled(conn, (ANNE, A, 0, 0.40))
 
-    assert people.found(conn, people.Clustering(MODEL, VERSION, 0.9)) == {}
+    assert people.found(conn, people.Clustering(MODEL, VERSION, 0.9, CUT)) == {}
+    assert people.found(conn, people.Clustering(MODEL, VERSION, THRESHOLD, NO_CUT)) == {}
 
 
 def test_the_stacks_come_back_at_the_setting_the_grid_draws(conn) -> None:
