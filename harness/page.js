@@ -690,9 +690,15 @@ function drawPerson() {
       ` ${one.faces.length === 1 ? "face" : "faces"} · clustered at ${crowd.threshold}` +
       ` over boxes from ${crowd.cut}`
   );
+  // A prior is what the reader said about the cluster of this name before the cut
+  // dropped some of its faces -- ticket 78. It is shown and never counted: the
+  // faces are not the ones they judged, so it is evidence about who this is and
+  // not an answer about them.
   said.textContent = one.answer
     ? `answered: ${SAYS[one.answer]} — press again to revise it`
-    : "not answered yet";
+    : one.prior
+      ? `not answered yet — ${SAYS[one.prior]} before the cut, about other faces`
+      : "not answered yet";
   peopleCount();
 }
 

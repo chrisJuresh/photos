@@ -250,6 +250,111 @@ def test_the_same_person_under_another_clustering_reads_as_unjudged(labels) -> N
     assert people.verdicts(labels, HERE) == {ANNE: "stranger"}
 
 
+# The uncut population, whose answers a cut one inherits as a prior. `HERE` is the
+# shipped cut and `UNCUT` is what every answer given before it existed was about.
+UNCUT = people.Clustering(MODEL, VERSION, THRESHOLD, NO_CUT)
+
+
+def test_a_verdict_is_keyed_by_the_cut_it_was_given_at(labels) -> None:
+    """Ticket 78: a person is named by its least face, so a cut that drops some of
+    its faces can hand the same name to a smaller cluster. Without the cut in the
+    key, answering about that one *replaces* the answer given about the uncut one,
+    and `harness.floor` would then score the newer answer against boxes it was
+    never given about."""
+    people.record(labels, ANNE, "stranger", clustering=HERE)
+    people.record(labels, BEN, "friend", clustering=UNCUT)
+
+    assert people.verdicts(labels, HERE) == {ANNE: "stranger"}
+    assert people.verdicts(labels, UNCUT) == {BEN: "friend"}
+
+
+def test_an_answer_about_a_cluster_the_cut_did_not_change_is_an_answer_here(
+    labels,
+) -> None:
+    """The reader is not asked twice about a cluster that did not change: the same
+    faces are the same cluster, so what they said about it is a judgement about
+    this population as much as about the uncut one. `unchanged` is who those are,
+    and it is a fact about the catalog rather than about the labels file."""
+    people.record(labels, ANNE, "stranger", clustering=UNCUT)
+
+    assert people.verdicts(labels, HERE, carried={ANNE}) == {ANNE: "stranger"}
+
+
+def test_an_answer_about_a_cluster_the_cut_changed_is_a_prior_and_not_a_judgement(
+    labels,
+) -> None:
+    """An answer about a different set of faces is evidence and not a judgement, so
+    it reads the way `DEFAULT` reads for an unjudged person: a default the reader of
+    the table applies, and never a row this clustering has."""
+    people.record(labels, ANNE, "stranger", clustering=UNCUT)
+
+    assert people.verdicts(labels, HERE) == {}
+    assert people.priors(labels, HERE) == {ANNE: "stranger"}
+
+
+def test_an_answer_given_here_is_not_replaced_by_the_prior(labels) -> None:
+    """Carried or not, the answer given about *this* clustering is the reader's
+    latest word about these faces."""
+    people.record(labels, ANNE, "stranger", clustering=UNCUT)
+    people.record(labels, ANNE, "friend", clustering=HERE)
+
+    assert people.verdicts(labels, HERE, carried={ANNE}) == {ANNE: "friend"}
+
+
+def test_the_uncut_population_has_no_prior_but_its_own_answers(labels) -> None:
+    """`harness.floor` and `harness.recluster` read `NO_CUT`, and there is nothing
+    behind it to inherit: the prior *is* the answer there, which is what keeps them
+    scoring only answers given about the population they read."""
+    people.record(labels, ANNE, "friend", clustering=UNCUT)
+
+    assert people.priors(labels, UNCUT) == people.verdicts(labels, UNCUT)
+
+
+def test_a_verdict_table_from_before_the_cut_carries_its_answers_forward(
+    tmp_path: Path,
+) -> None:
+    """The reader's 202 answers of 2026-08-23 were given about the uncut population
+    and there is one value of the new column that says so. Refusing the file, or
+    dropping the rows, would spend a sitting twice for a column."""
+    path = tmp_path / "labels.sqlite3"
+    old = opened(path)
+    old.execute(
+        "CREATE TABLE person_verdict ("
+        " model TEXT NOT NULL, version TEXT NOT NULL, threshold REAL NOT NULL,"
+        " person TEXT NOT NULL, verdict TEXT NOT NULL,"
+        " answered_at TEXT NOT NULL DEFAULT (datetime('now')),"
+        " PRIMARY KEY (model, version, threshold, person))"
+    )
+    old.execute(
+        "INSERT INTO person_verdict (model, version, threshold, person, verdict)"
+        " VALUES (?, ?, ?, ?, 'stranger')",
+        (MODEL, VERSION, THRESHOLD, ANNE),
+    )
+    old.close()
+
+    conn = opened(path)
+    try:
+        assert people.ensure(conn)
+        assert people.verdicts(conn, UNCUT) == {ANNE: "stranger"}
+        assert people.verdicts(conn, HERE) == {}
+    finally:
+        conn.close()
+
+
+def test_carrying_the_older_table_forward_happens_once(tmp_path: Path) -> None:
+    """`ensure` is called on every open of the labels file, and a table already
+    carrying the column has nothing to say about it."""
+    path = tmp_path / "labels.sqlite3"
+    conn = opened(path)
+    try:
+        assert people.ensure(conn) is None
+        people.record(conn, ANNE, "friend", clustering=HERE)
+        assert people.ensure(conn) is None
+        assert people.verdicts(conn, HERE) == {ANNE: "friend"}
+    finally:
+        conn.close()
+
+
 def test_a_new_model_is_a_new_population_too(labels) -> None:
     people.record(labels, ANNE, "stranger", clustering=HERE)
 
@@ -329,6 +434,36 @@ def test_the_stack_answers_and_the_person_answers_share_one_file(tmp_path: Path)
     assert {"answer", "person_verdict"} <= tables
 
 
+def test_the_harness_opens_a_labels_file_from_before_the_cut(tmp_path: Path) -> None:
+    """`label.store` is what the reader's own file goes through, and both tables
+    widen there: the stack answers by `_carry_over` and the verdicts by `ensure`.
+    The 202 answers of 2026-08-23 come back as the uncut population's."""
+    from harness import label
+
+    path = tmp_path / "labels.sqlite3"
+    old = opened(path)
+    old.execute(
+        "CREATE TABLE person_verdict ("
+        " model TEXT NOT NULL, version TEXT NOT NULL, threshold REAL NOT NULL,"
+        " person TEXT NOT NULL, verdict TEXT NOT NULL,"
+        " answered_at TEXT NOT NULL DEFAULT (datetime('now')),"
+        " PRIMARY KEY (model, version, threshold, person))"
+    )
+    old.execute(
+        "INSERT INTO person_verdict (model, version, threshold, person, verdict)"
+        " VALUES (?, ?, ?, ?, 'friend')",
+        (MODEL, VERSION, THRESHOLD, ANNE),
+    )
+    old.close()
+
+    conn = label.store(path)
+    try:
+        assert people.verdicts(conn, UNCUT) == {ANNE: "friend"}
+        assert people.priors(conn, HERE) == {ANNE: "friend"}
+    finally:
+        conn.close()
+
+
 # --- how many are left worth asking about -------------------------------------
 
 
@@ -374,19 +509,30 @@ def published(conn: sqlite3.Connection, sha256: str) -> None:
     )
 
 
-def peopled(conn: sqlite3.Connection, *rows: tuple[str, str, int, float]) -> None:
-    """Faces and their persons, at the clustering the harness reads."""
+def peopled(
+    conn: sqlite3.Connection, *rows: tuple[str, str, int, float], cut: float = CUT
+) -> None:
+    """Faces and their persons, at the clustering the harness reads.
+
+    `cut` because a catalog holds both populations at once -- the uncut one every
+    answer so far was given about, and the one the pass writes at
+    `photolib.people.CUT` -- and what carries from the first to the second is
+    `unchanged`'s question. A face is written once whichever populations hold it,
+    which is `face_person`'s own shape: a cut costs a matrix multiply and not a
+    re-detection.
+    """
     for person, sha256, idx, share in rows:
         published(conn, sha256)
         conn.execute(
             "INSERT INTO face (model, version, sha256, idx, share, vector)"
-            " VALUES (?, ?, ?, ?, ?, x'00')",
+            " VALUES (?, ?, ?, ?, ?, x'00')"
+            " ON CONFLICT (model, version, sha256, idx) DO NOTHING",
             (MODEL, VERSION, sha256, idx, share),
         )
         conn.execute(
             "INSERT INTO face_person (model, version, threshold, cut, sha256, idx,"
             " person) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (MODEL, VERSION, THRESHOLD, CUT, sha256, idx, person),
+            (MODEL, VERSION, THRESHOLD, cut, sha256, idx, person),
         )
     conn.commit()
 
@@ -421,6 +567,33 @@ def test_another_clustering_hands_back_nothing(conn) -> None:
 
     assert people.found(conn, people.Clustering(MODEL, VERSION, 0.9, CUT)) == {}
     assert people.found(conn, people.Clustering(MODEL, VERSION, THRESHOLD, NO_CUT)) == {}
+
+
+def test_a_person_the_cut_did_not_change_carries_its_answer(conn) -> None:
+    """Ticket 78's first bullet: the same faces are the same cluster, so the reader
+    is not asked about it a second time for a column."""
+    peopled(conn, (ANNE, A, 0, 0.40), (ANNE, B, 0, 0.38), cut=NO_CUT)
+    peopled(conn, (ANNE, A, 0, 0.40), (ANNE, B, 0, 0.38))
+
+    assert people.unchanged(conn, HERE) == {ANNE}
+
+
+def test_a_person_the_cut_left_holding_other_faces_carries_nothing(conn) -> None:
+    """A person is named by its least face, so the same name can survive a cut that
+    dropped one of the others -- and `BEN`, who exists only at the cut, has nothing
+    behind him to inherit at all."""
+    peopled(conn, (ANNE, A, 0, 0.40), (ANNE, B, 0, 0.01), cut=NO_CUT)
+    peopled(conn, (ANNE, A, 0, 0.40), (BEN, C, 0, 0.30))
+
+    assert people.unchanged(conn, HERE) == frozenset()
+
+
+def test_the_uncut_population_carries_every_person_it_has(conn) -> None:
+    """There is nothing behind `NO_CUT` to differ from, so reading it is reading the
+    answers themselves -- which is what `harness.floor` and `harness.recluster` do."""
+    peopled(conn, (ANNE, A, 0, 0.40), cut=NO_CUT)
+
+    assert people.unchanged(conn, UNCUT) == {ANNE}
 
 
 def test_the_stacks_come_back_at_the_setting_the_grid_draws(conn) -> None:

@@ -119,6 +119,15 @@ walking through the back of a burst cannot break it. Marked once per person and 
 appearance.
 _Avoid_: bystander, background person, extra
 
+**Prior**:
+What the reader said about a person of this name in a population clustered differently --
+shown beside the question and counted by nothing. A person is named by its least face, so a
+size cut that drops some of a cluster's faces hands the same name to a smaller one, and an
+answer about a different set of faces is evidence about who somebody is rather than a
+judgement about them. Where the cut left a cluster's faces exactly as they were, the older
+answer is not a prior at all: it is the answer.
+_Avoid_: default, inherited verdict, carried answer, previous answer
+
 **Match**:
 How strongly two frames agree that they are the same picture — the count of distinctive
 points that line up between them under one transform. It survives a change of exposure

@@ -418,20 +418,39 @@ of the friends' boxes and 0.02 at none.
 and the vector stay where they were — the face simply has no person at that cut, which is
 `face_person`'s existing shape. So a cut costs a matrix multiply and not a pass.
 
-**The answers still stand.** `person_verdict` is *not* keyed by the cut, and that asymmetry is
-deliberate: a verdict about a person carries across a re-clustering so that a sitting is not
-spent twice, which is the whole reason the measurement above could be made from labels given
-before the cut existed.
+**The answers still stand.** `person_verdict` was *not* keyed by the cut when #74 landed, and
+that asymmetry was deliberate: a verdict about a person carries across a re-clustering so that
+a sitting is not spent twice, which is the whole reason the measurement above could be made
+from labels given before the cut existed.
 
-**And that carry-across cuts both ways, which is the one thing left open here.** A person is
-named by its least face, so the same name can survive a cut holding fewer faces. Answering
-about it again *replaces* the earlier answer, because the key cannot tell the two apart — and
-`harness.floor` and `harness.recluster` read the uncut population, so an answer given about
-the cut cluster would be scored against the uncut one's boxes. Nothing has been answered at
-0.02 yet, so nothing is wrong today; the fix is a verdict keyed by the cut with the uncut
-answer read as a default rather than as the answer, and it is
-[#78](https://github.com/chrisJuresh/photos/issues/78) rather than this ticket, whose scope
-stopped at the population. **It comes before the next sitting at the harness**, not after.
+**But that carry-across cut both ways**, which #74 left open and
+[#78](https://github.com/chrisJuresh/photos/issues/78) has now settled — before the next
+sitting, as it had to be. A person is named by its least face, so the same name can survive a
+cut holding fewer faces; answering about that one *replaced* the earlier answer, because the
+key could not tell the two apart, and `harness.floor` and `harness.recluster` read the uncut
+population, so the newer answer would have been scored against boxes it was never given about.
+Nothing had been answered at 0.02, so nothing was ever wrong in the file.
+
+### What a verdict is about, and what an older one is evidence of
+
+`person_verdict` is keyed by the cut. A labels file written before that column is widened when
+the harness opens it and its rows are carried forward as `NO_CUT` — a real value that names the
+population they were given about — so nothing the reader has said is lost or re-asked for a
+column.
+
+**An older answer is not thrown away and is not silently inherited either.** Which of the two it
+is turns on the faces and never on the name: `harness.people.unchanged` reads `face_person` at
+both cuts and names the clusters that came through holding exactly the faces they had. Those are
+the faces the reader judged, so their answer is a judgement about this population as well, and
+they are not asked again. Every other cluster of the same name reads as **unjudged with a
+prior** — the older answer is shown beside the question and counted by nothing, which is the
+shape an unjudged person's `friend` already has and is there for the same reason: an answer
+about a different set of faces is evidence and not a judgement.
+
+That leaves `harness.floor` and `harness.recluster` exactly where they were. Both read `NO_CUT`
+by name, and at `NO_CUT` there is no population behind the answers for them to have been
+inherited from, so every input either report has is one the reader gave about the population it
+reads.
 
 ## The cover, and the surprise it introduces
 
