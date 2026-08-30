@@ -1059,16 +1059,16 @@ def store(path: Path) -> sqlite3.Connection:
 
     **Both modes' tables**, because there is one labels file: the stack answers
     here and the person verdicts `harness.people` owns, created through this so the
-    harness has one open and one thing to keep. The person table has no widening to
-    carry: it is newer than every shape `_carry_over` knows about.
+    harness has one open and one thing to keep. The person table has a widening of
+    its own now -- ticket 78 put the cut in its key -- and it carries its rows
+    forward the way `_carry_over` does, so both messages are printed from here.
     """
     conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute(SCHEMA)
-    people.ensure(conn)
-    carried = _carry_over(conn)
-    if carried:
-        print(carried)
+    for carried in (people.ensure(conn), _carry_over(conn)):
+        if carried:
+            print(carried)
     return conn
 
 
@@ -1226,6 +1226,7 @@ class LabelServer(ThreadingHTTPServer):
         linkage: str = DEFAULT_LINKAGE,
         persons: Sequence[people.Person] = (),
         clustering: people.Clustering | None = None,
+        carried: Collection[str] = (),
     ):
         self.drawing = drawing
         # The sets this sitting has been dealt, which is the sampler's own list and
@@ -1251,6 +1252,11 @@ class LabelServer(ThreadingHTTPServer):
         # and it is what a verdict is filed under.
         self.persons = tuple(persons)
         self.clustering = clustering or people.Clustering()
+        # The persons the cut did not change, which is what makes an answer given
+        # about the uncut population an answer about these faces as well -- ticket
+        # 78. A fact about the catalog and fixed for the life of the server, so it
+        # is read once beside the ranking rather than on every request.
+        self.carried = frozenset(carried)
         self.asked = {one.person: one for one in self.persons}
         # Every touch of the labels database goes through this, which is what
         # lets one connection serve threaded requests -- see `store`.
@@ -1328,7 +1334,12 @@ class LabelServer(ThreadingHTTPServer):
         caption can say, and the reader's check that the face being judged is the
         one they think it is.
         """
-        given = people.verdicts(self.labels, self.clustering)
+        given = people.verdicts(self.labels, self.clustering, carried=self.carried)
+        # What the reader said about the uncut cluster of the same name, for the
+        # persons the cut changed. Not an answer -- `given` already holds the ones
+        # that are -- so it rides beside the verdict and never in it, and the page
+        # says which it is showing.
+        prior = people.priors(self.labels, self.clustering)
         judged, left = people.progress(self.persons, given)
         return {
             "persons": [
@@ -1340,6 +1351,7 @@ class LabelServer(ThreadingHTTPServer):
                         for face in one.faces
                     ],
                     "answer": given.get(one.person),
+                    "prior": None if one.person in given else prior.get(one.person),
                 }
                 for one in self.persons
             ],
@@ -1347,8 +1359,9 @@ class LabelServer(ThreadingHTTPServer):
             "judged": judged,
             "left": left,
             "threshold": self.clustering.threshold,
-            # And the cut, for the same reason: a verdict carries across one, so the
-            # reader has to be able to see which population they are answering about.
+            # And the cut, for the same reason: it is the other half of what a
+            # verdict is filed under, and it is what a `prior` beside an unjudged
+            # person is the far side of.
             "cut": self.clustering.cut,
             # What the splits were counted over, so the page can say which grid a
             # verdict is being priced against rather than implying every grid.
@@ -1714,6 +1727,10 @@ def main(argv: list[str] | None = None) -> int:
     # so, and the stack mode is untouched either way.
     clustering = people.Clustering()
     persons = people.asking(conn, clustering)
+    # Which of them the cut left holding the faces they had, so that an answer given
+    # about the uncut population is an answer here too -- ticket 78. Read once, with
+    # the ranking, because the catalog does not change while the server is up.
+    carried = people.unchanged(conn, clustering)
 
     server = LabelServer(
         ("127.0.0.1", args.port),
@@ -1726,6 +1743,7 @@ def main(argv: list[str] | None = None) -> int:
         linkage=args.linkage,
         persons=persons,
         clustering=clustering,
+        carried=carried,
     )
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"labelling harness on {url}")
@@ -1746,11 +1764,26 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  labels          {labels_db}")
     print(f"  substrates      {config.substrate_root}")
     print(f"  answers given   {len(given)} in this round")
-    judged, left = people.progress(persons, people.verdicts(labels, clustering))
+    standing = people.verdicts(labels, clustering, carried=carried)
+    judged, left = people.progress(persons, standing)
     print(
         f"  people mode     {len(persons)} persons whose verdict would move a stack,"
         f" {judged} judged, {left} left"
     )
+    # The answers the carry could not make judgements of. A cluster the cut left
+    # alone keeps its answer and is counted as judged above; one it changed holds
+    # the older answer as a prior, which the page shows and the counter does not
+    # count, so the number of them is worth saying out loud.
+    prior = people.priors(labels, clustering)
+    held = sum(
+        1 for one in persons if one.person in prior and one.person not in standing
+    )
+    if held:
+        print(
+            f"                  {held} of them hold an answer about the uncut cluster"
+            " of that name as a prior rather than as a judgement: the cut changed"
+            " which faces they are"
+        )
     if not persons:
         print(
             "                  nothing to judge there: either"

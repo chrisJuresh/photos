@@ -72,6 +72,14 @@ rather than repairing it. `unsure` and `two-people` fall the same way -- neither
 the claim *this person was never photographed*, and only that claim takes somebody
 out of a frame.
 
+**An answer about another cut falls there too.** A person is named by its least
+face, so a size cut that drops some of a cluster's faces hands the same name to a
+smaller one, and what the reader said about the first is not a judgement about the
+second. `unchanged` is which clusters came through the cut holding exactly the
+faces they had -- those keep their answer, and a sitting is not spent twice for a
+column -- and for every other one the older answer is a `priors`: evidence the page
+shows and the counter does not count, which is `DEFAULT`'s shape one step along.
+
 ## A cluster that is obviously two people
 
 The fourth answer, and it is a report about the clustering rather than about a
@@ -93,10 +101,10 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from photolib.browse import STACK_SETTING
-from photolib.people import CUT, FLOOR, MODEL, THRESHOLD, VERSION
+from photolib.people import CUT, FLOOR, MODEL, NO_CUT, THRESHOLD, VERSION
 
 # The four things the reader can say. Three answers and a report: `friend` and
 # `stranger` are the judgement ADR 0004 asks for, `unsure` is a cluster they could
@@ -129,14 +137,18 @@ class Clustering:
     `cut` is the fourth column of that key and is here for the same reason: a
     population clustered over the faces reaching one size is not the population
     clustered over another, so a report that read both would be describing two
-    clusterings as one. It is **not** part of `person_verdict`'s key below, and that
-    asymmetry is deliberate: the answers the reader has already given carry across a
-    cut so that a sitting is not spent twice, which is the whole reason
-    `harness.recluster` could price one from labels given before it existed. It also
-    means a second answer about a same-named cluster at another cut *replaces* the
-    first, and the reports read the uncut population -- so
-    [#78](https://github.com/chrisJuresh/photos/issues/78) keys the verdict by the
-    cut and reads the uncut one as a default, and it comes before the next sitting.
+    clusterings as one. It is part of `person_verdict`'s key below as well, which it
+    was not at first: a verdict carried across a cut by its bare name, and a person
+    is named by its least face, so a cut that dropped some of a cluster's faces
+    handed the same name to a smaller one and the second answer *replaced* the
+    first. [#78](https://github.com/chrisJuresh/photos/issues/78) is that ticket.
+
+    What carried across is kept and demoted rather than dropped. `unchanged` is
+    which clusters the cut left holding exactly the faces they had, and `verdicts`
+    reads their uncut answer as an answer about these faces too -- a sitting is not
+    spent twice for a column. For the rest the uncut answer is a `priors` and reads
+    the way `DEFAULT` reads for an unjudged person: something the reader of the
+    table applies, and never a row this clustering has.
     """
 
     model: str = MODEL
@@ -311,7 +323,9 @@ def progress(
     ones about persons still being asked about. A re-clustering, or a stack setting
     moved since, can leave a judged person off the list; what they said is still an
     answer they gave and a counter that lost it would be reporting their evening
-    back to them wrongly.
+    back to them wrongly. Which is also why `given` is `verdicts`' and not the
+    table's: an answer carried across a cut that changed nothing is one of theirs,
+    and a `priors` about a cluster the cut did change is not.
     """
     return len(given), sum(1 for one in asked if one.person not in given)
 
@@ -323,12 +337,14 @@ def progress(
 # it. It lives in `labels.sqlite3` beside the stack answers -- one page to run and
 # one database to keep -- and `harness.label.store` is what creates both.
 #
-# **Keyed on the person and the clustering.** The three clustering columns are
+# **Keyed on the person and the clustering.** The four clustering columns are
 # `face_person`'s own key and they are here for `stack_member`'s reason: a person
-# is named by its least face, so re-clustering at another threshold can hand the
-# same name to a different set of faces. Answering about one is not answering
-# about the other, and a key that could not tell them apart would inherit
-# judgements silently.
+# is named by its least face, so re-clustering at another threshold -- or over the
+# faces reaching another size -- can hand the same name to a different set of
+# faces. Answering about one is not answering about the other, and a key that could
+# not tell them apart would inherit judgements silently, which is exactly what the
+# key without `cut` did until ticket 78. `ensure` carries an older table's rows
+# forward stamped `NO_CUT`, the population they were given about.
 #
 # **There is no verdict for "unjudged".** A person the reader has not reached has
 # no row, and `counts` is what reads the absence as a friend. The two are different
@@ -347,32 +363,70 @@ CREATE TABLE IF NOT EXISTS person_verdict (
   model       TEXT NOT NULL,      -- the detector's identity, `face_person`'s own
   version     TEXT NOT NULL,
   threshold   REAL NOT NULL,      -- the cosine the faces were clustered at
+  cut         REAL NOT NULL,      -- the share a face had to reach to be clustered
   person      TEXT NOT NULL,      -- '<sha256>:<idx>' of the cluster's least face
   verdict     TEXT NOT NULL CHECK (verdict IN ({', '.join(f"'{v}'" for v in VERDICTS)})),
   answered_at TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (model, version, threshold, person)
+  PRIMARY KEY (model, version, threshold, cut, person)
 )
 """
 
 _RECORD = """
-INSERT OR REPLACE INTO person_verdict (model, version, threshold, person, verdict)
-VALUES (?, ?, ?, ?, ?)
+INSERT OR REPLACE INTO person_verdict
+  (model, version, threshold, cut, person, verdict)
+VALUES (?, ?, ?, ?, ?, ?)
 """
 
 _VERDICTS = """
 SELECT person, verdict FROM person_verdict
-WHERE model = ? AND version = ? AND threshold = ?
+WHERE model = ? AND version = ? AND threshold = ? AND cut = ?
+"""
+
+_CARRY = """
+INSERT INTO person_verdict
+  (model, version, threshold, cut, person, verdict, answered_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 """
 
 
-def ensure(conn: sqlite3.Connection) -> None:
-    """Create the verdict table on a labels connection if it is not there yet.
+def ensure(conn: sqlite3.Connection) -> str | None:
+    """Create the verdict table on a labels connection, or widen the one there.
 
     A function rather than a second `store`, because there is one labels file and
     one connection to it: `harness.label.store` opens it and calls this, so the
     harness has one open and both modes write through it.
+
+    The widening is ticket 78's, and it is `harness.label._carry_over`'s trade
+    rather than a migration framework: the rows already in the table were answered
+    about the population clustered over every face there was, and `NO_CUT` is a real
+    value of the new column that says so exactly. Refusing the file, or dropping
+    them, would spend a sitting twice for a column. It happens once -- a table
+    already carrying `cut` has nothing to say -- and what it returns is what
+    `harness.label.store` prints.
     """
     conn.execute(SCHEMA)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(person_verdict)")}
+    if "cut" in columns:
+        return None
+    conn.execute("BEGIN")
+    conn.execute("ALTER TABLE person_verdict RENAME TO person_verdict_before_the_cut")
+    conn.execute(SCHEMA)
+    older = conn.execute(
+        "SELECT model, version, threshold, person, verdict, answered_at"
+        " FROM person_verdict_before_the_cut"
+    ).fetchall()
+    conn.executemany(
+        _CARRY,
+        [
+            (model, version, threshold, NO_CUT, person, given, when)
+            for model, version, threshold, person, given, when in older
+        ],
+    )
+    conn.execute("DROP TABLE person_verdict_before_the_cut")
+    conn.execute("COMMIT")
+    return (
+        f"carried {len(older)} verdict(s) forward as the uncut population, cut {NO_CUT}"
+    )
 
 
 def record(
@@ -395,6 +449,7 @@ def record(
             clustering.model,
             clustering.version,
             clustering.threshold,
+            clustering.cut,
             person,
             verdict,
         ),
@@ -418,11 +473,26 @@ def judged_yet(conn: sqlite3.Connection) -> bool:
     )
 
 
-def verdicts(conn: sqlite3.Connection, clustering: Clustering) -> dict[str, str]:
-    """Every judgement given about this clustering's persons, by person.
+def verdicts(
+    conn: sqlite3.Connection,
+    clustering: Clustering,
+    *,
+    carried: Collection[str] = (),
+) -> dict[str, str]:
+    """Every judgement that stands about this clustering's persons, by person.
 
-    Only the rows there are. A person with no row is absent and not `friend`: see
-    `counts`, which is where the absence is read.
+    The rows there are, and the uncut answers about the persons in `carried` --
+    which is `unchanged`, the clusters the cut left holding exactly the faces they
+    had. Those are the same faces the reader judged, so what they said about them is
+    a judgement here and not an inheritance, and the reader is not asked a second
+    time for a column. An answer given about *this* clustering wins over a carried
+    one either way: it is their latest word about these faces.
+
+    Every other uncut answer is `priors` and is deliberately not here. An answer
+    about a different set of faces is evidence and not a judgement, which is
+    `DEFAULT`'s own shape one step along: something the reader of the table applies,
+    never a row this clustering has. A person with no row and no carry is absent and
+    not `friend`: see `counts`, which is where the absence is read.
 
     An older labels file has no table to read, and that is *no answers* rather than
     an error: the reader has not judged anybody because there was nowhere to record
@@ -431,12 +501,44 @@ def verdicts(conn: sqlite3.Connection, clustering: Clustering) -> dict[str, str]
     """
     if not judged_yet(conn):
         return {}
-    return {
-        person: given
-        for person, given in conn.execute(
-            _VERDICTS, (clustering.model, clustering.version, clustering.threshold)
+    given = {
+        person: said
+        for person, said in conn.execute(
+            _VERDICTS,
+            (
+                clustering.model,
+                clustering.version,
+                clustering.threshold,
+                clustering.cut,
+            ),
         )
     }
+    if clustering.cut == NO_CUT or not carried:
+        return given
+    return {
+        **{
+            person: said
+            for person, said in priors(conn, clustering).items()
+            if person in carried
+        },
+        **given,
+    }
+
+
+def priors(conn: sqlite3.Connection, clustering: Clustering) -> dict[str, str]:
+    """What the reader said about the same persons in the **uncut** population.
+
+    Evidence about a cut cluster rather than a judgement about it, except where
+    `unchanged` says the faces are the same set -- and there `verdicts` has it
+    already. So this is what a caller shows beside an unjudged person to say *you
+    called them a stranger when they had nine faces*, and what lets a report say
+    which of its inputs is the reader's own.
+
+    At `NO_CUT` it is the answers themselves, there being nothing behind that for
+    them to be inherited from. `harness.floor` and `harness.recluster` read that
+    population, which is why neither of them has anything to do with this.
+    """
+    return verdicts(conn, replace(clustering, cut=NO_CUT))
 
 
 # --- what the catalog holds ---------------------------------------------------
@@ -476,6 +578,37 @@ def found(conn: sqlite3.Connection, clustering: Clustering) -> dict[str, list[Fa
     ):
         held.setdefault(person, []).append(Face(sha256, idx, share))
     return held
+
+
+def unchanged(conn: sqlite3.Connection, clustering: Clustering) -> frozenset[str]:
+    """The persons this cut did not change: the same faces as with no cut at all.
+
+    A person is named by its least face, so a cut that drops one of the *others*
+    leaves the name standing over a different cluster -- and a cut is a different
+    agglomeration rather than a subset of an old one, complete linkage's merge order
+    depending on every cluster at once, so which names come through intact is a fact
+    about the catalog and not something arithmetic over the cut could predict. Hence
+    a second read of `face_person` rather than a rule.
+
+    It is the whole of what `verdicts` needs to know about the catalog, and it is
+    here rather than there because the labels file cannot answer it: a report
+    holding only a labels connection is not asking.
+
+    At `NO_CUT` every person is trivially unchanged -- there is no other population
+    behind it -- and the answers are simply the answers.
+    """
+    here = found(conn, clustering)
+    if clustering.cut == NO_CUT:
+        return frozenset(here)
+    uncut = {
+        person: {(face.sha256, face.idx) for face in faces}
+        for person, faces in found(conn, replace(clustering, cut=NO_CUT)).items()
+    }
+    return frozenset(
+        person
+        for person, faces in here.items()
+        if uncut.get(person) == {(face.sha256, face.idx) for face in faces}
+    )
 
 
 def frames(held: Mapping[str, Sequence[Face]]) -> dict[str, list[str]]:

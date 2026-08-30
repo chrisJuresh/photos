@@ -345,9 +345,17 @@ the table — a row saying friend is the reader's answer and no row is nobody's,
 could not tell them apart would report silence as a judgement. Verdicts go to the same
 `labels.sqlite3` in a `person_verdict` table of their own, **keyed on the person and the
 clustering** — `stack_member`'s discipline one layer up, because a person is named by its least
-face and re-clustering at another threshold can hand the same name to a different set of faces.
-The splits are counted at `browse.STACK_SETTING` and not at a knob, so a verdict is priced
-against the grid the reader is actually looking at.
+face and re-clustering at another threshold, or over the faces reaching another size, can hand
+the same name to a different set of faces. **The cut is in that key**, so an answer given about
+the 0.02 population cannot silently replace one given about the uncut one; a labels file written
+before it is widened on open and its rows carried forward as `NO_CUT`, the population they were
+given about. What the cut left alone still carries: `harness.people.unchanged` is the clusters
+that came through it holding exactly the faces they had, and their older answer *is* the answer
+here, so a sitting is not spent twice for a column. For every other cluster of the same name the
+older answer is a **prior** — shown on the page, counted by nothing, and read the way an
+unjudged person's `friend` is read, because an answer about a different set of faces is evidence
+and not a judgement. The splits are counted at `browse.STACK_SETTING` and not at a knob, so a
+verdict is priced against the grid the reader is actually looking at.
 
 To price the **prominence floor** from those answers — the other thing ADR 0004 left open, and
 the one it expects to lose. It prints, separately for the friends and the strangers, the
