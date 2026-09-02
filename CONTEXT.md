@@ -152,16 +152,20 @@ says it and should; everywhere the thing itself is meant, it is a fingerprint.
 _Avoid_: signature, descriptor, hash, match
 
 **Linkage**:
-How much has to match before frames are one stack. *Matches most members* — strictly more
-than half of them, so a tie is not most — is the default, settled from the reader's labels
-in `docs/adr/0003`. *Complete* is every pair inside the stack, which makes "two unrelated
-photographs never share a stack" structurally true rather than merely likely, and cannot
-express a burst holding one pair the geometry agrees nothing about. *Neighbour* asks only
-that each frame match the one before it, which is cheaper and lets a stack walk from one
-subject to another in small steps — measured and rejected, not merely feared. It is a knob
-in the Stacks panel beside **strictness**, and both offer the assignments
-`python -m photolib.membership` has written rather than every value the rule allows: a
-setting is a choice of which stored grouping to read.
+How much has to match before frames are one stack. *Neighbour* — *the chain* in prose, and
+*matches its neighbour* where the Stacks panel says it — asks only that each frame match the
+one before it, and **it is the default**, at strictness 10 since 2026-08-21. It lets a stack
+walk from one subject to another in small steps, which is why an earlier reading of the same
+labels rejected it; what changed is the precision floor those labels were read under, and the
+walk that was feared was priced on sets drawn to break it and cleared the floor anyway — see
+`docs/adr/0003`, "What the recalibration settled". *Matches most members* — strictly more than
+half of them, so a tie is not most — was the default before that date and is still offered, so
+that the change is something the reader can see rather than be told about. *Complete* is every
+pair inside the stack, which makes "two unrelated photographs never share a stack" structurally
+true rather than merely likely, and cannot express a burst holding one pair the geometry agrees
+nothing about. It is a knob in the Stacks panel beside **strictness**, and both offer the
+assignments `python -m photolib.membership` has written rather than every value the rule
+allows: a setting is a choice of which stored grouping to read.
 _Avoid_: clustering, chaining, closure
 
 **Window**:
