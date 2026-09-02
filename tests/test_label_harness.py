@@ -24,7 +24,7 @@ import pytest
 
 from harness import label
 from harness.label import STRICTNESS, Question
-from photolib import matches
+from photolib import matches, membership
 
 
 def sha_of(seed: str) -> str:
@@ -44,15 +44,30 @@ def scores(**pairs: int) -> dict[tuple[str, str], int]:
     return {(sha_of(early), sha_of(late)): points for (early, late), points in pairs.items()}
 
 
+def agreed(
+    points: dict[tuple[str, str], int], strictness: int = membership.STRICTNESS
+) -> label.Agree:
+    """Those scores as the seam the walk asks through: whether two frames agree.
+
+    `label.agreement` and never a comparison spelled out here -- the predicate is
+    the grid's, and a test written against a copy of it would assert about the copy.
+    The default is the *grid's* strictness and not this file's, which is what `link`
+    used to fall back to; the two have been the same number and are not now. Every
+    score below is plainly over both lines or plainly under them, so which one is in
+    force only matters where a test names it.
+    """
+    return label.agreement(points, strictness)
+
+
 # --- forming the stack the reader is shown -----------------------------------
 
 
 def test_frames_that_agree_are_one_stack() -> None:
-    assert label.link([A, B], scores(ab=HIGH)) == [[A, B]]
+    assert label.link([A, B], agreed(scores(ab=HIGH))) == [[A, B]]
 
 
 def test_frames_that_agree_on_nothing_are_two_stacks() -> None:
-    assert label.link([A, B], scores(ab=LOW)) == [[A], [B]]
+    assert label.link([A, B], agreed(scores(ab=LOW))) == [[A], [B]]
 
 
 def test_a_pair_at_the_strictness_holds() -> None:
@@ -60,8 +75,8 @@ def test_a_pair_at_the_strictness_holds() -> None:
 
     Named rather than left to `link`'s default, which is the *grid's* strictness and
     not the harness's -- the two have been the same number and are not now."""
-    assert label.link([A, B], scores(ab=STRICTNESS), STRICTNESS) == [[A, B]]
-    assert label.link([A, B], scores(ab=STRICTNESS - 1), STRICTNESS) == [[A], [B]]
+    assert label.link([A, B], agreed(scores(ab=STRICTNESS), STRICTNESS)) == [[A, B]]
+    assert label.link([A, B], agreed(scores(ab=STRICTNESS - 1), STRICTNESS)) == [[A], [B]]
 
 
 def test_linkage_that_wants_more_than_a_neighbour_starts_a_new_stack() -> None:
@@ -73,14 +88,17 @@ def test_linkage_that_wants_more_than_a_neighbour_starts_a_new_stack() -> None:
     rule is current."""
     points = scores(ab=HIGH, bc=HIGH, ac=LOW)
 
-    assert label.link([A, B, C], points, joins=label.complete) == [[A, B], [C]]
-    assert label.link([A, B, C], points, joins=label.LINKAGE["majority"]) == [[A, B], [C]]
+    assert label.link([A, B, C], agreed(points), joins=label.complete) == [[A, B], [C]]
+    assert label.link([A, B, C], agreed(points), joins=label.LINKAGE["majority"]) == [
+        [A, B],
+        [C],
+    ]
 
 
 def test_a_pair_with_no_row_is_read_as_agreeing_on_nothing() -> None:
     """The screen rejected it or a substrate was missing. Either way the harness
     has no evidence the two frames are one picture, and draws them apart."""
-    assert label.link([A, B], {}) == [[A], [B]]
+    assert label.link([A, B], agreed({})) == [[A], [B]]
 
 
 def test_matches_most_members_lets_in_a_frame_complete_linkage_keeps_out() -> None:
@@ -88,9 +106,11 @@ def test_matches_most_members_lets_in_a_frame_complete_linkage_keeps_out() -> No
     frame agreeing with half a stack does not join: a tie is not most."""
     points = scores(ab=HIGH, bc=HIGH, ac=LOW)
 
-    assert label.majority([A, B], C, points, STRICTNESS) is False  # one of two
-    assert label.majority([A, B, C], D, scores(ad=HIGH, bd=HIGH, cd=LOW), STRICTNESS) is True
-    assert label.neighbour([A, B], C, points, STRICTNESS) is True  # only B decides
+    joined = scores(ad=HIGH, bd=HIGH, cd=LOW)
+
+    assert label.majority([A, B], C, agreed(points, STRICTNESS)) is False  # one of two
+    assert label.majority([A, B, C], D, agreed(joined, STRICTNESS)) is True
+    assert label.neighbour([A, B], C, agreed(points, STRICTNESS)) is True  # only B decides
 
 
 # --- which sets are worth the reader's evening -------------------------------
@@ -245,7 +265,7 @@ def test_the_sets_are_drawn_under_the_rule_the_labels_settled() -> None:
     disagrees with."""
     points = scores(ab=HIGH, ac=HIGH, bc=HIGH, ad=LOW, bd=HIGH, cd=HIGH)
 
-    assert label.link([A, B, C, D], points, joins=label.complete) == [[A, B, C], [D]]
+    assert label.link([A, B, C, D], agreed(points), joins=label.complete) == [[A, B, C], [D]]
     assert one([A, B, C, D], points).members == (A, B, C, D)
 
 
@@ -276,7 +296,7 @@ def test_a_chain_that_breaks_inside_the_stack_and_walks_on_still_counts() -> Non
     asked = one([A, B, C, D, E], points)
 
     assert asked.members == (A, B, C, D)
-    assert label.link([A, B, C, D, E], points, joins=label.neighbour) == [
+    assert label.link([A, B, C, D, E], agreed(points), joins=label.neighbour) == [
         [A, B, C],
         [D, E],
     ]
@@ -301,7 +321,7 @@ def test_a_chain_reaching_the_frames_before_the_stack_counts_too() -> None:
     points = scores(ab=HIGH, ac=HIGH, bc=HIGH, ad=LOW, bd=LOW, cd=HIGH, de=HIGH)
     asked = ask([A, B, C, D, E], points)
 
-    assert label.link([A, B, C, D, E], points, joins=label.neighbour) == [
+    assert label.link([A, B, C, D, E], agreed(points), joins=label.neighbour) == [
         [A, B, C, D, E]
     ]
     assert [question.members for question in asked] == [(A, B, C), (D, E)]

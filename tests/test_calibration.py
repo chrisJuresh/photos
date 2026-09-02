@@ -131,33 +131,52 @@ def test_a_frame_beyond_the_run_is_evidence_about_the_fence_and_not_the_threshol
 # --- the linkage rules --------------------------------------------------------
 
 
-def test_complete_linkage_wants_every_member_to_agree() -> None:
-    points = scores(ab=HIGH, ac=LOW, bc=HIGH)
+def agreed(points: dict[tuple[str, str], int]) -> calibrate.Agree:
+    """Those scores as the seam a rule asks through: whether two frames agree.
 
-    assert calibrate.LINKAGE["complete"]([A, B], C, points, STRICT) is False
-    assert calibrate.LINKAGE["complete"]([B], C, points, STRICT) is True
+    `calibrate.agreement` and never a comparison written here, which is the same
+    reason the rules themselves are the harness's rather than this report's: a rule
+    priced against a copy of the predicate would be priced against something the
+    grid does not use.
+    """
+    return calibrate.agreement(points, STRICT)
+
+
+def test_complete_linkage_wants_every_member_to_agree() -> None:
+    agree = agreed(scores(ab=HIGH, ac=LOW, bc=HIGH))
+
+    assert calibrate.LINKAGE["complete"]([A, B], C, agree) is False
+    assert calibrate.LINKAGE["complete"]([B], C, agree) is True
 
 
 def test_neighbour_linkage_wants_only_the_frame_before() -> None:
-    points = scores(ab=HIGH, ac=LOW, bc=HIGH)
+    agree = agreed(scores(ab=HIGH, ac=LOW, bc=HIGH))
 
-    assert calibrate.LINKAGE["neighbour"]([A, B], C, points, STRICT) is True
+    assert calibrate.LINKAGE["neighbour"]([A, B], C, agree) is True
 
 
 def test_majority_linkage_wants_most_of_the_stack() -> None:
     """ADR 0003's open question: whether complete linkage needs softening to
     "matches most members"."""
-    points = scores(ad=HIGH, bd=HIGH, cd=LOW)
+    agree = agreed(scores(ad=HIGH, bd=HIGH, cd=LOW))
 
-    assert calibrate.LINKAGE["majority"]([A, B, C], D, points, STRICT) is True
-    assert calibrate.LINKAGE["majority"]([A], D, {}, STRICT) is False
+    assert calibrate.LINKAGE["majority"]([A, B, C], D, agree) is True
+    assert calibrate.LINKAGE["majority"]([A], D, agreed({})) is False
 
 
 # --- scoring a setting against the labels -------------------------------------
 
 
 def replay(cases, points, strictness, linkage="complete"):
-    return calibrate.replay(cases, points, strictness, calibrate.LINKAGE[linkage])
+    """One setting scored, named the way `sweep` names one: a strictness and a rule.
+
+    `calibrate.replay` takes the predicate rather than the strictness, because
+    building one is `sweep`'s job and not the scoring's. That is one line to spell
+    out per call and it is spelled out here instead.
+    """
+    return calibrate.replay(
+        cases, points, calibrate.agreement(points, strictness), calibrate.LINKAGE[linkage]
+    )
 
 
 def test_a_setting_that_draws_what_the_reader_drew_is_right_about_everything() -> None:
@@ -672,7 +691,7 @@ def test_the_pick_comes_from_the_choosing_slice_and_the_checking_slice_only_chec
 
     printed = capsys.readouterr().out
     assert chosen == calibrate.Setting(STRICT, "complete")
-    assert calibrate.replay(choosing, points, STRICT, calibrate.LINKAGE["complete"]).precision == 1.0
+    assert replay(choosing, points, STRICT).precision == 1.0
     assert "held-back quarter" in printed
     assert "fails its own check" in printed
 

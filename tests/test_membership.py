@@ -13,7 +13,9 @@ the_labels_were_replayed_against`.
 
 from __future__ import annotations
 
+import random
 import sqlite3
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -26,6 +28,7 @@ from photolib.membership import (
     MembershipRefused,
     Setting,
     Work,
+    agreement,
     link,
     place,
     place_all,
@@ -441,6 +444,7 @@ def test_the_rule_is_the_one_the_labels_were_replayed_against(corpus: Stacks) ->
     """
     assert label.LINKAGE is membership.LINKAGE
     assert label.link is membership.link
+    assert label.agreement is membership.agreement
 
 
 def test_the_recorded_setting_is_the_one_the_labels_settled() -> None:
@@ -489,7 +493,155 @@ def test_a_greedy_walk_can_split_a_stack_the_rule_would_have_held(corpus: Stacks
     every member of the stack it was placed before."""
     points = {("a", "b"): HIGH, ("b", "c"): HIGH, ("a", "c"): LOW}
 
-    assert link(["a", "b", "c"], points, 20, membership.majority) == [["a", "b"], ["c"]]
+    assert link(["a", "b", "c"], agreement(points, 20), membership.majority) == [
+        ["a", "b"],
+        ["c"],
+    ]
+
+
+# --- the seam --------------------------------------------------------------------
+
+# The three linkage rules and the walk exactly as they stood before the pair
+# predicate was lifted out of them: each rule spelling out the Match against
+# strictness for itself. This is the only copy of that code left anywhere and it
+# lives here on purpose -- the prefactor's whole claim is that the grid did not
+# move, and a claim like that has to be asserted against what was actually replaced
+# rather than against a paraphrase of it.
+#
+# **It is dead code by design and nothing keeps it in step with `link`.** That is
+# the point: it is a photograph of the old rule and not a second live one. It is
+# also spent the moment the evidence moves -- the ticket that prices a rule over the
+# fingerprint is where this block and the test under it go, because an equivalence
+# to a rule nothing ships is a test that can only fail for the wrong reason.
+
+
+def _was_complete(
+    holding: Sequence[str], frame: str, points: dict[tuple[str, str], int], strictness: int
+) -> bool:
+    return all(membership.match(points, member, frame) >= strictness for member in holding)
+
+
+def _was_majority(
+    holding: Sequence[str], frame: str, points: dict[tuple[str, str], int], strictness: int
+) -> bool:
+    agreed = sum(
+        1 for member in holding if membership.match(points, member, frame) >= strictness
+    )
+    return agreed * 2 > len(holding)
+
+
+def _was_neighbour(
+    holding: Sequence[str], frame: str, points: dict[tuple[str, str], int], strictness: int
+) -> bool:
+    return membership.match(points, holding[-1], frame) >= strictness
+
+
+WAS = {"complete": _was_complete, "majority": _was_majority, "neighbour": _was_neighbour}
+
+
+def _was_link(
+    run: Sequence[str], points: dict[tuple[str, str], int], strictness: int, joins
+) -> list[list[str]]:
+    stacks: list[list[str]] = []
+    holding: list[str] = []
+    for frame in run:
+        if holding and joins(holding, frame, points, strictness):
+            holding.append(frame)
+        else:
+            if holding:
+                stacks.append(holding)
+            holding = [frame]
+    if holding:
+        stacks.append(holding)
+    return stacks
+
+
+def awkward_matches(seed: int, run: Sequence[str]) -> dict[tuple[str, str], int]:
+    """One run's Match rows, drawn deterministically and deliberately awkwardly.
+
+    Three of every ten pairs carry no row at all and half the rows that do exist are
+    stored the other way round, which are exactly the two readings `match` is careful
+    about -- absent evidence is no agreement, and either order, because a run's order
+    is the enumeration's. Both had to survive the move into the predicate, and a tidy
+    corpus of forward rows would not notice either of them going missing.
+
+    The counts straddle every strictness the equivalence is checked at, so the rules
+    disagree with one another over this corpus rather than all returning one cut.
+    """
+    draw = random.Random(seed)
+    rows: dict[tuple[str, str], int] = {}
+    for index, early in enumerate(run):
+        for late in run[index + 1 :]:
+            if draw.random() < 0.3:
+                continue
+            pair = (late, early) if draw.random() < 0.5 else (early, late)
+            rows[pair] = draw.randrange(0, 41)
+    return rows
+
+
+def test_the_predicate_cuts_every_run_where_the_rule_it_replaced_did() -> None:
+    """The prefactor's acceptance test: the same run and the same stored Matches,
+    through the seam and through what the seam replaced, cut in the same places.
+
+    Every rule at every strictness worth asking about, over enough corpora for the
+    rules to disagree with one another -- an equivalence asserted on one tidy burst
+    would hold for a predicate that was wrong everywhere else.
+    """
+    run = [sha_of(seed) for seed in "abcdefghijkl"]
+    drawn: set[tuple[int, ...]] = set()
+    for seed in range(24):
+        points = awkward_matches(seed, run)
+        for strictness in (0, 4, membership.STRICTNESS, 20, 41):
+            for linkage, joins in membership.LINKAGE.items():
+                cut = link(run, agreement(points, strictness), joins)
+                assert cut == _was_link(run, points, strictness, WAS[linkage]), (
+                    seed,
+                    strictness,
+                    linkage,
+                )
+                drawn.add(tuple(len(stack) for stack in cut))
+
+    # Not a vacuous agreement. Two rules that never stack anything agree perfectly,
+    # so the corpus has to have exercised both ends and the middle: the whole run in
+    # one stack, the run in twelve stacks of one, and enough distinct shapes between
+    # them that the rules were plainly disagreeing with each other rather than all
+    # returning the same cut. 20 is a floor well under the 120 this corpus draws --
+    # what it rules out is a corpus collapsed to a handful of shapes, not a count
+    # worth tuning.
+    assert (len(run),) in drawn
+    assert (1,) * len(run) in drawn
+    assert len(drawn) > 20
+
+
+def test_the_predicate_reads_a_pair_in_either_order_and_an_absent_one_as_nothing() -> None:
+    """`match`'s two readings, asserted of the predicate and not only of the function
+    under it: those are the properties the linkage rules used to hold themselves and
+    now delegate, and a rule that lost one would quietly stop stacking half the pairs
+    in the table."""
+    early, late = sha_of("a"), sha_of("b")
+    agrees = agreement({(late, early): HIGH}, 20)
+
+    assert agrees(early, late) is True
+    assert agrees(late, early) is True
+    assert agreement({}, 20)(early, late) is False
+
+
+def test_a_rule_asks_the_predicate_and_never_the_table() -> None:
+    """The property the seam exists for: the rules take agreement as a value and have
+    no way to reach a Match, so a predicate built from other evidence is a different
+    rule rather than a second walk."""
+    asked: list[tuple[str, str]] = []
+
+    def agrees(early: str, late: str) -> bool:
+        asked.append((early, late))
+        return "c" not in (early, late)
+
+    assert link(["a", "b", "c", "d"], agrees, membership.complete) == [
+        ["a", "b"],
+        ["c"],
+        ["d"],
+    ]
+    assert asked == [("a", "b"), ("a", "c"), ("c", "d")]
 
 
 def test_the_linkage_vocabulary_is_the_schema_s_and_not_a_convention(corpus: Stacks) -> None:
