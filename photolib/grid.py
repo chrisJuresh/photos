@@ -52,13 +52,14 @@ small:
 page carries covers rather than frames and each one says how many it stands for.
 The grouping is `photolib.membership`'s, stored, so a page is a slice of one read
 of it — the same path for all ten sorts, and a filter can only shrink a stack.
-Which frame a stack is drawn as is `browse.cover` — the sharpest of the
-middle-exposure third — resolved from one read over the members of the stacks on
-the page and never materialised, because that is a question about the members the
-view left rather than about the stack.
+Which frame a stack is drawn as is `browse.cover` — the member with the most
+people in it, and the sharpest of the middle-exposure third among those tied at
+the top — resolved from one read over the members of the stacks on the page and
+never materialised, because that is a question about the members the view left
+rather than about the stack.
 
 `strictness=` and `linkage=` name *which* stored assignment to read, and default
-to the one ADR 0003's labels settled. They are the two of `stack_member`'s five key
+to the one ADR 0003's labels settled. They are the two of `stack_member`'s six key
 columns a reader may move, and a request may only name an assignment somebody ran
 the pass at — `GridServer.settings` is that list, and it is the same one the
 Stacks panel was offered, so a knob the panel showed is never a 400 and a setting
@@ -310,28 +311,82 @@ def build_assignment(conn: sqlite3.Connection, query: browse.Query) -> tuple:
     )
 
 
-def _scalars(conn: sqlite3.Connection, ids: list[int]) -> dict:
-    """`(mean luminance, sharpness)` per photo — what the cover rule ranks on.
+# How many persons were read in a frame, at the clustering the assignment names and
+# above the prominence floor. A correlated subquery rather than a join, so that a
+# frame with no face still returns a row and counts zero, and so that the ids
+# already bound below stay the whole of what this read is scoped by.
+#
+# **The clustering is the setting's own**, split back out of the people identity
+# `stack_member` is keyed under, so the count the cover ranks on is read from the
+# same persons the veto grouped with. Pointing the grid at another people population
+# moves both together, which a second constant here could not promise.
+#
+# Every column it selects on is a key prefix: `face`'s (model, version, sha256) and
+# `face_person`'s (model, version, threshold, cut, sha256), both supplied.
+_PEOPLE_COUNT = """(
+  SELECT count(DISTINCT fp.person) FROM face_person AS fp
+  JOIN face AS fa
+    ON fa.model = fp.model AND fa.version = fp.version
+   AND fa.sha256 = fp.sha256 AND fa.idx = fp.idx
+  WHERE fp.model = ? AND fp.version = ? AND fp.threshold = ? AND fp.cut = ?
+    AND fp.sha256 = f.sha256 AND fa.share >= ?
+)"""
 
-    Both live inside `file.quality` as JSON, and extracting one costs ~50 ms
-    over the whole tile set. This is the read that keeps that off the page: it
-    is asked only about the members of the stacks being served, and never about
+
+def _people_sql(setting: dict) -> tuple[str, list]:
+    """The cover's people count, and what to bind for it.
+
+    Zero and no subquery where the assignment says no people rule was applied: the
+    cover is then exactly the rule it was before ADR 0004, which is the population
+    that setting names.
+
+    **The strangers are deliberately not subtracted here**, where
+    `photolib.membership.peopled` does subtract them. They are the reader's own
+    answers and they live in `labels.sqlite3`, which the website does not open —
+    it reads the catalog and the triage state and nothing else. What that costs is
+    bounded: this count only ranks the members of a stack the veto has already
+    decided, so a stranger can tip which frame is drawn and can never change which
+    frames are in it.
+    """
+    if setting["people"] == browse.NO_PEOPLE:
+        return "0", []
+    model, version, threshold, cut = str(setting["people"]).rsplit("/", 3)
+    return _PEOPLE_COUNT, [
+        model,
+        version,
+        float(threshold),
+        float(cut),
+        browse.PEOPLE_FLOOR,
+    ]
+
+
+def _scalars(conn: sqlite3.Connection, ids: list[int], setting: dict) -> dict:
+    """`(mean luminance, sharpness, people)` per photo — what the cover ranks on.
+
+    The first two live inside `file.quality` as JSON, and extracting one costs
+    ~50 ms over the whole tile set. This is the read that keeps that off the page:
+    it is asked only about the members of the stacks being served, and never about
     the library. The ids come from `photo`, not from a request.
+
+    The third is ADR 0004's, and it rides in the same query rather than a second
+    one: the cover rule takes all three per frame, and a page that read the people
+    separately would be two round trips for one ranking.
     """
     if not ids:
         return {}
+    counted, bound = _people_sql(setting)
     sql = (
-        f"SELECT p.id, {browse.LUMINANCE}, {browse.SHARPNESS} "
+        f"SELECT p.id, {browse.LUMINANCE}, {browse.SHARPNESS}, {counted} "
         "FROM photo AS p JOIN file AS f ON f.sha256 = p.rep_sha256 "
         f"WHERE p.id IN ({', '.join('?' * len(ids))})"
     )
     return {
-        row[0]: (browse.mean_luminance(row[1]), row[2])
-        for row in conn.execute(sql, ids)
+        row[0]: (browse.mean_luminance(row[1]), row[2], row[3])
+        for row in conn.execute(sql, [*bound, *ids])
     }
 
 
-def _covers(conn: sqlite3.Connection, groups: list) -> list[int]:
+def _covers(conn: sqlite3.Connection, groups: list, setting: dict) -> list[int]:
     """Which member each stack is drawn as, in one read for the whole page.
 
     A stack of one is not read for — there is nothing to choose between, and
@@ -339,14 +394,20 @@ def _covers(conn: sqlite3.Connection, groups: list) -> list[int]:
     like any other. An unread member arrives as a member with no readings, which
     is a state the rule already answers: it draws the first, and the first of
     one is it. So the size of a stack is not a case anything here has to know
-    about.
+    about — and a member with no people row arrives as nobody, which is the same
+    kind of answer one step along.
+
+    `setting` is the assignment the view groups on, because the people half of the
+    rule is read at the clustering that assignment was keyed under.
     """
     scalars = _scalars(
-        conn, [photo_id for group in groups if len(group) > 1 for photo_id in group]
+        conn,
+        [photo_id for group in groups if len(group) > 1 for photo_id in group],
+        setting,
     )
     return [
         browse.cover(
-            [(photo_id, *scalars.get(photo_id, (None, None))) for photo_id in group]
+            [(photo_id, *scalars.get(photo_id, (None, None, 0))) for photo_id in group]
         )
         for group in groups
     ]
@@ -436,7 +497,7 @@ def _assigned(
                 break
             start += 1
     wanted = stacks[start:start + limit]
-    covers = _covers(conn, [stack.members for stack in wanted])
+    covers = _covers(conn, [stack.members for stack in wanted], query.setting)
     # Every member and not just the drawn one: the covers alone would leave the
     # overlay a second read behind the click. The same ids `_covers` has just
     # read the quality of, so this adds a row width rather than a query shape.

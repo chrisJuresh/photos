@@ -43,16 +43,24 @@ count equals what selecting it actually yields. Keep both green.
 
 `stack=on` draws the frames verified to be the same photograph as one tile. **The
 grouping is read, not computed**: `photolib.membership` wrote one row per tile at
-strictness 10 with *the chain* behind the 3600s fence, and `browse.py` joins
-`stack_member` on those five key columns — [ADR 0003](adr/0003-stack-on-verified-match.md)
+strictness 10 with *the chain* behind the 3600s fence, vetoed by who is in the frames, and
+`browse.py` joins `stack_member` on those six key columns —
+[ADR 0003](adr/0003-stack-on-verified-match.md)
 is the decision and [ADR 0001](adr/0001-stack-on-capture-time-not-phash.md) the
 measurements it stands on. There is no window to send: what used to be a slider is the
 fence the Match rows were computed behind, and a walk at any other value would be reading
 pairs nothing ever checked. `browse.STACK_SETTING` names the assignment the grid reads by
 default and `tests/test_membership.py` asserts it is the one the pass writes.
 
+**The sixth column is the people the veto read** — `face_person`'s whole key as one
+value, model, version, threshold and cut — and it is not a knob either, for `ceiling`'s
+reason turned the other way up: [ADR 0004](adr/0004-people-veto-a-stack.md) makes the veto
+part of what a stack *is* rather than a dial on how much of one. The walk with no veto is
+still a population, stamped `none` by migration 014, so switching between them is pointing
+`browse.DEFAULT_PEOPLE` at the other value and never a third control in the panel.
+
 **`strictness=` and `linkage=` name another one**, and are the whole of what the Stacks
-panel's two knobs send. They cost nothing extra — a setting is five bound values in the
+panel's two knobs send. They cost nothing extra — a setting is six bound values in the
 same join, so a second population is a different key into the same index and never a
 second query shape — and they are validated against `browse.settings`, one
 `SELECT DISTINCT` over `stack_member`'s key read once per process beside the facets. That
@@ -147,14 +155,31 @@ slice of the assignment, which is what returns a stack whole on one page for all
 and what makes an overshoot past `limit` unnecessary: a page carries exactly the covers it
 asked for.
 
-The **cover** — the frame a closed stack is drawn as — is **the sharpest frame of the
-middle-exposure third**. Rank the members by mean luminance, take the middle third
-rounded up to at least one, and take `max(sharpness)` among those: the library is
-mostly three-frame bracketing, and the middle exposure is the one that was aimed. The
+The **cover** — the frame a closed stack is drawn as — is **the member with the most
+people in it, and the sharpest frame of the middle-exposure third among those tied at the
+top**. Take the members holding the most people; rank those by mean luminance, take the
+middle third rounded up to at least one, and take `max(sharpness)` among them: the library
+is mostly three-frame bracketing, and the middle exposure is the one that was aimed. The
 band widens to every member sharing its edge exposures, which is what makes a
 constant-exposure burst degrade to plain sharpest instead of picking an arbitrary frame
 out of a tie. A member whose quality pass failed carries neither reading, cannot be
 ranked, and so is never drawn over one that can be — only when it is the whole stack.
+
+**The people clause is additive**, which is why every measurement above still stands: a
+bracket's frames hold the same people, so the count is constant, nothing is filtered out
+and the exposure rule decides alone. It bites where ADR 0004 says a stack is admissible at
+all — the member that contains everybody is the one worth drawing, so a closed tile tells
+the reader who is inside it. The count is `count(DISTINCT person)` over the faces reaching
+`browse.PEOPLE_FLOOR`, at the clustering the assignment's own key names, and it is `0` and
+no subquery at all where that key says no veto was applied. A frame the people pass never
+reached counts as nobody and can still win a stack where nobody else has a count either.
+
+**The strangers are deliberately not subtracted from that count**, where the pass does
+subtract them: they are the reader's answers and they live in `labels.sqlite3`, which the
+website does not open — it reads the catalog and the triage state and nothing else. The
+cost is bounded by what the count is for: it ranks the members of a stack the veto has
+already decided, so a stranger can tip *which* frame is drawn and never which frames are
+in it.
 
 Mean luminance is not stored. It is the centre of mass of the 16-bin
 `luminance_histogram` Phase 2b wrote, computed in Python: Phase 2b's own
@@ -177,6 +202,16 @@ feature does not make — fetching the rows by id, and SQLite parsing `file.qual
 per row. Stacks of one are not read for at all, having nothing to choose between, and
 computing the mean in SQL with `json_each` measured slower than shipping the histogram
 and parsing it in Python. The lever is still the page size.
+
+**The people count rides in that same read** rather than a second one, as a correlated
+subquery per member — so the shape of the bill is unchanged and its size is one indexed
+lookup per frame on top of the JSON parse. Every column it selects on is a key prefix:
+`face`'s `(model, version, sha256)` and `face_person`'s
+`(model, version, threshold, cut, sha256)`, both supplied in full, so it is a
+`SEARCH … USING PRIMARY KEY` per member and never a scan. **The four figures above are
+owed a re-measurement**, which needs the people population in `stack_member` and therefore
+a `python -m photolib.membership` run against the real catalog; nothing here has been
+re-timed and the numbers are the ones the exposure rule alone returned.
 
 The fence the assignment was computed behind measures gaps with `unixepoch`, which is
 exact for the whole-second timestamps `capture_time` writes. Its two expressions live in

@@ -1,8 +1,9 @@
 # Stacking is vetoed by who is in the frame
 
-**Status: accepted 2026-08-12. The rule is not implemented; the evidence it reads is** — see
-"What the pass records" and "Who the reader says they photographed" below, which landed
-2026-08-22. Extends
+**Status: accepted 2026-08-12, implemented 2026-09-02** — the rule, the key column and the
+cover are in `photolib.membership` and `photolib.browse`; see "What landed, and what it left
+standing" below. The evidence it reads landed first: "What the pass records" and "Who the
+reader says they photographed", 2026-08-22. Extends
 [ADR 0003](0003-stack-on-verified-match.md) and supersedes nothing in it: the Match is still
 the evidence a stack is built on, and this document is a rule that sits on top of it. 0003's
 own objective changed at the same time — see "The objective changed" there — and the two
@@ -541,6 +542,70 @@ guard on how much of a run a person has to appear in before their absence may ve
 report does not choose between them; it establishes that the person threshold is not one of
 them.
 
+## What landed, and what it left standing
+
+[#56](https://github.com/chrisJuresh/photos/issues/56) is the rule arriving, and it arrived
+**as written** — the guard the section above says it needs was not invented on the way in.
+That is deliberate and it is the whole shape of this landing: the veto is a keyed population
+beside the one the grid already had, so what the sweep predicted is now something the reader
+can look at rather than a table in this document.
+
+**`photolib.membership.regroup(members, who)` is the rule and the whole of it.** One pure
+function from a Match-proposed stack and a mapping of frames to people, to that stack
+partitioned. Nesting, the greedy split, the capture-order tie-break and the nobody clause
+all live inside it; there is no image, no database and no model anywhere in it, so the
+worked example above is a test case verbatim and so is every clause under "The rule". It is
+applied after the walk and before anything is stored, which keeps
+`migrations/011_stack_member.sql`'s argument whole: the grid reads the answer and no query
+re-derives it.
+
+**A frame's people are three states and not two.** A set of person names is what was read
+there; `None` is the body detector saying nobody is in the frame, which is the nobody
+clause's subject; and a frame the people pass never examined is **absent from the mapping**
+and exempt from both halves. That third state is what makes an incomplete people pass
+degrade to the grid without the rule, frame by frame, rather than to a split — and the pass
+counts those frames, because a grid that quietly stopped vetoing is the failure that would
+otherwise be silent. The empty set is somebody with no readable face and nests into
+anything, which is the distinction the two detectors exist for.
+
+**The people identity is a column of `stack_member`'s key** — migration 014 — holding
+`face_person`'s whole key as one value, `'<model>/<version>/<threshold>/<cut>'`. All four,
+because all four decide which persons a frame has; three would name three of the four things
+that decided the answer, which is what #55's blocker on that ticket said and what migration
+013 established. **The rows already there are stamped `'none'`**, a real value saying *no
+people rule applied*, so the grid the reader had before this is still in the table and still
+drawable, and `python -m photolib.membership --no-people` writes more of it. `--no-people`
+is a flag where `--ceiling` is not, and the difference is the reason: a fence cannot be
+moved without reading pairs nothing checked, and a rule can simply be not applied.
+
+**The floor and the strangers are read when the pass runs and are not in that key.** The
+floor can be moved by re-reading `face.share`, which is what the share was stored for; a
+verdict is the reader's answer rather than a population, and one more of them is not a
+different clustering. What that costs is stated where it is paid: the pass places a frame
+once per key, so re-reading the rule after an answer moved is a `DELETE` of the population
+and a re-run, and the pass prints that line the way it already prints one for a hole in the
+Match rows. Naming them in the key instead would make every answer a fifth population of a
+table that would then never be re-read at all.
+
+**The strangers are the one thing `photolib` reads out of `labels.sqlite3`** — one column of
+one table, read-only, and tolerant of the file not being there. An absent labels file, a
+file written before the people mode existed, and a reader who has answered nothing are all
+*no strangers*, which is the grid this document says the rule produces on its own. Only the
+verdicts given about the clustering in hand are read: an answer about another population is
+evidence and not a judgement, so the carry-across `harness.people.unchanged` performs for
+the harness is deliberately not performed here, and the pass reports the count so that a
+reader whose answers are all about another cut sees zero rather than assuming otherwise.
+
+**The pass reports what the veto did**, which is "How it will be judged" made operational:
+how many of the walk's stacks it split, how many frames left the stack they were proposed
+in, and the name of every split stack. The thirteen-frame set is checkable against that list
+rather than by browsing.
+
+**What the sweep predicted is unchanged by any of this**, and is the number to read the
+first run against: 94 of 3,984 multi-frame stacks split, 53 of them with every frame holding
+somebody, and the reader's own thirteen-frame run among the 53. If the first run says
+something else, the clustering or the floor moved and not the rule.
+
 ## The cover, and the surprise it introduces
 
 **Most people first, then the existing rule among the frames tied at the top** — the sharpest
@@ -553,6 +618,24 @@ the view. The new consequence, recorded here before it surprises anybody: **narr
 can now change *who* the cover shows**, and not only how it is exposed. A filter that hides the
 `{A,B,C,D}` frame leaves `{A,B,C}` as the most-people member present, and the stack is drawn
 with `D` missing while still holding every frame it held.
+
+**It is additive, and the tests written before it are what prove that.** `browse.cover`
+takes `(id, luminance, sharpness, people)` and filters to the members holding the most
+people before the exposure rule runs at all. A bracket's frames hold the same people, so the
+count is constant, nothing is filtered out and the rule is the one it was — every assertion
+made about the exposure rule still holds with the count held constant, which is why none of
+them was rewritten. A stack no frame of which holds anybody is the same case by the same
+arithmetic.
+
+**The count the cover ranks on is not quite the set the veto read**, and the difference is
+the strangers. It is read from the people tables at the clustering the assignment's own key
+names and above the same floor, but the reader's stranger verdicts live in `labels.sqlite3`
+and the website does not open that file — it reads the catalog and the triage state and
+nothing else. The cost is bounded by what the count is for: it ranks the members of a stack
+the veto has already decided, so a stranger can tip *which* frame is drawn and never which
+frames are in it. Closing it would mean the grid opening a third database in a request
+handler, or storing a count the floor exists to keep read-time, and neither is worth a
+tie-break.
 
 ## Accepted failures
 

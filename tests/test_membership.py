@@ -22,9 +22,10 @@ from pathlib import Path
 import pytest
 
 from harness import label
-from photolib import browse, candidates, fingerprints, matches, membership
+from photolib import browse, candidates, fingerprints, matches, membership, people
 from photolib.config import Config
 from photolib.membership import (
+    NO_PEOPLE,
     MembershipRefused,
     Setting,
     Work,
@@ -33,6 +34,7 @@ from photolib.membership import (
     place,
     place_all,
     placed,
+    regroup,
     worklist,
 )
 
@@ -106,16 +108,60 @@ class Stacks:
         )
         self.conn.commit()
 
-    def plan(self, setting: Setting = SETTING) -> tuple[Work, dict, set[str]]:
-        return worklist(self.conn, setting)
+    def examined(self, sha256: str, *, body: float = 0.0, who: Sequence[str] = ()) -> None:
+        """What the people pass found in one frame: a body, and some persons.
+
+        `body` is the largest body's share of the frame's height and `who` is the
+        persons whose faces were read there, each given a face of its own well above
+        the floor. A frame with neither is the pass having looked and found nobody,
+        which is a row and not an absence -- `frame_body` exists to keep those two
+        apart, and the veto reads them differently.
+        """
+        self.conn.execute(
+            "INSERT OR REPLACE INTO frame_body (model, version, sha256, bodies, share)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (people.MODEL, people.VERSION, sha256, 1 if body else 0, body),
+        )
+        for idx, person in enumerate(who):
+            self.conn.execute(
+                "INSERT OR REPLACE INTO face (model, version, sha256, idx, share, vector)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (people.MODEL, people.VERSION, sha256, idx, people.FLOOR + 0.1, b""),
+            )
+            self.conn.execute(
+                "INSERT OR REPLACE INTO face_person"
+                " (model, version, threshold, cut, sha256, idx, person)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    people.MODEL,
+                    people.VERSION,
+                    people.THRESHOLD,
+                    people.CUT,
+                    sha256,
+                    idx,
+                    person,
+                ),
+            )
+        self.conn.commit()
+
+    def plan(
+        self, setting: Setting = SETTING, excluded: Sequence[str] = ()
+    ) -> tuple[Work, dict, set[str], dict | None]:
+        return worklist(self.conn, setting, excluded)
 
     def work(self, setting: Setting = SETTING) -> Work:
         return self.plan(setting)[0]
 
-    def run(self, setting: Setting = SETTING, *, limit: int | None = None) -> dict:
-        work, points, videos = self.plan(setting)
+    def run(
+        self,
+        setting: Setting = SETTING,
+        *,
+        limit: int | None = None,
+        excluded: Sequence[str] = (),
+    ) -> dict:
+        work, points, videos, who = self.plan(setting, excluded)
         todo = work.todo if limit is None else work.todo[:limit]
-        return place_all(self.conn, todo, videos, points, setting)
+        return place_all(self.conn, todo, videos, points, setting, who)
 
     def rows(self) -> list[tuple[str, str]]:
         return self.conn.execute(
@@ -404,8 +450,8 @@ def test_progress_is_reported_as_the_pass_runs(corpus: Stacks, capsys) -> None:
     and not about how long a test is willing to sit still."""
     burst(corpus, "12")
     corpus.add("3", 7200)
-    work, points, videos = corpus.plan()
-    place_all(corpus.conn, work.todo, videos, points, SETTING, progress_seconds=0)
+    work, points, videos, who = corpus.plan()
+    place_all(corpus.conn, work.todo, videos, points, SETTING, who, progress_seconds=0)
 
     assert "place            2/3" in capsys.readouterr().out
 
@@ -432,6 +478,209 @@ def test_a_setting_that_has_never_run_owes_every_tile(corpus: Stacks) -> None:
     corpus.run(SETTING)
 
     assert corpus.work(Setting(strictness=25, linkage="majority")).todo == [[a, b]]
+
+
+# --- the veto, over a catalog ----------------------------------------------------
+
+
+def test_the_veto_splits_a_stack_the_match_proposed(corpus: Stacks) -> None:
+    """ADR 0003's worst failure, drawn: three frames of one place that the geometry
+    cannot tell apart, where the difference is who is in them."""
+    a, b, c = burst(corpus, "123")
+    for early, late in ((a, b), (b, c), (a, c)):
+        corpus.matched(early, late, HIGH)
+    corpus.examined(a, body=0.4, who=["p1", "p2"])
+    corpus.examined(b, body=0.4, who=["p1"])
+    corpus.examined(c, body=0.4, who=["p3"])
+    corpus.run()
+
+    assert corpus.stacks() == [{a, b}, {c}]
+
+
+def test_the_veto_is_a_population_and_never_an_overwrite(corpus: Stacks) -> None:
+    """The people identity is part of the key for the reason strictness and linkage
+    are: the grid the reader had before the rule landed is still in the table, so the
+    change is something they can see rather than be told about."""
+    a, b = burst(corpus, "12")
+    corpus.matched(a, b, HIGH)
+    corpus.examined(a, body=0.4, who=["p1"])
+    corpus.examined(b, body=0.4, who=["p2"])
+    corpus.run()
+    corpus.run(Setting(people=NO_PEOPLE))
+
+    assert dict(
+        corpus.conn.execute(
+            "SELECT people, count(DISTINCT stack) FROM stack_member GROUP BY people"
+        )
+    ) == {membership.PEOPLE: 2, NO_PEOPLE: 1}
+    assert placed(corpus.conn, SETTING) == {a, b}
+
+
+def test_a_second_pass_with_the_veto_places_nothing(corpus: Stacks) -> None:
+    a, b = burst(corpus, "12")
+    corpus.matched(a, b, HIGH)
+    corpus.examined(a, body=0.4, who=["p1"])
+    corpus.examined(b, body=0.4, who=["p2"])
+    corpus.run()
+    before = corpus.rows()
+
+    assert corpus.work().todo == []
+    assert corpus.run()["written"] == 0
+    assert corpus.rows() == before
+
+
+def test_an_interrupted_pass_with_the_veto_resumes_where_it_reached(corpus: Stacks) -> None:
+    """The resume unit is still the run: the veto is applied inside one, so a run is
+    either wholly placed as the rule decided or wholly absent."""
+    first = burst(corpus, "12")
+    second = [corpus.add("3", 7200), corpus.add("4", 7202)]
+    for pair in (first, second):
+        corpus.matched(pair[0], pair[1], HIGH)
+        corpus.examined(pair[0], body=0.4, who=["p1"])
+        corpus.examined(pair[1], body=0.4, who=["p2"])
+
+    corpus.run(limit=1)
+    assert len(corpus.rows()) == 2
+    assert corpus.work().todo == [second]
+
+    corpus.run()
+    assert corpus.stacks() == [{first[0]}, {first[1]}, {second[0]}, {second[1]}]
+
+
+def test_the_frames_the_people_pass_never_reached_are_counted(corpus: Stacks) -> None:
+    """Counted rather than split, and counted rather than left to be noticed: an
+    incomplete people pass degrades to the grid without the rule, frame by frame, and
+    that is the failure that would otherwise be silent."""
+    a, b, c = burst(corpus, "123")
+    for early, late in ((a, b), (b, c), (a, c)):
+        corpus.matched(early, late, HIGH)
+    corpus.examined(a, body=0.4, who=["p1"])
+    corpus.run()
+
+    assert corpus.work().unpeopled == 2
+    assert corpus.stacks() == [{a, b, c}]
+
+
+def passers_by(corpus: Stacks) -> list[str]:
+    """A burst of one friend with two different passers-by wandering through it.
+
+    Two and not one, which is the shape of the failure `harness.people` was built to
+    guard: one extra person in some frames *nests*, because the frame holding them
+    contains the frames that do not. It takes two different ones to leave no frame
+    showing everybody, and that is when the rule takes the burst apart.
+    """
+    a, b, c = burst(corpus, "123")
+    for early, late in ((a, b), (b, c), (a, c)):
+        corpus.matched(early, late, HIGH)
+    corpus.examined(a, body=0.4, who=["p1", "tourist"])
+    corpus.examined(b, body=0.4, who=["p1"])
+    corpus.examined(c, body=0.4, who=["p1", "cyclist"])
+    return [a, b, c]
+
+
+def test_a_stranger_is_out_of_every_frames_people(corpus: Stacks) -> None:
+    """ADR 0004's *a stranger never counts*: passers-by the reader never noticed
+    cannot break their burst, once the reader has said so."""
+    a, b, c = passers_by(corpus)
+
+    assert corpus.run(excluded=["tourist", "cyclist"])["split"] == []
+    assert corpus.stacks() == [{a, b, c}]
+
+
+def test_an_unjudged_person_is_a_friend_and_splits_the_stack(corpus: Stacks) -> None:
+    """The other side of the same test, and ADR 0004's stated default: the grid at
+    zero answers is the grid the rule produces on its own, so silence counts the
+    person rather than discounting them -- every answer the reader gives moves the
+    grid from there rather than repairing it."""
+    a, b, c = passers_by(corpus)
+    result = corpus.run()
+
+    assert corpus.stacks() == [{a, b}, {c}]
+    assert (result["split"], result["moved"]) == ([a], 1)
+
+
+def test_the_veto_reads_the_persons_at_the_clustering_the_key_names(corpus: Stacks) -> None:
+    """A person at another threshold or another cut is a person of another
+    population, and reading one against the other is what putting all four columns in
+    the identity prevents."""
+    a, b = burst(corpus, "12")
+    corpus.matched(a, b, HIGH)
+    corpus.examined(a, body=0.4, who=["p1"])
+    corpus.examined(b, body=0.4, who=["p2"])
+    elsewhere = Setting(people=membership.identity(threshold=0.9))
+    corpus.run(elsewhere)
+
+    # No face has a person at 0.9, so both frames read as somebody with no readable
+    # face -- which nests, and leaves the walk's own answer standing.
+    assert corpus.stacks() == [{a, b}]
+
+
+def test_a_face_under_the_floor_is_in_no_frames_people(corpus: Stacks) -> None:
+    """The floor is read at every run and stored nowhere, which is what
+    `012_people.sql` kept the share for: a person forty metres away in the background
+    of one frame of a bracket does not split it."""
+    a, b = burst(corpus, "12")
+    corpus.matched(a, b, HIGH)
+    corpus.examined(a, body=0.4, who=["p1"])
+    corpus.examined(b, body=0.4, who=["p1"])
+    corpus.conn.execute(
+        "INSERT INTO face (model, version, sha256, idx, share, vector)"
+        " VALUES (?, ?, ?, 9, ?, ?)",
+        (people.MODEL, people.VERSION, b, people.FLOOR / 2, b""),
+    )
+    corpus.conn.execute(
+        "INSERT INTO face_person"
+        " (model, version, threshold, cut, sha256, idx, person) VALUES (?, ?, ?, ?, ?, 9, ?)",
+        (people.MODEL, people.VERSION, people.THRESHOLD, people.CUT, b, "distant"),
+    )
+    corpus.conn.commit()
+    corpus.run()
+
+    assert corpus.stacks() == [{a, b}]
+
+
+def test_a_video_is_its_own_stack_whatever_the_veto_says(corpus: Stacks) -> None:
+    """Nothing looks for a person in a video, so it has no people -- and it is out of
+    the veto's way for the same reason it is out of the walk's."""
+    a = corpus.add("1", 0)
+    clip = corpus.add("2", 2, kind="video")
+    b = corpus.add("3", 4)
+    corpus.matched(a, b, HIGH)
+    corpus.examined(a, body=0.4, who=["p1"])
+    corpus.examined(b, body=0.4, who=["p1"])
+    corpus.run()
+
+    assert corpus.stacks() == [{a, b}, {clip}]
+
+
+def test_the_strangers_are_read_from_the_labels_file_when_there_is_one(
+    tmp_path: Path,
+) -> None:
+    """The one read this package makes of the harness's database, and every way it
+    can be absent is *no strangers* rather than an error: ADR 0004's grid at zero
+    answers is the grid the rule produces on its own."""
+    labels_db = tmp_path / membership.LABELS
+    assert membership.strangers(labels_db, membership.PEOPLE) == frozenset()
+
+    conn = sqlite3.connect(labels_db)
+    try:
+        conn.execute("CREATE TABLE answer (given TEXT)")  # a file from before the mode
+        conn.commit()
+        assert membership.strangers(labels_db, membership.PEOPLE) == frozenset()
+
+        from harness import people as harness_people
+
+        harness_people.ensure(conn)
+        clustering = harness_people.Clustering()
+        harness_people.record(conn, "tourist", "stranger", clustering=clustering)
+        harness_people.record(conn, "friend", "friend", clustering=clustering)
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert membership.strangers(labels_db, membership.PEOPLE) == {"tourist"}
+    # An answer given about another clustering is evidence and not a judgement here.
+    assert membership.strangers(labels_db, membership.identity(cut=0.5)) == frozenset()
 
 
 # --- the rule ------------------------------------------------------------------
@@ -463,6 +712,27 @@ def test_the_recorded_setting_is_the_one_the_labels_settled() -> None:
         10,
         "neighbour",
         candidates.CEILING,
+        membership.PEOPLE,
+    )
+
+
+def test_the_people_the_veto_reads_are_named_by_the_whole_clustering() -> None:
+    """`face_person`'s four columns and not three of them.
+
+    The cut joined that key at migration 013, so an identity naming the model, the
+    version and the threshold alone would name three of the four things that decided
+    which persons a frame has -- and a grouping made at one cut and one made at
+    another would share a key, which is what `011_stack_member.sql` exists to
+    prevent.
+    """
+    assert membership.PEOPLE == (
+        f"{people.MODEL}/{people.VERSION}/{people.THRESHOLD}/{people.CUT}"
+    )
+    assert membership.clustering(membership.PEOPLE) == (
+        people.MODEL,
+        people.VERSION,
+        people.THRESHOLD,
+        people.CUT,
     )
 
 
@@ -483,8 +753,25 @@ def test_the_grid_reads_the_setting_this_pass_writes() -> None:
         "strictness",
         "linkage",
         "ceiling",
+        "people",
     )
     assert tuple(browse.STACK_SETTING.values()) == Setting().key
+    assert browse.NO_PEOPLE == NO_PEOPLE
+
+
+def test_the_grid_ranks_a_cover_at_the_floor_the_veto_read() -> None:
+    """The other constant the website spells out for itself, and for the same
+    reason: `photolib.people` imports numpy and Pillow to reach `FLOOR`, and the
+    website reads stored numbers only. A cover ranked at one floor over an
+    assignment vetoed at another would draw a frame for holding somebody the stack
+    was not grouped by."""
+    assert browse.PEOPLE_FLOOR == people.FLOOR
+
+
+def test_the_labels_file_is_named_the_same_thing_on_both_sides() -> None:
+    """The one read `photolib` makes of the harness's database, spelled out rather
+    than imported because the arrow between them points the other way."""
+    assert membership.LABELS == label.LABELS
 
 
 def test_a_greedy_walk_can_split_a_stack_the_rule_would_have_held(corpus: Stacks) -> None:
@@ -497,6 +784,122 @@ def test_a_greedy_walk_can_split_a_stack_the_rule_would_have_held(corpus: Stacks
         ["a", "b"],
         ["c"],
     ]
+
+
+# --- the veto -------------------------------------------------------------------
+
+# ADR 0004's rule is a statement about sets of people, so it is asserted as one:
+# no photograph, no database and no model anywhere below. The frames are named by
+# letter in capture order and each one's people are a set of person names, which is
+# exactly what `regroup` takes.
+
+
+def sets(*who: object) -> tuple[list[str], dict[str, frozenset[str] | None]]:
+    """One stack's frames in capture order, and what was read in each.
+
+    A string is the people read in that frame -- `"ABC"` is `{A,B,C}` and `""` is
+    somebody with no readable face -- `None` is a frame the pass found nobody in,
+    and `...` is a frame it never reached, which is absent from the mapping rather
+    than in it holding nothing.
+    """
+    frames = [chr(ord("a") + index) for index in range(len(who))]
+    return frames, {
+        frame: None if held is None else frozenset(str(held))
+        for frame, held in zip(frames, who)
+        if held is not ...
+    }
+
+
+def grouped(*who: object) -> list[str]:
+    """`regroup`'s answer as one string per stack, for reading in an assertion."""
+    frames, held = sets(*who)
+    return ["".join(stack) for stack in regroup(frames, held)]
+
+
+def test_the_readers_worked_example() -> None:
+    """ADR 0004's, verbatim, and the reason the rule is derived rather than stated:
+
+    > Photographs of `{A,B,C,D}`, `{A,B,C}`, `{A,B}`, `{A,B,E}`, `{B,F}`. The first
+    > three are one stack with `{A,B,C,D}` as its cover, and the last two stand
+    > alone.
+    """
+    assert grouped("ABCD", "ABC", "AB", "ABE", "BF") == ["abc", "d", "e"]
+
+
+def test_a_stack_needs_a_member_holding_the_rest_and_not_a_chain() -> None:
+    """Subset of the cover, and not a strict chain: the members need not contain one
+    another, only all fit inside one of them. `{A,B}` and `{A,C}` do not contain each
+    other and `{A,B,C}` contains both, so all three are one stack."""
+    assert grouped("AB", "AC", "ABC") == ["abc"]
+
+
+def test_two_frames_with_no_frame_showing_everybody_are_two_stacks() -> None:
+    """The other half of the same rule: with no `{A,B,C}` present there is no frame
+    that shows everybody, so there is none worth drawing as a cover of one."""
+    assert grouped("AB", "AC") == ["a", "b"]
+
+
+def test_the_greedy_split_runs_again_on_what_is_left() -> None:
+    """A stack that splits into a group and a remainder which itself has no maximum
+    splits again, rather than the remainder being kept whole because the first pass
+    was satisfied."""
+    assert grouped("ABC", "AB", "AD", "AE") == ["ab", "c", "d"]
+
+
+def test_ties_are_settled_by_capture_order_and_the_answer_never_moves() -> None:
+    """Two frames holding as many people as each other are separated by which was
+    taken first, which is what makes the assignment a fact about the photographs
+    rather than about the day the pass ran."""
+    assert grouped("AB", "CD") == ["a", "b"]
+    assert grouped("CD", "AB") == ["a", "b"]
+    frames, held = sets("AB", "CD", "AB")
+    assert regroup(frames, held) == regroup(frames, held) == [["a", "c"], ["b"]]
+
+
+def test_a_frame_with_nobody_in_it_never_joins_a_frame_with_somebody() -> None:
+    """The reader's own extra clause, and it does not follow from nesting -- the
+    empty set is a subset of everything, so a landscape would otherwise disappear
+    into the same landscape with a friend standing in it."""
+    assert grouped(None, "A") == ["a", "b"]
+    assert grouped("A", None, "A") == ["b", "ac"]
+    # And it fires on presence rather than on identity: a frame the pass found
+    # somebody in whose face it could not read is not a frame with nobody in it.
+    assert grouped(None, None) == ["ab"]
+
+
+def test_a_frame_holding_somebody_with_no_readable_face_stays_in_its_burst() -> None:
+    """The empty set nests into anything, which is the whole reason ADR 0004 runs two
+    detectors: a turned head and a blink are somebody, and their frame keeps its
+    place rather than being split out on the strength of a face that could not be
+    read."""
+    assert grouped("", "AB") == ["ab"]
+    assert grouped("AB", "", "AB") == ["abc"]
+
+
+def test_a_frame_the_people_pass_never_reached_stays_where_the_match_put_it() -> None:
+    """Exempt from both halves: an incomplete people pass degrades to the grid
+    without the rule for that frame, and never to a split."""
+    assert grouped(..., "AB") == ["ab"]
+    assert grouped(..., None) == ["ab"]
+    assert grouped("AB", ..., "AC") == ["ab", "c"]
+
+
+def test_the_rule_only_ever_splits() -> None:
+    """What comes back is a partition of what went in -- never a frame twice, never
+    a frame lost, and never a stack the Match did not propose."""
+    frames, held = sets("ABCD", "ABC", None, "", "BF", ..., "AB")
+    parts = regroup(frames, held)
+
+    assert sorted(frame for part in parts for frame in part) == sorted(frames)
+    assert all(part for part in parts)
+    assert len(parts) > 1
+
+
+def test_a_stack_nobody_is_in_is_the_stack_the_match_proposed() -> None:
+    """The no-op the rule is on nine stacks in ten: every frame reads as no people,
+    every set nests, and the walk's answer comes back unchanged."""
+    assert grouped("", "", "") == ["abc"]
+    assert grouped(*[...] * 3) == ["abc"]
 
 
 # --- the seam --------------------------------------------------------------------
@@ -766,9 +1169,9 @@ def test_place_puts_every_frame_of_a_run_somewhere(corpus: Stacks) -> None:
     """A frame with no row is a tile the grid could not draw, so the walk is total."""
     run = [f"{index}" * 64 for index in range(4)]
 
-    stacks = place(run, {run[2]}, {(run[0], run[1]): HIGH}, SETTING)
+    cut = place(run, {run[2]}, {(run[0], run[1]): HIGH}, SETTING)
 
-    assert sorted(sha256 for stack in stacks for sha256 in stack) == sorted(run)
+    assert sorted(sha256 for stack in cut.stacks for sha256 in stack) == sorted(run)
 
 
 # --- refusals -----------------------------------------------------------------

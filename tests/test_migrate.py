@@ -12,7 +12,7 @@ from conftest import file_version, table_names
 
 from photolib import db, migrate
 
-LATEST = 13
+LATEST = 14
 
 
 def test_applies_from_empty(pair):
@@ -201,6 +201,44 @@ def test_the_cut_carries_the_population_clustered_before_it_existed(pair, tmp_pa
         assert conn.execute(
             "SELECT threshold, cut, person FROM face_person"
         ).fetchall() == [(0.363, 0.0, "a:0")]
+    finally:
+        conn.close()
+
+
+def test_the_people_column_carries_the_walk_that_had_no_veto(pair, tmp_path):
+    """014 grows `stack_member`'s primary key by the people identity. The rows
+    already there were walked before ADR 0004's veto existed, so they are stamped
+    `'none'` -- `photolib.membership.NO_PEOPLE`, a real value of the column saying
+    *no people rule applied* -- and stay readable as the grid the reader had."""
+    catalog, state = pair
+    before = tmp_path / "before_the_people"
+    before.mkdir()
+    for _, path in migrate.discover()[:13]:
+        shutil.copy(path, before)
+    assert migrate.apply(catalog, state, migrations_dir=before) == 13
+
+    conn = db.connect(catalog, state)
+    try:
+        conn.execute(
+            "INSERT INTO file (sha256, size, ext, kind, state, feature_ver)"
+            " VALUES ('a', 1, '.jpg', 'image', 'published', '{}')"
+        )
+        conn.execute(
+            "INSERT INTO stack_member"
+            " (method, version, strictness, linkage, ceiling, sha256, stack)"
+            " VALUES ('sift_ratio_homography', '1', 10, 'neighbour', 3600, 'a', 'a')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert migrate.apply(catalog, state) == LATEST
+
+    conn = db.connect(catalog, state)
+    try:
+        assert conn.execute(
+            "SELECT people, sha256, stack FROM stack_member"
+        ).fetchall() == [("none", "a", "a")]
     finally:
         conn.close()
 

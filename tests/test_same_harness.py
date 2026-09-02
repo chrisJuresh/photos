@@ -498,7 +498,7 @@ def grouped(conn: sqlite3.Connection, *groups: tuple[str, ...]) -> None:
             published(conn, sha256)
             conn.execute(
                 "INSERT INTO stack_member (method, version, strictness, linkage,"
-                " ceiling, sha256, stack) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " ceiling, people, sha256, stack) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (*people.STACK_SETTING.values(), sha256, group[0]),
             )
     conn.commit()

@@ -922,14 +922,28 @@ def test_no_part_of_the_setting_reaches_the_sql_text(bursts):
 
 # -- the cover -----------------------------------------------------------
 
-# The cover rule reads two numbers per frame and nothing else, so it is tested
+# The cover rule reads three numbers per frame and nothing else, so it is tested
 # on the numbers rather than through a corpus. Ids are the frame's position in
 # the page's own order, because that is the only other thing the rule uses.
 
 
 def frames(*readings) -> list[tuple]:
-    """`(id, luminance, sharpness)` per frame, in the page's order."""
-    return [(index + 1, *reading) for index, reading in enumerate(readings)]
+    """`(id, luminance, sharpness, people)` per frame, in the page's order.
+
+    The people count defaults to nobody, which is what makes every assertion
+    written before ADR 0004's clause an assertion about the rule under it: the
+    count is constant over the stack, so nothing is filtered out and the exposure
+    rule decides alone. `peopled` below is where the new clause is exercised.
+    """
+    return [
+        (index + 1, *(reading if len(reading) == 3 else (*reading, 0)))
+        for index, reading in enumerate(readings)
+    ]
+
+
+def peopled(*readings) -> list[tuple]:
+    """`(people, luminance, sharpness)` per frame, people first for readability."""
+    return frames(*[(lum, sharp, count) for count, lum, sharp in readings])
 
 
 def test_a_bracket_draws_the_sharpest_frame_of_its_middle_exposure():
@@ -985,6 +999,41 @@ def test_a_stack_no_frame_of_which_can_be_ranked_draws_its_first():
     answer is the frame the page's own order reached first."""
     assert browse.cover(frames((None, None), (None, None))) == 1
     assert browse.cover(frames((None, 0.9), (0.5, None))) == 1
+
+
+def test_the_frame_that_shows_who_is_in_the_stack_is_the_cover():
+    """ADR 0004's clause, and the point of the cover rather than a nicety: a stack
+    is admissible precisely because one of its members contains everybody in it,
+    so that member is the one worth drawing. It wins over the exposure rule and
+    not after it -- the frame with the most people here is the darkest and the
+    softest, and the rule below would have drawn either of the others."""
+    assert browse.cover(peopled((0, 0.50, 0.90), (0, 0.80, 0.95), (4, 0.20, 0.40))) == 3
+
+
+def test_among_the_frames_tied_on_people_the_exposure_rule_decides():
+    """Additive, which is what makes every assertion above still true: a bracket's
+    frames hold the same people, so the count is constant, nothing is filtered out
+    and the sharpest frame of the middle-exposure third is drawn as before."""
+    bracket = peopled((2, 0.20, 0.40), (2, 0.50, 0.70), (2, 0.80, 0.95))
+    assert browse.cover(bracket) == 2
+    # And the tie is only ever broken among the frames at the top: the sharpest
+    # frame of the middle exposure loses to a darker frame holding one more person.
+    assert browse.cover(peopled((2, 0.20, 0.40), (2, 0.50, 0.70), (3, 0.80, 0.95))) == 3
+
+
+def test_a_frame_with_no_people_row_counts_as_nobody_and_can_still_win():
+    """A people pass that has not reached a frame reads as nobody there, and a
+    stack no frame of which has a count behaves exactly as it did before: everybody
+    is tied, so the exposure rule decides the whole of it."""
+    assert browse.cover(peopled((0, 0.20, 0.40), (0, 0.50, 0.70), (0, 0.80, 0.95))) == 2
+    assert browse.cover(peopled((0, 0.50, 0.70), (1, 0.20, 0.40))) == 2
+
+
+def test_the_people_clause_still_falls_back_to_the_first_frame_drawn():
+    """The two readings the exposure rule cannot use are unchanged by it -- and the
+    frame it falls back to is the first of the frames tied at the top, not the first
+    of the stack, because the others are not candidates at all."""
+    assert browse.cover(peopled((0, None, None), (1, None, None), (1, None, 0.9))) == 2
 
 
 def test_a_tie_in_sharpness_goes_to_the_first_in_the_pages_order():

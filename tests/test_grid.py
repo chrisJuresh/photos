@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 import synthetic
 
-from photolib import browse, db, migrate
+from photolib import browse, db, migrate, people
 from photolib import grid as grid_module
 from photolib import rebuild as rebuild_module
 from photolib.browse import SORTS, BadFilter, assignment_sql, page_sql, parse_cursor
@@ -892,6 +892,90 @@ def test_filtering_out_a_cover_promotes_the_frame_the_rule_names_next(stacked):
     assert 2 not in covers and 3 not in covers
 
 
+def peopled_catalog(conn: sqlite3.Connection, faces: dict[int, list[str]]) -> None:
+    """Two tiles of one bracket, and the persons a people pass read in each.
+
+    The quality readings are the shape `_scalars` extracts them from, so the whole
+    of what this corpus is for is that the cover's people count comes out of the
+    same query the exposure rule's two numbers do.
+    """
+    for photo_id, who in faces.items():
+        sha256 = f"{photo_id}" * 64
+        conn.execute(
+            "INSERT INTO file (sha256, size, ext, kind, state, feature_ver, quality)"
+            " VALUES (?, 1, '.jpg', 'image', 'published', '{}',"
+            " '{\"sharpness\": 0.5, \"luminance_histogram\": [1]}')",
+            (sha256[:64],),
+        )
+        conn.execute(
+            "INSERT INTO photo (id, rep_sha256, sort_key) VALUES (?, ?, '2021-06-01T12:00:00')",
+            (photo_id, sha256[:64]),
+        )
+        for idx, person in enumerate(who):
+            conn.execute(
+                "INSERT INTO face (model, version, sha256, idx, share, vector)"
+                " VALUES (?, ?, ?, ?, ?, x'00')",
+                (people.MODEL, people.VERSION, sha256[:64], idx, people.FLOOR + 0.1),
+            )
+            conn.execute(
+                "INSERT INTO face_person"
+                " (model, version, threshold, cut, sha256, idx, person)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    people.MODEL,
+                    people.VERSION,
+                    people.THRESHOLD,
+                    people.CUT,
+                    sha256[:64],
+                    idx,
+                    person,
+                ),
+            )
+    conn.commit()
+
+
+def test_the_page_reads_the_people_count_the_cover_ranks_on(conn):
+    """The join ADR 0004's cover clause needs, asserted over rows rather than
+    trusted: the count is the persons whose faces reach the floor, at the clustering
+    the assignment's own key names, and a frame with no face counts zero."""
+    peopled_catalog(conn, {1: ["anne", "ben"], 2: ["anne"], 3: []})
+
+    scalars = grid_module._scalars(conn, [1, 2, 3], browse.STACK_SETTING)
+
+    assert {photo_id: reading[2] for photo_id, reading in scalars.items()} == {
+        1: 2,
+        2: 1,
+        3: 0,
+    }
+    # And the cover is the frame those persons are all in.
+    assert grid_module._covers(conn, [[1, 2, 3]], browse.STACK_SETTING) == [1]
+
+
+def test_a_face_under_the_floor_is_not_counted_towards_a_cover(conn):
+    """`browse.PEOPLE_FLOOR` is read at the query and stored nowhere, which is what
+    `012_people.sql` kept the share for."""
+    peopled_catalog(conn, {1: ["anne"]})
+    conn.execute(
+        "UPDATE face SET share = ? WHERE sha256 = ?",
+        (browse.PEOPLE_FLOOR / 2, "1" * 64),
+    )
+    conn.commit()
+
+    assert grid_module._scalars(conn, [1], browse.STACK_SETTING)[1][2] == 0
+
+
+def test_the_assignment_with_no_veto_ranks_a_cover_on_nobody(conn):
+    """The population the grid drew before ADR 0004 draws exactly what it drew: no
+    subquery is asked at all, so the exposure rule decides the whole of it."""
+    peopled_catalog(conn, {1: ["anne", "ben"], 2: ["anne"]})
+    setting = {**browse.STACK_SETTING, "people": browse.NO_PEOPLE}
+
+    scalars = grid_module._scalars(conn, [1, 2], setting)
+
+    assert {photo_id: reading[2] for photo_id, reading in scalars.items()} == {1: 0, 2: 0}
+    assert grid_module._people_sql(setting) == ("0", [])
+
+
 @pytest.mark.parametrize("sort", ["newest", "largest"])
 def test_a_page_reads_the_quality_of_its_own_members_and_nothing_else(stacked, sort,
                                                                       monkeypatch):
@@ -903,9 +987,9 @@ def test_a_page_reads_the_quality_of_its_own_members_and_nothing_else(stacked, s
     read: list[list[int]] = []
     original = grid_module._scalars
 
-    def spy(conn, ids):
+    def spy(conn, ids, setting):
         read.append(list(ids))
-        return original(conn, ids)
+        return original(conn, ids, setting)
 
     monkeypatch.setattr(grid_module, "_scalars", spy)
     body = get_json(stacked.port, f"/api/photos?limit=3&stack=on&sort={sort}")

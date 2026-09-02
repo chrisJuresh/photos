@@ -36,9 +36,9 @@ One pass per view, in the ordering the reader is looking at, and the caller
 memoises it; a page is then a slice of it, which is what keeps a whole stack on one
 page for every sort rather than only for the two that used to stream. Which member
 a stack is *drawn* as is `cover`, and it is a different question from where the
-stack sits in the ordering: it is the sharpest frame of the middle-exposure third,
-computed in Python over readings that only the page's own members are ever read
-for.
+stack sits in the ordering: it is the member holding the most people, and the
+sharpest frame of the middle-exposure third among those tied at the top, computed
+in Python over readings that only the page's own members are ever read for.
 
 The vocabulary itself is served from `facets`, one pass over the tile set at
 startup, so the header can only ever offer a value that exists and can show what
@@ -93,13 +93,37 @@ STACK_ON = "on"
 DEFAULT_STRICTNESS = 10
 DEFAULT_LINKAGE = "neighbour"
 
+# Which persons the veto read, which is `face_person`'s whole key as one value:
+# model, version, clustering threshold and size cut. `docs/adr/0004-people-veto-a-
+# stack.md` is the rule and `photolib.membership.regroup` is the whole of it -- a
+# stack needs one member whose people contain every other member's -- and this
+# names the clustering it read them from, so a grouping made with people and one
+# made without are two populations rather than one. `photolib.membership.PEOPLE` is
+# the same string built from `photolib.people`'s own constants;
+# `tests/test_membership.py` asserts they agree, for the reason the four above are
+# spelled out here rather than imported.
+DEFAULT_PEOPLE = "fasterrcnn_v2+yunet+sface/1/0.363/0.02"
+
+# The walk with no veto applied, which is the grid before ADR 0004 landed. Its rows
+# are still in `stack_member` -- migration 014 stamped them -- so pointing the two
+# constants above and this one at it is how the difference is seen rather than
+# described. `photolib.membership.NO_PEOPLE` is the same sentinel.
+NO_PEOPLE = "none"
+
+# How much of a frame's height a face has to be for its person to count towards
+# that frame's people, and therefore towards the cover's ranking below.
+# `photolib.people.FLOOR`, spelled out for the same reason, and asserted equal in
+# `tests/test_membership.py`. It is read at every query and stored nowhere: a box
+# records its share and nothing records whether the share was enough.
+PEOPLE_FLOOR = 0.10
+
 # The assignment the grid reads: the setting `photolib.membership` wrote
-# `stack_member` under. A change of any of the five adds a population to that table
+# `stack_member` under. A change of any of the six adds a population to that table
 # rather than overwriting one, so a reader has to name which one it means or it
 # could compare an assignment made at one setting against an assignment made at
 # another.
 #
-# Column names rather than five bare values, because the join below is generated
+# Column names rather than six bare values, because the join below is generated
 # from this mapping: the SQL's order and the parameters' order are then one thing
 # and cannot come to disagree. Spelled out here rather than imported from
 # `photolib.membership`, which reaches `photolib.matches` for two of these values
@@ -111,16 +135,20 @@ STACK_SETTING: dict[str, str | int] = {
     "strictness": DEFAULT_STRICTNESS,
     "linkage": DEFAULT_LINKAGE,
     "ceiling": 3600,
+    "people": DEFAULT_PEOPLE,
 }
 
-# The two of those five a reader may move, and it is deliberately not all five.
+# The two of those six a reader may move, and it is deliberately not all six.
 # `method` and `version` say what the Match rows are, so a reader choosing one
 # would be choosing evidence rather than reading it; `ceiling` is the fence those
 # rows were computed behind, so an assignment at any other value would have been
 # decided over pairs nothing ever checked -- `migrations/011_stack_member.sql` is
 # where that is written down, and it is the document ADR 0003's "four knobs" line
-# lost to. Strictness and linkage are the two `photolib.membership` takes as
-# flags, so moving one names a population somebody wrote.
+# lost to. `people` is not a knob either: ADR 0004 makes the veto part of what a
+# stack *is* rather than a dial on how much of one, so switching it is pointing the
+# constant above at the other population and never a third control in the panel.
+# Strictness and linkage are the two `photolib.membership` takes as flags, so
+# moving one names a population somebody wrote.
 STACK_KNOBS = ("strictness", "linkage")
 
 # What each linkage rule asks of a frame, in the words CONTEXT.md settles them in.
@@ -418,7 +446,7 @@ class Query:
     sort: str
     stack: bool = False
     # Which assignment it groups on, of the ones `stack_member` holds. In the key
-    # for the reason the five columns are in `stack_member`'s: two settings are two
+    # for the reason the six columns are in `stack_member`'s: two settings are two
     # populations, so a memo that mixed them would answer about one and be read as
     # the other.
     strictness: int = DEFAULT_STRICTNESS
@@ -430,7 +458,7 @@ class Query:
 
     @property
     def setting(self) -> dict[str, str | int]:
-        """The whole five-column name of the assignment to read: the three that are
+        """The whole six-column name of the assignment to read: the four that are
         not knobs, and the two the reader moved."""
         return {**STACK_SETTING, "strictness": self.strictness, "linkage": self.linkage}
 
@@ -582,7 +610,7 @@ def where(query: Query) -> tuple[list[str], list]:
 KEY = 5
 
 # Which stack each tile in the view is in, at the setting the query names, generated
-# from `STACK_SETTING` so the five placeholders are in the same order `Query.setting`
+# from `STACK_SETTING` so the six placeholders are in the same order `Query.setting`
 # hands them over in -- the SQL's order and the parameters' order are then one thing
 # and there is no way to bind a strictness to a linkage. A LEFT JOIN because a tile
 # the filesystem dated carries no row -- a copy date is not when the photograph was
@@ -680,11 +708,24 @@ def mean_luminance(histogram: str | None) -> float | None:
     return sum(share * (index + 0.5) / len(bins) for index, share in enumerate(bins))
 
 
-def cover(members: list[tuple[int, float | None, float | None]]) -> int:
-    """Which member a closed stack is drawn as, from `(id, luminance, sharpness)`.
+def cover(members: list[tuple[int, float | None, float | None, int]]) -> int:
+    """Which member a closed stack is drawn as, from `(id, luminance, sharpness,
+    people)`.
 
-    The sharpest frame of the middle-exposure third. Rank the members by mean
-    luminance, take the middle third rounded up to at least one, and take the
+    **Most people first**, and then the rule below among the members tied at the
+    top. `docs/adr/0004-people-veto-a-stack.md` makes that the point of the cover
+    rather than a nicety: a stack is admissible precisely because one of its members
+    contains everybody in it, so that member is the one worth drawing, and a closed
+    tile then tells the reader who is inside it.
+
+    It is additive. A bracket's frames hold the same people, so the count is
+    constant over the whole stack, every member survives the filter and the rule is
+    the one it was -- which is what the tests written before this clause are proof
+    of. A stack no frame of which holds anybody is the same case: nobody wins on
+    people, so everybody is tied.
+
+    The sharpest frame of the middle-exposure third, among those. Rank the members
+    by mean luminance, take the middle third rounded up to at least one, and take the
     sharpest of those. The library is mostly three-frame bracketing, and the
     middle exposure is the one that was aimed -- so the frame worth looking at
     is the best-focused frame of the metered exposure, not the brightest and not
@@ -699,8 +740,11 @@ def cover(members: list[tuple[int, float | None, float | None]]) -> int:
     A member missing either reading cannot be ranked and so cannot win. When no
     member has both, the stack is drawn as the first member in the page's own
     order -- which is what `members` is in, and which is also how a tie in
-    sharpness is settled.
+    sharpness is settled. A frame with no people row counts as nobody and can still
+    win a stack where nobody else has a count either.
     """
+    most = max(member[3] for member in members)
+    members = [member for member in members if member[3] == most]
     ranked = sorted(
         (member for member in members if member[1] is not None and member[2] is not None),
         key=lambda member: member[1],

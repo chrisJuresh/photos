@@ -272,9 +272,10 @@ def store_membership(conn: sqlite3.Connection, stacks, **knobs) -> None:
     as its own setting's.
     """
     setting = {**browse.STACK_SETTING, **knobs}
+    columns = ", ".join(setting)
     conn.executemany(
-        "INSERT INTO stack_member (method, version, strictness, linkage, ceiling, "
-        "sha256, stack) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        f"INSERT INTO stack_member ({columns}, sha256, stack)"
+        f" VALUES ({', '.join('?' * (len(setting) + 2))})",
         [
             (*setting.values(), sha, members[0])
             for members in stacks
