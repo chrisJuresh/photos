@@ -363,6 +363,50 @@ unjudged person's `friend` is read, because an answer about a different set of f
 and not a judgement. The splits are counted at `browse.STACK_SETTING` and not at a knob, so a
 verdict is priced against the grid the reader is actually looking at.
 
+**And a third mode, which asks whether two clusters are one human.** Neither of the others
+can: the stack mode asks about a frame and the people mode asks about a person, and #88 found
+that **53 of the 94** stacks ADR 0004's nesting rule would split hold somebody in every frame
+— one human handed two names, so no member's people contain every other member's and the
+stack the reader wants made *bigger* is cut in two. Until this existed a loosening could only
+be scored on the damage it does, because `two-people` marks a cluster holding two humans and
+says nothing at all about one human split in two; `harness.recluster` concluded the knob was
+the wrong one on exactly that one-sided evidence.
+
+Two montages side by side, one person each — people mode's montage kept whole rather than a
+second way of drawing a person invented beside it, so the frames and not face crops, for its
+reason. `s` is the same person, `d` is different people, `u` is **not sure** — an answer and
+not a skip, both other modes' distinction — and there is deliberately **no fourth**: nothing
+would read *cannot tell from these frames* that does not read `unsure`. `h`/`l` move between
+pairs and `k`/`j`/`g`/`0` say how much of the two montages is on screen, the stack mode's own
+vocabulary. The answer *is* the keystroke, so it records and moves on. The similarity between
+the two clusters is never shown, because it would prime the reader towards the answer the
+clustering already gave.
+
+**The queue is drawn from the stacks and not from the embeddings.** All pairs of clusters is
+two million questions, and screening by embedding distance — the obvious cut — admits exactly
+the pairs the clustering nearly merged, so the mode could only ever confirm a loosening and
+never contradict one. So `harness.same.moving` walks the stacks at `browse.STACK_SETTING`,
+keeps the ones whose members' people sets do not nest, and asks about the pairs that are why:
+some frame holds one and not the other, and some other frame holds the other and not the one.
+That is roughly a hundred stacks, so it is a sitting or two, and a pair whose clusters are far
+apart in embedding space that the reader calls one human is then evidence that **the threshold
+is the wrong knob**. The named blind spot is a human split across *different* stacks, days
+apart — nothing here will ask, because merging them would move no stack either way, which is
+the people mode's own principle and the reason stopping early is safe. It counts what a merge
+*changes* about a stack the rule is splitting rather than what would make it nest, the floor
+report's posture towards the same unimplemented rule: a stack torn three ways by one human is
+repaired by no single merge, and the stricter measure would score all three pairs zero and
+never ask.
+
+Verdicts go to the same `labels.sqlite3` in a `same_person` table of their own, **keyed on
+both clusters and on the clustering** — `person_verdict`'s discipline and its reason — with
+`CHECK (one < other)` making the pair unordered as a fact about the table rather than a
+convention. **The stack setting is deliberately not in that key**: whether two clusters are
+one human is a fact about the photographs and not about how the grid happens to be cut, so
+the setting decides which pairs are worth asking about and never what an answer means. An
+answer carries across a cut only when the cut left **both** clusters holding exactly the faces
+they had.
+
 To price the **prominence floor** from those answers — the other thing ADR 0004 left open, and
 the one it expects to lose. It prints, separately for the friends and the strangers, the
 distribution of their box shares and the overlap between them; whether **any** floor separates
@@ -398,10 +442,15 @@ sitting that came back flagged `two-people`, which is the count that fourth answ
 there to produce. **It is the measurement and never the pass**: every row is a clustering of
 the stored vectors by `photolib.people.cluster` itself, so what is priced is what a pass would
 write, and both connections are read-only — `harness.floor`'s posture kept whole.
-**The sweep runs upwards**, because `face_person`'s threshold is the cosine at or above which
-two faces are one person and a *lower* value merges more; the standing row is first and the
-report says whether it reproduces the stored assignment, which is its own check that it is
-pricing the clustering the pass performs. **Two counts, apart and never totalled**, for the
+**The first sweep runs upwards**, because `face_person`'s threshold is the cosine at or above
+which two faces are one person and a *lower* value merges more; the standing row is first and
+the report says whether it reproduces the stored assignment, which is its own check that it is
+pricing the clustering the pass performs. **A second sweep runs downwards**, on evidence that
+did not exist when the first was written: the same-person mode's answers, read by
+`harness.same.scored`, so every looser value is scored on **humans correctly rejoined** beside
+**humans wrongly merged** — apart and never totalled, the same rule the two counts above obey.
+It runs only when there are answers to run it on, and where there are none the report says
+which step is missing rather than printing a table of zeroes as if it were a finding. **Two counts, apart and never totalled**, for the
 floor report's reason: a flagged cluster coming apart is the failure being fixed, and a
 judged friend coming apart is the reader's own answer being contradicted — one individual
 reading as two persons is a frame's people set that no longer nests, which is a stack split

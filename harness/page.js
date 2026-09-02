@@ -1,11 +1,12 @@
 // The labelling harness's client. Vanilla and unbundled — `ui/` is the website's
 // client and this is not part of it, so it carries none of that toolchain.
 //
-// **Two modes over one page.** The stack mode asks whether a stack is drawn right
-// and the people mode asks whether a person is somebody the reader photographed;
-// they share the header, the stage, the substrate route and the labels file, and
-// they share nothing else. Everything below the mode switch is one or the other,
-// and the stack mode's half is unchanged by the people mode existing.
+// **Three modes over one page.** The stack mode asks whether a stack is drawn
+// right, the people mode asks whether a person is somebody the reader photographed,
+// and the same-person mode asks whether two clusters are one human; they share the
+// header, the stage, the substrate route and the labels file, and they share nothing
+// else. Everything below the mode switch is one of the three, and neither of the
+// older two is changed by the newest one existing.
 //
 // Everything the sitting has been dealt arrives in one response, so going back to
 // revise an answer is a local move. Two things talk to the server: recording an
@@ -28,7 +29,8 @@ const marks = new Map(); // index -> { out: Set, in: Set, why: Map }
 // Which question the reader is answering. It rides in the location hash so a
 // reload comes back to the mode they were in -- the alternative is storage, and a
 // page with one reader at one keyboard has somewhere simpler to put one word.
-let mode = location.hash === "#people" ? "people" : "stacks";
+const MODES = ["stacks", "people", "same"];
+let mode = MODES.includes(location.hash.slice(1)) ? location.hash.slice(1) : "stacks";
 
 const beside = (set) => Math.max(set.before.length, set.after.length);
 const showing = (set) => Math.min(wanted, beside(set));
@@ -400,10 +402,18 @@ function finished() {
 // different answer. Debounced, because a drag is a hundred of these.
 let settling = null;
 window.addEventListener("resize", () => {
-  const drawing = mode === "people" ? crowd && crowd.persons[who] : sample && sample.sets[at];
+  const drawing =
+    mode === "people"
+      ? crowd && crowd.persons[who]
+      : mode === "same"
+        ? subjectPair()
+        : sample && sample.sets[at];
   if (!drawing) return;
   clearTimeout(settling);
-  settling = setTimeout(mode === "people" ? drawPerson : draw, 150);
+  settling = setTimeout(
+    mode === "people" ? drawPerson : mode === "same" ? drawPair : draw,
+    150
+  );
 });
 
 // A drag marks a run of frames in one go, because a stack of a dozen near
@@ -534,6 +544,10 @@ function why(reason) {
 
 document.addEventListener("keydown", (event) => {
   if (event.ctrlKey || event.altKey || event.metaKey) return;
+  if (mode === "same") {
+    pressedInSame(event);
+    return;
+  }
   if (mode === "people") {
     pressedInPeople(event);
     return;
@@ -618,11 +632,13 @@ const SAYS = {
 const modes = {
   stacks: document.getElementById("mode-stacks"),
   people: document.getElementById("mode-people"),
+  same: document.getElementById("mode-same"),
 };
 
 const legends = {
   stacks: document.getElementById("keys-stacks"),
   people: document.getElementById("keys-people"),
+  same: document.getElementById("keys-same"),
 };
 
 function subject() {
@@ -825,6 +841,208 @@ function nobody() {
   count.textContent = "no people to judge";
 }
 
+// --- the same-person mode ----------------------------------------------------
+//
+// Two clusters at once, and the reader says whether they are one human. It is the
+// question neither other mode can ask: the stack mode asks about a frame and the
+// people mode asks about a person, and #88 found that 53 of the 94 stacks ADR
+// 0004's nesting rule would split hold somebody in every frame — one human handed
+// two names, so no member's people contain every other member's and the stack the
+// reader wants made bigger is cut in two.
+//
+// **People mode's montage twice over**, rather than a second way of drawing a
+// person invented beside it: the frames and not face crops, for its reason —
+// `migrations/012_people.sql` stores a face's share of the frame's height and no
+// box, so there is nothing stored to crop from. Each side is drawn from its *own*
+// faces, because two persons in one frame have two different faces in it.
+//
+// The similarity between the two clusters is deliberately not on screen. It would
+// prime the reader towards the answer the clustering already gave, which is why the
+// stack mode withholds which band a set was drawn from.
+
+let torn = null; // the /api/pairs payload
+let pairAt = 0;
+// How many of each person's faces are on screen. Its own, kept apart from the other
+// two modes' for `faces`' reason: a view widened for one question means nothing in
+// a different one.
+let sides = 0;
+
+// The three answers, in the reader's own words. `harness.same.VERDICTS` is the same
+// three under the names the column stores, which are the keys here.
+const AGREED = {
+  same: "the same person",
+  different: "different people",
+  unsure: "not sure — these frames could not settle it",
+};
+
+function subjectPair() {
+  return torn && torn.pairs[pairAt];
+}
+
+// One person's faces as a box of the stage, sharing the room with the other side in
+// proportion to how many faces it holds — `.box`'s own rule, and it matters more
+// here than anywhere: a cluster of nine beside a cluster of one is the nine that
+// says who these people are.
+function montageOf(faces, shown) {
+  const here = new Map();
+  for (const face of faces) here.set(face.sha, (here.get(face.sha) || 0) + 1);
+
+  const holder = document.createElement("div");
+  holder.className = "box montage side";
+  for (const face of faces.slice(0, shown)) holder.append(faceOf(face, here.get(face.sha)));
+  holder.style.setProperty("--share", shown);
+  return holder;
+}
+
+function drawPair() {
+  const pair = subjectPair();
+  const each = pair.faces.map((faces) => Math.min(sides, faces.length));
+  const boxes = pair.faces.map((faces, side) => montageOf(faces, each[side]));
+  stage.replaceChildren(...boxes);
+  // After insertion, `drawPerson`'s own measurement: the arrangement is chosen
+  // against the room there is, and there is no room until the box is in the stage.
+  boxes.forEach((holder, side) => {
+    holder.style.setProperty(
+      "--columns",
+      columns(each[side], holder.clientWidth, holder.clientHeight)
+    );
+  });
+
+  about.replaceChildren(
+    // No denominator, the other two modes' reason: the list is ordered so stopping
+    // early is expected, and "3 of 412" reads as a quota rather than as a queue.
+    `pair ${pairAt + 1} · `,
+    strong(
+      // What the merge *changes* about a stack the rule is splitting, and
+      // deliberately not "would be drawn differently": a merge can change how two
+      // frames compare without changing the partition the greedy split arrives at,
+      // so the stronger claim would be one the number does not support. See
+      // `harness.same.moving`.
+      pair.stacks === 1
+        ? "1 stack the people rule splits turns on this pair"
+        : `${pair.stacks} stacks the people rule splits turn on this pair`
+    ),
+    ` at strictness ${torn.strictness} under ${LINKAGES[torn.linkage] || torn.linkage}` +
+      ` linkage · showing ${each[0]} of ${pair.faces[0].length} and ${each[1]} of` +
+      ` ${pair.faces[1].length} faces · clustered at ${torn.threshold} over boxes` +
+      ` from ${torn.cut}`
+  );
+  said.textContent = pair.answer
+    ? `answered: ${AGREED[pair.answer]} — press again to revise it`
+    : "not answered yet";
+  pairCount();
+}
+
+// Two numbers, the people mode's pair and for its reason: how many the reader has
+// judged, and how many are left whose answer would change a stack.
+function pairCount() {
+  count.replaceChildren(
+    strong("same person"),
+    " · ",
+    strong(`${torn.judged}`),
+    torn.judged === 1 ? " pair judged" : " pairs judged",
+    " · ",
+    strong(`${torn.left}`),
+    " left whose answer would change a stack · stop whenever you like"
+  );
+}
+
+async function judgePair(verdict) {
+  const pair = subjectPair();
+  const response = await fetch("/api/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ persons: pair.persons, verdict }),
+  });
+  if (!response.ok) {
+    said.textContent = `the harness refused that answer (${response.status})`;
+    return;
+  }
+  torn = await response.json();
+  // The verdict is filed either way — that is the server's business and it is done.
+  // What must not happen is drawing two montages over another mode's question.
+  if (mode !== "same") return;
+  // On to the next, because the answer *is* the keystroke here: there is no second
+  // press meaning "finished with this one", so recording and advancing are the same
+  // act. `h` is how a misclick is revised.
+  if (pairAt < torn.pairs.length - 1) toPair(1);
+  else drawPair();
+}
+
+function toPair(by) {
+  pairAt = Math.min(Math.max(pairAt + by, 0), torn.pairs.length - 1);
+  // Back to the first few for each pair, `toPerson`'s reason: how far the reader
+  // widened it for a pair of ninety faces says nothing about the next pair.
+  sides = torn.montage;
+  drawPair();
+}
+
+// More or fewer faces of both persons at once, with no ceiling — the other two
+// modes' `widen` and its reasoning. Counted from the larger side's own count on
+// screen, `widenFaces`' correction: the montage opens at twelve and the median
+// person has three faces, so a press counted from twelve would spend itself
+// closing a gap the reader cannot see.
+function widenSides(by) {
+  const pair = subjectPair();
+  const most = Math.max(...pair.faces.map((faces) => faces.length));
+  const current = Math.min(sides, most);
+  const next = Math.min(Math.max(current + by, 1), most);
+  if (next === current) return;
+  sides = next;
+  redrawPair();
+}
+
+// One draw per animation frame, `redrawPerson`'s reason and its measurement.
+let settlingPair = false;
+function redrawPair() {
+  if (settlingPair) return;
+  settlingPair = true;
+  requestAnimationFrame(() => {
+    settlingPair = false;
+    drawPair();
+  });
+}
+
+const SAME_KEYS = {
+  s: () => judgePair("same"),
+  d: () => judgePair("different"),
+  u: () => judgePair("unsure"),
+  l: () => toPair(1),
+  h: () => toPair(-1),
+  ArrowRight: () => toPair(1),
+  ArrowLeft: () => toPair(-1),
+  k: () => widenSides(1),
+  j: () => widenSides(-1),
+  g: () => widenSides(Infinity),
+  0: () => widenSides(-Infinity),
+  "=": () => widenSides(1),
+  "+": () => widenSides(1),
+  "-": () => widenSides(-1),
+  _: () => widenSides(-1),
+};
+
+function pressedInSame(event) {
+  if (!subjectPair()) return;
+  const pressed = SAME_KEYS[event.key] || SAME_KEYS[event.key.toLowerCase()];
+  if (!pressed) return;
+  event.preventDefault();
+  pressed();
+}
+
+function noPairs() {
+  stage.replaceChildren();
+  const done = document.createElement("p");
+  done.className = "done";
+  done.textContent =
+    "no pairs to judge: either the people pass has not run, or no stack the people" +
+    " rule would split is torn between two clusters — which would mean the case" +
+    " this mode exists to catch does not happen in this library.";
+  stage.append(done);
+  about.textContent = "";
+  said.textContent = "";
+  count.textContent = "no pairs to judge";
+}
+
 // --- the two modes ----------------------------------------------------------
 
 async function into(next) {
@@ -835,17 +1053,28 @@ async function into(next) {
   history.replaceState(
     null,
     "",
-    next === "people" ? "#people" : location.pathname + location.search
+    next === "stacks" ? location.pathname + location.search : `#${next}`
   );
   for (const [name, button] of Object.entries(modes)) {
     button.classList.toggle("on", name === mode);
     button.setAttribute("aria-pressed", String(name === mode));
   }
   for (const [name, block] of Object.entries(legends)) block.hidden = name !== mode;
+  if (mode === "same") {
+    if (!torn) torn = await (await fetch("/api/pairs")).json();
+    // The switch may have moved again while that was in flight — the people mode's
+    // own guard, for its reason: the first entry into a mode is a fetch and two
+    // clicks fit inside one.
+    if (mode !== "same") return;
+    if (!torn.pairs.length) return noPairs();
+    sides = sides || torn.montage;
+    drawPair();
+    return;
+  }
   if (mode === "people") {
     if (!crowd) crowd = await (await fetch("/api/persons")).json();
     // The switch may have moved again while that was in flight -- the first entry
-    // into either mode is a fetch, and two clicks fit inside one. Whoever set
+    // into any of the three is a fetch, and two clicks fit inside one. Whoever set
     // `mode` last is the mode the reader is in, so a resumed continuation that no
     // longer matches it draws nothing rather than drawing over the other mode.
     if (mode !== "people") return;
@@ -870,7 +1099,6 @@ async function into(next) {
   step(0);
 }
 
-modes.stacks.addEventListener("click", () => into("stacks"));
-modes.people.addEventListener("click", () => into("people"));
+for (const name of MODES) modes[name].addEventListener("click", () => into(name));
 
 into(mode);

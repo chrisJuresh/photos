@@ -7,6 +7,7 @@
   <p class="modes">
     <button id="mode-stacks" class="mode" type="button">stacks</button>
     <button id="mode-people" class="mode" type="button">people</button>
+    <button id="mode-same" class="mode" type="button">same person</button>
   </p>
   <p id="count" class="count">drawing the first set…</p>
 </header>
@@ -54,6 +55,23 @@
       each answer holds everywhere that person appears, and stopping is free —
       the list is ordered so that the people whose answer would change your
       stacks come first
+    </p>
+  </div>
+  <div id="keys-same" hidden>
+    <p class="keys">
+      <kbd>s</kbd> the same person &middot;
+      <kbd>d</kbd> different people &middot;
+      <kbd>u</kbd> not sure &mdash; these frames cannot settle it
+    </p>
+    <p class="keys">
+      <kbd>h</kbd> back to revise &middot; <kbd>l</kbd> on to the next pair &middot;
+      <kbd>k</kbd> <kbd>j</kbd> see more or fewer of their faces &middot;
+      <kbd>g</kbd> <kbd>0</kbd> every face, or back to the first few
+    </p>
+    <p class="keys">
+      each pair is two clusters torn across a stack the people rule would split,
+      and the list is ordered so that the pairs whose answer would change the most
+      stacks come first &mdash; stopping is free
     </p>
   </div>
 </footer>

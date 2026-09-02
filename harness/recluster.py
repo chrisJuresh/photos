@@ -17,11 +17,22 @@ than reproduced, so what is priced is what a pass would write. **Nothing is writ
 both connections are opened read-only and no threshold is moved, which is
 `harness.floor`'s and `harness.screen`'s posture kept whole.
 
-**The threshold is a similarity and the sweep therefore runs upwards.** `face_person`'s
-threshold is the cosine at or above which two faces are one person, so a *lower* value
-merges more and a *higher* one merges less. Ticket 71 asks for "a sweep of thresholds
-below 0.363", which is the direction that would make the failure worse; the sweep runs
-from the standing value up, because coming apart is what is being measured.
+**The threshold is a similarity and the first sweep therefore runs upwards.**
+`face_person`'s threshold is the cosine at or above which two faces are one person, so a
+*lower* value merges more and a *higher* one merges less. Ticket 71 asks for "a sweep of
+thresholds below 0.363", which is the direction that would make *that* failure worse; the
+first sweep runs from the standing value up, because coming apart is what it measures.
+
+**And a second sweep runs downwards, on evidence that did not exist when the first was
+written.** `two-people` marks a cluster holding two humans and says nothing at all about
+one human split in two, so a loosening could only ever be scored on the damage it does --
+which is how this report came to conclude the knob was the wrong one. The harness's third
+mode collects the other side: the reader looking at two clusters and saying whether they
+are one human, over the pairs torn across a stack ADR 0004's nesting rule would split.
+`harness.same.scored` reads those answers and the table below prices every looser value
+against them, **rejoined and wrongly merged apart and never totalled** -- the same rule
+the two counts above obey, for the same reason. It runs only when there are answers to
+run it on, so a reader who has never opened that mode pays nothing for it.
 
 ## The two things it counts, kept apart
 
@@ -71,7 +82,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from harness import label, people, screen
+from harness import label, people, same, screen
 from harness.people import JUDGED
 from photolib import candidates
 from photolib.config import load
@@ -99,6 +110,14 @@ PROVISIONAL = FLOOR
 # was shown and every count below it is a count of a move away from that. Upwards
 # from there, because the threshold is a similarity: see the module docstring.
 SWEEP = (STANDING, 0.40, 0.425, 0.45, 0.475, 0.50, 0.55, 0.60)
+
+# The candidate thresholds below where it stands, and not a knob either. The
+# standing value is first and is the control: these pairs are two persons in the
+# population they were drawn from, so a clustering that reproduces it must rejoin
+# nothing and merge nothing. Downwards from there, because the threshold is a
+# similarity and rejoining is what is being measured -- `SWEEP`'s reasoning turned
+# round, on evidence `SWEEP` did not have.
+LOOSENING = (STANDING, 0.34, 0.32, 0.30, 0.28, 0.25)
 
 # The candidate size cuts, in shares of the frame's height. Zero is *no cut*, which
 # is the standing population again; `photolib.people.CUT` is the value this table
@@ -161,6 +180,20 @@ class Cut:
     flagged: Came
     friends: Came
     dropped: int
+
+
+@dataclass(frozen=True)
+class Looser:
+    """One looser threshold's answer, scored against the pair verdicts.
+
+    `persons` rides along because it is what says how large a move this is: a value
+    that halves the population is a different proposition from one that merges four
+    clusters, whatever it buys.
+    """
+
+    threshold: float
+    persons: int
+    joined: same.Rejoining
 
 
 @dataclass(frozen=True)
@@ -315,6 +348,39 @@ def recommend(rows: Sequence[Row]) -> float | None:
     return min(qualifying) if qualifying else None
 
 
+# --- what a looser clustering rejoins ------------------------------------------
+
+
+def loosen(rows: Sequence[Looser]) -> float | None:
+    """The looser threshold to move to, or None for *change nothing*.
+
+    **Worth moving to when it rejoins more humans the reader called one than it
+    merges humans they called two**, which is `recommend`'s exchange pointed the
+    other way: the two counts are different failures and neither cancels the other,
+    so the recommendation is made from the trade between them and never from a total.
+
+    The **tightest** such value where several qualify, which is `recommend`'s "a
+    smaller move is a smaller change to the population" in this direction: coming
+    down from the standing value, the smallest move is the largest number.
+
+    The standing value cannot qualify: by construction every judged pair is two
+    persons there -- that is the population they were drawn from -- so it rejoins
+    nothing and falls out of the running rather than being returned as a move.
+
+    None where nothing qualifies, and that is a finding rather than a failure to
+    choose. `harness.floor` and this module's own upward sweep have both returned
+    one, and a knob moved on evidence that does not support it costs the sitting
+    twice.
+    """
+    qualifying = [
+        one.threshold
+        for one in rows
+        if one.threshold != STANDING
+        and len(one.joined.rejoined) > len(one.joined.merged)
+    ]
+    return max(qualifying) if qualifying else None
+
+
 # --- the size cut, priced and now the pass's own -------------------------------
 
 
@@ -413,6 +479,7 @@ def report(
     reads: Sequence[Row],
     subjects: Sequence[Subject],
     cuts: Sequence[Cut] = (),
+    looser: Sequence[Looser] = (),
 ) -> list[str]:
     """What the answers say about re-clustering, and whether they say anything.
 
@@ -482,6 +549,7 @@ def report(
             *named(tightest.flagged.whole),
         ]
     lines += _cuts(cuts)
+    lines += _looser(looser)
     return lines
 
 
@@ -550,6 +618,72 @@ def _cuts(cuts: Sequence[Cut]) -> list[str]:
     return lines
 
 
+def _looser(rows: Sequence[Looser]) -> list[str]:
+    """The downward sweep, scored on the reader's own same-person answers.
+
+    Absent rather than empty when nobody has answered any, because a table of zeroes
+    over no subjects reads as a finding and is not one. What is printed instead says
+    which step is missing, `harness.people.judged_yet`'s courtesy.
+    """
+    if not rows:
+        return [
+            "\nrejoining no pair of clusters has been called one human or two."
+            " `python -m harness.label --open` in its same-person mode is where"
+            " those answers come from, and without them a looser threshold can only"
+            " be scored on the damage it does -- which is the one-sided evidence the"
+            " sweep above concluded from.",
+        ]
+    control = rows[0].joined
+    lines = [
+        "\nrejoin    a looser clustering, scored against the pairs the reader judged."
+        f" {control.same:,} were called one human and {control.different:,} two."
+        " **The two columns are different failures and are never totalled**: a human"
+        " put back together is what a loosening buys, and two humans collapsed is the"
+        " reader's own answer being contradicted. The cost of a *tighter* value is the"
+        " friends-apart column of the sweeps above; this is the other direction's.",
+        "            threshold   persons   rejoined   wrongly merged",
+    ]
+    for one in rows:
+        here = " <- standing" if one.threshold == STANDING else ""
+        lines.append(
+            f"            {one.threshold:>9.3f}   {one.persons:>7,}"
+            f"   {len(one.joined.rejoined):>3,} of {control.same:<4,}"
+            f"   {len(one.joined.merged):>5,} of {control.different:<6,}{here}"
+        )
+    if rows[0].joined.rejoined or rows[0].joined.merged:
+        lines.append(
+            "          the standing row moved a judged pair, which it cannot do if it"
+            " is the population those pairs were drawn from: read the rows below it as"
+            " describing a clustering this report does not have."
+        )
+    lines += _rejoining(rows)
+    return lines
+
+
+def _rejoining(rows: Sequence[Looser]) -> list[str]:
+    """The downward sweep's recommendation, and its reason either way."""
+    moving = loosen(rows)
+    if moving is None:
+        return [
+            "\nfinding   **no looser threshold** rejoins more humans the reader called"
+            " one than it merges humans they called two. The clustering does not"
+            " separate the two on this axis either, so the threshold is not the knob"
+            " that repairs the stacks the nesting rule splits.",
+            f"          the recommendation is to keep the threshold where it stands,"
+            f" {STANDING}, and to write no new population.",
+        ]
+    row = next(one for one in rows if one.threshold == moving)
+    return [
+        f"\nfinding   a threshold of {moving:.3f} **rejoins** more than it merges:"
+        f" {len(row.joined.rejoined):,} of {row.joined.same:,} pairs the reader called"
+        f" one human against {len(row.joined.merged):,} of {row.joined.different:,}"
+        " they called two.",
+        f"          `python -m photolib.people --threshold {moving}` writes that"
+        " population beside the standing one, and the harness asks about it fresh --"
+        " a person is named by its least face, so no answer here carries across.",
+    ]
+
+
 # --- running it ---------------------------------------------------------------
 
 
@@ -615,6 +749,35 @@ def sweep(
     return every_row, reading_row
 
 
+def rejoining(
+    stored: Mapping[str, np.ndarray],
+    faces_of: Mapping[str, frozenset[str]],
+    pairs: Mapping[tuple[str, str], str],
+) -> list[Looser]:
+    """Every looser threshold, scored against the pairs the reader judged.
+
+    `photolib.people.cluster` again and never a rule about what a looser value would
+    do, `sweep`'s discipline: what is priced is what a pass would write.
+    """
+    priced = []
+    for value in LOOSENING:
+        started = time.perf_counter()
+        looser = cluster(stored, value)
+        priced.append(
+            Looser(
+                threshold=value,
+                persons=len(set(looser.values())),
+                joined=same.scored(pairs, faces_of, looser),
+            )
+        )
+        print(
+            f"          {value:.3f}  {priced[-1].persons:,} persons"
+            f"  ({time.perf_counter() - started:.0f}s)",
+            flush=True,
+        )
+    return priced
+
+
 def cutting(
     stored: Mapping[str, np.ndarray],
     faces_of: Mapping[str, frozenset[str]],
@@ -655,6 +818,11 @@ def main(argv: list[str] | None = None) -> int:
     labels = screen.labels_read_only(labels_db)
     try:
         given = people.verdicts(labels, clustering)
+        # The third mode's answers, about the same population and read the same way.
+        # A labels file from before that mode existed has no table and reads as no
+        # answers, which is what the read-only connection makes it: this report
+        # creates nothing.
+        pairs = same.verdicts(labels, clustering)
     finally:
         labels.close()
 
@@ -738,12 +906,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     print("cutting     the small boxes out, at the standing threshold:")
     cuts = cutting(stored, faces_of, shares, given)
+    # Only where there is something to score. A reader who has never opened the
+    # same-person mode pays nothing for a sweep that could only print zeroes, and the
+    # report says which step is missing instead.
+    looser: list[Looser] = []
+    if pairs:
+        print(
+            f"rejoining   {len(pairs):,} judged pairs of clusters, at thresholds"
+            " below where it stands:"
+        )
+        looser = rejoining(stored, faces_of, pairs)
     print(
         *report(
             every,
             reads,
             subjects(given, faces_of, shares, touches, reach),
             cuts,
+            looser,
         ),
         sep="\n",
     )

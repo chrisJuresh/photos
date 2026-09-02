@@ -1186,7 +1186,7 @@ def test_a_file_keyed_on_the_set_alone_is_re_keyed_and_keeps_every_answer(
     # When it was answered rides across too. The column has a default, so losing it
     # would stamp the reader's whole evening with the day of the upgrade in silence.
     assert when == {label.key((A, B)): "2026-08-11", label.key((D, E)): "2026-08-11"}
-    assert tables == {"answer", "person_verdict"}
+    assert tables == {"answer", "person_verdict", "same_person"}
 
 
 def test_a_re_ask_against_the_old_shape_persists_once_it_has_been_re_keyed(
@@ -1222,7 +1222,7 @@ def test_re_keying_happens_once_and_a_second_open_changes_nothing(tmp_path: Path
         # would show up here -- and a second rebuild would drop the first's rows.
         assert {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        } == {"answer", "person_verdict"}
+        } == {"answer", "person_verdict", "same_person"}
     finally:
         conn.close()
 
@@ -1268,6 +1268,6 @@ def test_carrying_over_happens_once_and_a_second_open_changes_nothing(tmp_path: 
         conn.close()
 
     assert carried[label.key((A, B)), 1]["surrounding"] == [C]
-    # Both modes' tables and nothing else: the widening renames the old `answer`
+    # Every mode's table and nothing else: the widening renames the old `answer`
     # aside and drops it, so a leftover copy beside the real one would show up here.
-    assert tables == {"answer", "person_verdict"}
+    assert tables == {"answer", "person_verdict", "same_person"}

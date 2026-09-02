@@ -231,3 +231,14 @@ main {
 .frame.face:hover { border-color: transparent; }
 
 .done { padding: 24px 0; font-size: 15px; }
+
+/* Two persons at once, and the reader is comparing them -- so neither is context
+   and both are drawn the way a single montage is, solid-bordered and side by side.
+   The share is each side's own face count, `.box`'s rule again: a cluster of nine
+   faces beside a cluster of one should not be given the same room, because the
+   question is who these people are and the nine are what says so. The floor keeps
+   the thin side from becoming a sliver, which is `.box.neighbour`'s correction. */
+.box.montage.side {
+  flex: var(--share, 1) 1 0;
+  min-width: max(140px, 30%);
+}
