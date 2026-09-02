@@ -131,26 +131,37 @@ def test_a_frame_beyond_the_run_is_evidence_about_the_fence_and_not_the_threshol
 # --- the linkage rules --------------------------------------------------------
 
 
-def test_complete_linkage_wants_every_member_to_agree() -> None:
-    points = scores(ab=HIGH, ac=LOW, bc=HIGH)
+def agreed(points: dict[tuple[str, str], int]) -> calibrate.Agree:
+    """Those scores as the seam a rule asks through: whether two frames agree.
 
-    assert calibrate.LINKAGE["complete"]([A, B], C, points, STRICT) is False
-    assert calibrate.LINKAGE["complete"]([B], C, points, STRICT) is True
+    `calibrate.agreement` and never a comparison written here, which is the same
+    reason the rules themselves are the harness's rather than this report's: a rule
+    priced against a copy of the predicate would be priced against something the
+    grid does not use.
+    """
+    return calibrate.agreement(points, STRICT)
+
+
+def test_complete_linkage_wants_every_member_to_agree() -> None:
+    agree = agreed(scores(ab=HIGH, ac=LOW, bc=HIGH))
+
+    assert calibrate.LINKAGE["complete"]([A, B], C, agree) is False
+    assert calibrate.LINKAGE["complete"]([B], C, agree) is True
 
 
 def test_neighbour_linkage_wants_only_the_frame_before() -> None:
-    points = scores(ab=HIGH, ac=LOW, bc=HIGH)
+    agree = agreed(scores(ab=HIGH, ac=LOW, bc=HIGH))
 
-    assert calibrate.LINKAGE["neighbour"]([A, B], C, points, STRICT) is True
+    assert calibrate.LINKAGE["neighbour"]([A, B], C, agree) is True
 
 
 def test_majority_linkage_wants_most_of_the_stack() -> None:
     """ADR 0003's open question: whether complete linkage needs softening to
     "matches most members"."""
-    points = scores(ad=HIGH, bd=HIGH, cd=LOW)
+    agree = agreed(scores(ad=HIGH, bd=HIGH, cd=LOW))
 
-    assert calibrate.LINKAGE["majority"]([A, B, C], D, points, STRICT) is True
-    assert calibrate.LINKAGE["majority"]([A], D, {}, STRICT) is False
+    assert calibrate.LINKAGE["majority"]([A, B, C], D, agree) is True
+    assert calibrate.LINKAGE["majority"]([A], D, agreed({})) is False
 
 
 # --- scoring a setting against the labels -------------------------------------

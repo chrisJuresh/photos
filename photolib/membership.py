@@ -15,12 +15,22 @@ website should not import OpenCV to learn them, and asserted equal in
 which is ADR 0003's load-bearing consequence. Until this pass has run there is
 nothing to join, and the grid draws every tile as its own stack.
 
-**The walk is the one the labels were replayed against.** `link` and the three
-rules under `LINKAGE` live here and `harness.label` imports them, which is the
-whole of the argument that ADR 0003's "What the labels settled" describes what the
-grid will draw rather than something adjacent to it: the rule is one rule and not
-two copies that agree today. They are on this side of the seam because the harness
-is deleted when the grid ticket lands and the arrow between them points one way.
+**The walk is the one the labels were replayed against.** `link`, the three rules
+under `LINKAGE` and `agreement` -- the predicate they ask their question through --
+live here and `harness.label` imports them, which is the whole of the argument that
+ADR 0003's "What the labels settled" describes what the grid will draw rather than
+something adjacent to it: the rule is one rule and not two copies that agree today.
+They are on this side of the seam because the harness is deleted when the grid
+ticket lands and the arrow between them points one way.
+
+**What a stack rests on is a value and not a threshold spelled out three times.**
+`agreement` answers *do these two frames agree?* and the linkage rules take that
+answer without knowing what it is made of, so the evidence is one decision with one
+name rather than an implicit seam inside `complete`, `majority` and `neighbour`
+alike. Today the answer is the Match against the reader's strictness and nothing a
+reader can see turns on the seam existing; what it buys is that moving the evidence
+-- ADR 0003 leaves the fingerprint's own threshold unsettled -- is another `Agree`
+and never another walk.
 
 **The setting is part of the key and never a column beside it**, the relationship
 008's vectors and 010's Matches already have with the model and the method that
@@ -103,10 +113,18 @@ class MembershipRefused(RuntimeError):
 # --- the rule ----------------------------------------------------------------
 
 Points = dict[tuple[str, str], int]
+# **Whether two frames agree, as a value: the evidence a stack rests on.** Every
+# linkage rule below asks exactly this question and none of them knows what the
+# answer is made of, so there is one place where a stack's evidence is decided and
+# a different answer is a different value rather than a second walk. Today it is
+# always `agreement` -- the Match against the reader's strictness -- and the whole
+# of this seam's first job is that nothing a reader can see changed when it
+# appeared.
+Agree = Callable[[str, str], bool]
 # Whether a frame joins the stack in hand: the linkage rule, as a value. `link`
 # takes one so that a report can replay the labels against every rule ADR 0003
 # left open without a second copy of the walk.
-Joins = Callable[[Sequence[str], str, Points, int], bool]
+Joins = Callable[[Sequence[str], str, Agree], bool]
 
 
 def match(points: Points, a: str, b: str) -> int:
@@ -125,27 +143,48 @@ def match(points: Points, a: str, b: str) -> int:
     return points.get((b, a), 0) if found is None else found
 
 
-def complete(holding: Sequence[str], frame: str, points: Points, strictness: int) -> bool:
+def agreement(points: Points, strictness: int = STRICTNESS) -> Agree:
+    """The evidence the grid ships: the Match at or above the reader's strictness.
+
+    The one `Agree` there is, and the reason this seam exists rather than the three
+    rules below each spelling it out: what a stack rests on is a decision of its own,
+    separable from how much of a stack a frame has to agree with, and until now the
+    two were the same four lines written three times. Moving the evidence is
+    therefore building another one of these -- ADR 0003 leaves the fingerprint's own
+    threshold unsettled precisely so a rule over the stored cosine can be one -- and
+    never another walk.
+
+    Absent evidence reads as no agreement, which is `match`'s doing rather than this
+    function's, and either order for the same reason it gives.
+    """
+
+    def agrees(early: str, late: str) -> bool:
+        return match(points, early, late) >= strictness
+
+    return agrees
+
+
+def complete(holding: Sequence[str], frame: str, agree: Agree) -> bool:
     """ADR 0003's linkage: a frame joins only if it agrees with all of the stack.
 
     Named rather than inlined because `harness.calibrate` replays the labels
     against this rule and against the softer ones, and the rule it calls complete
     linkage has to be this one and not a second copy of it.
     """
-    return all(match(points, member, frame) >= strictness for member in holding)
+    return all(agree(member, frame) for member in holding)
 
 
-def majority(holding: Sequence[str], frame: str, points: Points, strictness: int) -> bool:
+def majority(holding: Sequence[str], frame: str, agree: Agree) -> bool:
     """"Matches most members" -- the softening ADR 0003 left open, and its answer.
 
     Strictly most, so a frame that agrees with half of a stack does not join it: a
     tie is not most, and precision is the constraint that breaks ties here.
     """
-    agreed = sum(1 for member in holding if match(points, member, frame) >= strictness)
+    agreed = sum(1 for member in holding if agree(member, frame))
     return agreed * 2 > len(holding)
 
 
-def neighbour(holding: Sequence[str], frame: str, points: Points, strictness: int) -> bool:
+def neighbour(holding: Sequence[str], frame: str, agree: Agree) -> bool:
     """Single linkage along the run: a frame joins if it agrees with the one before.
 
     The weakest rule there is, and the one ADR 0003 rejected -- first by argument
@@ -153,7 +192,7 @@ def neighbour(holding: Sequence[str], frame: str, points: Points, strictness: in
     boundary the settled rule drew and found it six points under the precision
     floor.
     """
-    return match(points, holding[-1], frame) >= strictness
+    return agree(holding[-1], frame)
 
 
 # The linkage rules as values, in the order a report reads them: the rule ADR 0003
@@ -167,19 +206,19 @@ LINKAGE: dict[str, Joins] = {
 
 def link(
     run: Sequence[str],
-    points: Points,
-    strictness: int = STRICTNESS,
+    agree: Agree,
     joins: Joins = LINKAGE[DEFAULT_LINKAGE],
 ) -> list[list[str]]:
-    """One run cut into stacks, by `joins` at `strictness`.
+    """One run cut into stacks: by `joins`, over what `agree` says about a pair.
 
-    **Both defaults are read off the settled setting rather than written out**, so
-    that moving one moves the other with it: a caller that says nothing gets the rule
-    the labels chose and never a rule that was current when this line was typed. Every
-    caller that draws or replays a round passes the round's own anyway --
-    `harness.label` passes what its sets are cut with and `harness.calibrate` passes
-    each of `LINKAGE` in turn -- so what the defaults serve is a reader asking what
-    the grid does.
+    **The two are separate arguments because they are separate decisions.** `agree`
+    is what a stack rests on and `joins` is how much of one a frame has to satisfy;
+    the walk between them is neither, and it is the same walk whichever pair the two
+    make. `joins` keeps its default read off the settled setting rather than written
+    out, so that a caller who says nothing gets the rule the labels chose and never
+    the rule that was current when this line was typed; `agree` has none, because a
+    predicate cannot be built without the Matches it reads and a default that
+    silently agreed about nothing would draw a grid of one-frame stacks.
 
     The walk is forward and greedy whichever rule is in force, as the window grouping
     `photolib.browse` used to do was: a frame the walk consumed early can agree with
@@ -189,7 +228,7 @@ def link(
     stacks: list[list[str]] = []
     holding: list[str] = []
     for frame in run:
-        if holding and joins(holding, frame, points, strictness):
+        if holding and joins(holding, frame, agree):
             holding.append(frame)
         else:
             if holding:
@@ -287,11 +326,14 @@ def place(
     joins nothing, and it does not break the run around it either -- the fence is
     cut over the whole population for exactly that reason, and `browse.py` already
     refuses to let a frame it cannot stack split the burst it sits inside.
+
+    The predicate is built here, from the setting, because a setting is what decides
+    both halves of the rule: `agreement` reads its strictness and `joins` reads its
+    linkage, and both are columns of the key these rows are stored under.
     """
     return link(
         [sha256 for sha256 in run if sha256 not in videos],
-        stored,
-        setting.strictness,
+        agreement(stored, setting.strictness),
         setting.joins,
     ) + [[sha256] for sha256 in run if sha256 in videos]
 

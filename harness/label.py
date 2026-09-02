@@ -100,12 +100,17 @@ from photolib.config import load, substrate_path
 # materialises the assignment and this harness judges it, so the walk both of them
 # read has to be one walk and it has to be the shipped one -- what the reader judges
 # has to be what the grid draws, or a round measures something adjacent to it.
+# `agreement` is there for the same reason one layer down: the evidence a stack rests
+# on is the grid's decision too, so a round asks about it through the predicate the
+# pass builds rather than through a threshold of its own.
 # Imported by name rather than reached through the module so that `label.link` and
 # `label.LINKAGE` go on meaning what they have always meant here.
 from photolib.membership import (  # noqa: F401 -- re-exported for `harness.calibrate`
     LINKAGE,
+    Agree,
     Joins,
     Points,
+    agreement,
     complete,
     link,
     majority,
@@ -445,18 +450,23 @@ def questions(
     its own boundary with its own question.
 
     `joins` is the rule the stacks are cut with and it defaults to the one the
-    labels chose, so a bare call cuts the runs the way the grid draws them. The run
-    is cut a second time by single linkage -- never to draw anything, only to fill
-    in `Question.chain`, which is why every member's chain group is looked up and
-    not just the first's.
+    labels chose, so a bare call cuts the runs the way the grid draws them.
+    `strictness` is two things and deliberately so: the predicate the cut asks
+    through, built here by `agreement` exactly as `photolib.membership.place` builds
+    it, and the line `_weakest` measures the margin from -- the second is a distance
+    on the Match and stays one, because a band is a report about how decisive the
+    Match was and never about how the frames were cut. The run is cut a second time
+    by single linkage -- never to draw anything, only to fill in `Question.chain`,
+    which is why every member's chain group is looked up and not just the first's.
     """
     asked: list[Question] = []
+    agree = agreement(points, strictness)
     for camera, run in runs:
         shas = [sha for sha, _ in run]
         reach = len(shas) if context is None else context
         taken = dict(run)
-        stacks = link(shas, points, strictness, joins)
-        chained = [set(walked) for walked in link(shas, points, strictness, neighbour)]
+        stacks = link(shas, agree, joins)
+        chained = [set(walked) for walked in link(shas, agree, neighbour)]
         holds = {sha: index for index, walked in enumerate(chained) for sha in walked}
         at = 0
         for stack in stacks:

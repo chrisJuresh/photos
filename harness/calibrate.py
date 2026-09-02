@@ -115,7 +115,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from harness import label
-from harness.label import Joins, Points
+from harness.label import Agree, Joins, Points, agreement
 from photolib import candidates, matches
 from photolib.config import load
 
@@ -450,10 +450,13 @@ class Tally:
         self.wrong.setdefault(subject.name, []).append(entry)
 
 
-def placed(
-    run: Sequence[str], points: Points, strictness: int, joins: Joins
-) -> dict[str, int]:
+def placed(run: Sequence[str], agree: Agree, joins: Joins) -> dict[str, int]:
     """Which stack each frame of a run lands in, at one setting.
+
+    A setting is the pair of arguments and not one of them: `agree` is what the
+    stacks rest on and `joins` is how much of a stack a frame has to satisfy. Both
+    come in as values, so this replays what the grid draws and never a rule spelled
+    out here to agree with it.
 
     **The whole run and not the scope**, which is the one place the harness's
     window deliberately does not bound things -- and it is the right way round.
@@ -470,7 +473,7 @@ def placed(
     """
     return {
         sha256: index
-        for index, stack in enumerate(label.link(run, points, strictness, joins))
+        for index, stack in enumerate(label.link(run, agree, joins))
         for sha256 in stack
     }
 
@@ -478,18 +481,26 @@ def placed(
 def replay(cases: Iterable[Case], points: Points, strictness: int, joins: Joins) -> Tally:
     """Score one setting against every label, naming what it got wrong.
 
+    The predicate is built once for the whole setting, by the `agreement`
+    `photolib.membership.place` builds the shipped grid's with, so what is scored is
+    the evidence the grid actually rests on. `points` is read straight afterwards
+    for the Match beside each mistake, and that is not a second copy of the
+    question: it is the number the pair scored, reported so a reader can see how far
+    off a wrong answer was, where the predicate only ever says yes or no.
+
     Every pair is counted into both conventions at once -- see `Tally`. `seen`
     holds the pairs already counted into `once`, ordered by sha256 rather than by
     the run, because two answers drawn from one run can name the same two frames
     in either order and the deduplication has to see through that.
     """
     tally = Tally()
+    agree = agreement(points, strictness)
     walked: dict[tuple[str, ...], dict[str, int]] = {}
     seen: set[tuple[str, str]] = set()
     for subject in cases:
         at = walked.get(subject.run)
         if at is None:
-            at = walked[subject.run] = placed(subject.run, points, strictness, joins)
+            at = walked[subject.run] = placed(subject.run, agree, joins)
         for early, late, same in pairs(subject):
             stacked = at[early] == at[late]
             pair = (min(early, late), max(early, late))
