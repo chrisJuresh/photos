@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from harness import recluster
+from harness import recluster, same
 from photolib.people import FLOOR, THRESHOLD
 
 
@@ -192,6 +192,59 @@ def test_the_standing_threshold_is_never_the_recommendation_to_move_to() -> None
     assert recluster.recommend([row(recluster.STANDING, 0, 0)]) is None
 
 
+# --- what a looser threshold rejoins -------------------------------------------
+#
+# The other side of the same knob, and the evidence the upward sweep did not have:
+# `two-people` marks a cluster holding two humans and says nothing about one human
+# split in two, so a loosening could only ever be scored on the damage it does.
+
+
+def looser(threshold: float, rejoined: int, merged: int) -> recluster.Looser:
+    """One row of the downward sweep, with only the two counts it is read on."""
+    return recluster.Looser(
+        threshold=threshold,
+        persons=0,
+        joined=same.Rejoining(
+            rejoined=tuple((f"one{n}", f"other{n}") for n in range(rejoined)),
+            merged=tuple((f"two{n}", f"more{n}") for n in range(merged)),
+        ),
+    )
+
+
+def test_a_threshold_that_rejoins_more_than_it_merges_is_recommended() -> None:
+    assert (
+        recluster.loosen(
+            [looser(recluster.STANDING, 0, 0), looser(0.32, 7, 2), looser(0.28, 9, 11)]
+        )
+        == 0.32
+    )
+
+
+def test_the_tightest_qualifying_looser_threshold_wins() -> None:
+    """`recommend`'s "a smaller move is a smaller change to the population", in this
+    direction: coming down from where it stands, the smallest move is the largest
+    number."""
+    assert recluster.loosen([looser(0.34, 7, 2), looser(0.28, 9, 3)]) == 0.34
+
+
+def test_a_loosening_that_merges_more_than_it_rejoins_everywhere_is_not_recommended() -> None:
+    """A human put back together is what a loosening buys and two humans collapsed
+    is the reader's own answer being contradicted, so a value that does more of the
+    second is not an improvement however many humans it rejoins."""
+    assert recluster.loosen([looser(0.32, 3, 9), looser(0.28, 5, 20)]) is None
+
+
+def test_the_standing_threshold_is_never_a_loosening_to_move_to() -> None:
+    """By construction every judged pair is two persons there -- it is the
+    population they were drawn from -- so it rejoins nothing."""
+    assert recluster.loosen([looser(recluster.STANDING, 0, 0)]) is None
+
+
+def test_the_downward_sweep_starts_where_the_threshold_stands_and_goes_down() -> None:
+    assert recluster.LOOSENING[0] == recluster.STANDING
+    assert all(value <= recluster.STANDING for value in recluster.LOOSENING)
+
+
 # --- the report ----------------------------------------------------------------
 
 
@@ -241,6 +294,69 @@ def test_a_knob_that_does_not_work_says_so_and_keeps_the_standing_value() -> Non
 
     assert "**no threshold**" in said
     assert f"keep the threshold where it stands, {recluster.STANDING}" in said
+
+
+def test_a_loosening_worth_taking_is_reported_as_one() -> None:
+    standing, given = flagged_and_friends()
+    rows = [recluster.measure(recluster.STANDING, standing, flat(standing), given)]
+
+    said = "\n".join(
+        recluster.report(
+            rows,
+            rows,
+            ANSWERED,
+            (),
+            [looser(recluster.STANDING, 0, 0), looser(0.32, 6, 1)],
+        )
+    )
+
+    assert "0.320 **rejoins**" in said
+
+
+def test_a_loosening_that_does_not_work_says_so_and_keeps_the_standing_value() -> None:
+    standing, given = flagged_and_friends()
+    rows = [recluster.measure(recluster.STANDING, standing, flat(standing), given)]
+
+    said = "\n".join(
+        recluster.report(
+            rows,
+            rows,
+            ANSWERED,
+            (),
+            [looser(recluster.STANDING, 0, 0), looser(0.32, 1, 6)],
+        )
+    )
+
+    assert "**no looser threshold**" in said
+    assert f"keep the threshold where it stands, {recluster.STANDING}" in said
+
+
+def test_no_pair_answers_at_all_is_said_to_be_a_missing_step_and_not_a_finding() -> None:
+    """A table of zeroes over no subjects reads as a finding and is not one, so the
+    report says which step is missing instead -- and says why the sweep above could
+    only ever conclude one way without it."""
+    standing, given = flagged_and_friends()
+    rows = [recluster.measure(recluster.STANDING, standing, flat(standing), given)]
+
+    said = "\n".join(recluster.report(rows, rows, ANSWERED))
+
+    assert "same-person mode" in said
+    assert "**no looser threshold**" not in said
+
+
+def test_the_two_counts_of_a_loosening_are_never_totalled() -> None:
+    """`harness.floor`'s rule: a human put back together and two humans collapsed
+    are different failures, so the table carries two columns and no sum."""
+    standing, given = flagged_and_friends()
+    rows = [recluster.measure(recluster.STANDING, standing, flat(standing), given)]
+
+    said = "\n".join(
+        recluster.report(
+            rows, rows, ANSWERED, (), [looser(recluster.STANDING, 0, 0), looser(0.32, 6, 1)]
+        )
+    )
+
+    assert "rejoined   wrongly merged" in said
 
 
 def test_the_sweep_starts_where_the_threshold_stands() -> None:

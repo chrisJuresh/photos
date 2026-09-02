@@ -1093,6 +1093,6 @@ def test_carrying_over_happens_once_and_a_second_open_changes_nothing(tmp_path: 
         conn.close()
 
     assert carried[label.key((A, B))]["surrounding"] == [C]
-    # Both modes' tables and nothing else: the widening renames the old `answer`
+    # Every mode's table and nothing else: the widening renames the old `answer`
     # aside and drops it, so a leftover copy beside the real one would show up here.
-    assert tables == {"answer", "person_verdict"}
+    assert tables == {"answer", "person_verdict", "same_person"}

@@ -92,7 +92,7 @@ from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from harness import people
+from harness import people, same
 from photolib import candidates, matches
 from photolib.config import load, substrate_path
 
@@ -1057,15 +1057,18 @@ def store(path: Path) -> sqlite3.Connection:
     and every use of it goes through `LabelServer`'s lock. `check_same_thread` is
     off because that is what the lock is for.
 
-    **Both modes' tables**, because there is one labels file: the stack answers
-    here and the person verdicts `harness.people` owns, created through this so the
-    harness has one open and one thing to keep. The person table has a widening of
-    its own now -- ticket 78 put the cut in its key -- and it carries its rows
-    forward the way `_carry_over` does, so both messages are printed from here.
+    **Every mode's table**, because there is one labels file: the stack answers
+    here, the person verdicts `harness.people` owns and the pair verdicts
+    `harness.same` owns, created through this so the harness has one open and one
+    thing to keep. The person table has a widening of its own -- ticket 78 put the
+    cut in its key -- and it carries its rows forward the way `_carry_over` does, so
+    both messages are printed from here. The pair table has never had another shape
+    and so has nothing to say.
     """
     conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute(SCHEMA)
+    same.ensure(conn)
     for carried in (people.ensure(conn), _carry_over(conn)):
         if carried:
             print(carried)
@@ -1225,6 +1228,7 @@ class LabelServer(ThreadingHTTPServer):
         strictness: int = STRICTNESS,
         linkage: str = DEFAULT_LINKAGE,
         persons: Sequence[people.Person] = (),
+        pairs: Sequence[same.Pair] = (),
         clustering: people.Clustering | None = None,
         carried: Collection[str] = (),
     ):
@@ -1258,6 +1262,11 @@ class LabelServer(ThreadingHTTPServer):
         # is read once beside the ranking rather than on every request.
         self.carried = frozenset(carried)
         self.asked = {one.person: one for one in self.persons}
+        # The third mode. Ranked once at startup beside the persons and for the same
+        # reason: how many stacks a merge would change is counted across every stack,
+        # so there is no part of that queue that could be computed later.
+        self.pairs = tuple(pairs)
+        self.paired = {pair.key: pair for pair in self.pairs}
         # Every touch of the labels database goes through this, which is what
         # lets one connection serve threaded requests -- see `store`.
         self._lock = threading.Lock()
@@ -1369,6 +1378,61 @@ class LabelServer(ThreadingHTTPServer):
             "linkage": people.STACK_SETTING["linkage"],
         }
 
+    # --- the same-person mode -------------------------------------------------
+
+    def which(self) -> dict:
+        """The pairs worth asking about, with what the reader has said so far."""
+        with self._lock:
+            return self._pairs()
+
+    def agree(self, one: str, other: str, verdict: str) -> dict:
+        """Record one verdict about one pair and hand back the list it changed.
+
+        One lock over the write and the read that follows it, `judge`'s reason: the
+        counter the reader is shown is the count as of their own press.
+        """
+        with self._lock:
+            same.record(self.labels, one, other, verdict, clustering=self.clustering)
+            return self._pairs()
+
+    def _pairs(self) -> dict:
+        """Every pair worth asking about, all at once -- `_people`'s arrangement.
+
+        Two montages per pair, and each side drawn from its own faces: two persons in
+        one frame have two different faces in it, so a montage assembled from the
+        frames alone would draw the reader somebody else.
+        """
+        given = same.verdicts(self.labels, self.clustering, carried=self.carried)
+        judged, left = same.progress(self.pairs, given)
+        return {
+            "pairs": [
+                {
+                    "persons": list(pair.key),
+                    "stacks": pair.stacks,
+                    "faces": [
+                        [
+                            {"sha": face.sha256, "idx": face.idx, "share": face.share}
+                            for face in side
+                        ]
+                        for side in pair.faces
+                    ],
+                    "answer": given.get(pair.key),
+                }
+                for pair in self.pairs
+            ],
+            "montage": MONTAGE,
+            "judged": judged,
+            "left": left,
+            "threshold": self.clustering.threshold,
+            "cut": self.clustering.cut,
+            # What the queue was counted over, so the page can say which grid these
+            # pairs were drawn against. The *verdict* is not about that grid -- two
+            # clusters are one human or they are not -- and `harness.same` is where
+            # that distinction is written down.
+            "strictness": people.STACK_SETTING["strictness"],
+            "linkage": people.STACK_SETTING["linkage"],
+        }
+
     def _payload(self) -> dict:
         """Everything this sitting has been dealt, with what the reader said about it.
 
@@ -1466,6 +1530,8 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._json(200, self.server.payload())
         elif path == "/api/persons":
             self._json(200, self.server.whom())
+        elif path == "/api/pairs":
+            self._json(200, self.server.which())
         elif substrate:
             self._frame(substrate.group(1))
         else:
@@ -1490,6 +1556,8 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._answer()
         elif path == "/api/person":
             self._verdict()
+        elif path == "/api/pair":
+            self._agreed()
         else:
             self.close_connection = True
             self._respond(404)
@@ -1623,6 +1691,37 @@ class LabelHandler(BaseHTTPRequestHandler):
             return
         self._json(200, self.server.decide(person, verdict))
 
+    def _agreed(self) -> None:
+        """Record one judgement about one pair. The same-person mode's only write.
+
+        The body names a pair rather than describing one, `_verdict`'s discipline:
+        the two names are matched against the queue this server is serving, so an
+        answer about two clusters that are not being asked about -- names off another
+        clustering, or a pair whose merge moves no stack -- is a 404 rather than a
+        row. Either order names the same pair, because the reader is asked about two
+        clusters and not about a direction.
+        """
+        payload = self._json_body()
+        if payload is None:
+            return
+        persons = payload.get("persons")
+        if (
+            not isinstance(persons, list)
+            or len(persons) != 2
+            or not all(isinstance(person, str) for person in persons)
+        ):
+            self._json(400, {"error": "persons"})
+            return
+        pair = same.pairing(*persons)
+        if pair not in self.server.paired:
+            self._json(404, {"error": "persons"})
+            return
+        verdict = payload.get("verdict")
+        if verdict not in same.VERDICTS:
+            self._json(400, {"error": "verdict"})
+            return
+        self._json(200, self.server.agree(*pair, verdict))
+
     def _json_body(self) -> dict | None:
         """A validated JSON object body, or None having already answered.
 
@@ -1731,6 +1830,12 @@ def main(argv: list[str] | None = None) -> int:
     # about the uncut population is an answer here too -- ticket 78. Read once, with
     # the ranking, because the catalog does not change while the server is up.
     carried = people.unchanged(conn, clustering)
+    # The third mode's queue, ranked here beside the persons and for its reason: how
+    # many stacks a merge would change is counted across every stack at once. It is
+    # drawn from the stacks the nesting rule would split rather than from the
+    # embeddings -- see `harness.same` -- so it is empty, and the page says so, when
+    # the people pass or the membership pass has not run.
+    pairs = same.asking(conn, clustering)
 
     server = LabelServer(
         ("127.0.0.1", args.port),
@@ -1742,6 +1847,7 @@ def main(argv: list[str] | None = None) -> int:
         strictness=args.strictness,
         linkage=args.linkage,
         persons=persons,
+        pairs=pairs,
         clustering=clustering,
         carried=carried,
     )
@@ -1790,6 +1896,12 @@ def main(argv: list[str] | None = None) -> int:
             " `python -m photolib.people` has not run, or"
             " `python -m photolib.membership` has not"
         )
+    agreed = same.verdicts(labels, clustering, carried=carried)
+    settled, outstanding = same.progress(pairs, agreed)
+    print(
+        f"  same-person     {len(pairs)} pairs of clusters torn across a stack the"
+        f" nesting rule would split, {settled} judged, {outstanding} left"
+    )
     if args.open:
         import webbrowser
 
