@@ -725,6 +725,116 @@ def test_a_pick_the_held_back_quarter_agrees_with_is_printed_as_checking_out(
     assert "the pick checks out" in capsys.readouterr().out
 
 
+# --- a set the reader has been asked about twice ------------------------------
+
+
+def again(subject, *, round: int, **marks):
+    """The same set asked again in another round, answered however `marks` says."""
+    return calibrate.case(
+        answer(subject.members, surrounding=subject.run[2:], round=round, **marks),
+        subject.run,
+    )
+
+
+def test_a_set_answered_the_same_way_twice_is_a_repeat_and_not_a_contest() -> None:
+    """The reader agreeing with themselves is the numerator of the rate, not a
+    reason to drop anything."""
+    asked = sitting(3)
+    twice = [*asked, again(asked[0], round=1)]
+
+    assert list(calibrate.asked_again(twice)) == [calibrate.filed(asked[0])]
+    assert calibrate.contested(twice) == {}
+
+
+def test_a_set_the_reader_placed_two_ways_is_contested() -> None:
+    """One round kept the two frames together and another pushed one out. Both
+    answers are the reader's and only one of them can be what a rule reproduces."""
+    asked = sitting(3)
+    argued = asked[0]
+    twice = [*asked, again(argued, round=1, evicted=[argued.members[1]], verdict="split")]
+
+    assert list(calibrate.contested(twice)) == [calibrate.filed(argued)]
+
+
+def test_a_wider_view_the_second_time_is_not_a_contradiction() -> None:
+    """A re-ask can be answered with the view widened further, and a frame only the
+    second answer saw is not something the first one denied. Scoring that as a
+    disagreement would measure how far the reader scrolled."""
+    x, y, z = trio(0)
+    narrow = calibrate.case(answer([x, y], round=3), (x, y, z))
+    wide = calibrate.case(answer([x, y], surrounding=[z], round=1), (x, y, z))
+
+    assert calibrate.disagree(narrow, wide) == []
+    assert calibrate.contested([narrow, wide]) == {}
+
+
+def test_an_agreeing_re_ask_is_one_answer_in_each_round_and_never_two_in_one() -> None:
+    """Which is the whole of what "not double-counted" needs here: the rounds are
+    scored apart, so a set answered the same way twice is one vote in the evidence
+    and one vote in the check, and never two votes anywhere."""
+    asked = sitting(3)
+    split = calibrate.rounds([*asked, again(asked[0], round=1)])
+
+    assert [len(subjects) for subjects in split.values()] == [1, 3]
+
+
+def test_a_contested_set_is_scored_against_no_setting(capsys) -> None:
+    """The ticket's one real decision. The set is the only one any setting gets
+    wrong here, so scoring it would show up as a precision under 100% and a case
+    named in the diagnosis."""
+    asked = sitting(40)
+    argued = asked[0]
+    twice = [*asked, again(argued, round=1, evicted=[argued.members[1]], verdict="split")]
+    choosing, _ = calibrate.partition([one for one in asked if one is not argued])
+
+    chosen = calibrate.report(twice, told(asked, wrong_in=[argued]), [], strictnesses=(STRICT,))
+
+    printed = capsys.readouterr().out
+    assert chosen == calibrate.Setting(STRICT, "complete")
+    assert f"0/{len(choosing)} cases wrong" in printed
+
+
+def test_the_contested_sets_are_named_and_the_convention_is_stated(capsys) -> None:
+    """A convention a reader has to open the source to find is one they will read
+    the numbers without."""
+    asked = sitting(40)
+    argued = asked[0]
+    twice = [*asked, again(argued, round=1, evicted=[argued.members[1]], verdict="split")]
+
+    calibrate.report(twice, told(asked, wrong_in=[]), [], strictnesses=(STRICT,))
+
+    printed = capsys.readouterr().out
+    assert "1 set(s) carry an answer from more than one round, and 0 of them agree" in printed
+    assert "self-consistency rate of 0.0%" in printed
+    assert "none of those is scored against any setting at all" in printed
+    assert argued.name in printed
+    assert "round 1 split" in printed and "round 3 accept" in printed
+
+
+def test_a_repeat_that_agrees_is_a_rate_and_sets_nothing_aside(capsys) -> None:
+    asked = sitting(40)
+    twice = [*asked, again(asked[0], round=1), again(asked[1], round=1)]
+
+    calibrate.report(twice, told(asked, wrong_in=[]), [], strictnesses=(STRICT,))
+
+    printed = capsys.readouterr().out
+    assert "2 set(s) carry an answer from more than one round, and 2 of them agree" in printed
+    assert "self-consistency rate of 100.0%" in printed
+    assert "every answer in the file is scored" in printed
+
+
+def test_no_set_asked_twice_is_said_plainly_and_never_a_rate(capsys) -> None:
+    """A rate over nothing is worse than no rate. The floor has moved twice with
+    this number never measured, and the report says so rather than printing 100%."""
+    asked = sitting(40)
+
+    calibrate.report(asked, told(asked, wrong_in=[]), [], strictnesses=(STRICT,))
+
+    printed = capsys.readouterr().out
+    assert "no set carries an answer from more than one round" in printed
+    assert "self-consistency rate of" not in printed
+
+
 # --- which round chooses ------------------------------------------------------
 
 
