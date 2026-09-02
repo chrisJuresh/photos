@@ -120,6 +120,12 @@ Points = dict[tuple[str, str], int]
 # always `agreement` -- the Match against the reader's strictness -- and the whole
 # of this seam's first job is that nothing a reader can see changed when it
 # appeared.
+#
+# **It is always asked in run order**: the member already in the stack first, the
+# frame being considered second. So a predicate need not be symmetric, and what it
+# may not assume is that its *evidence* is keyed that way round -- a `pair_match`
+# row exists in one order only, which is why `match` looks both ways and why
+# anything reading another table has to do the same.
 Agree = Callable[[str, str], bool]
 # Whether a frame joins the stack in hand: the linkage rule, as a value. `link`
 # takes one so that a report can replay the labels against every rule ADR 0003

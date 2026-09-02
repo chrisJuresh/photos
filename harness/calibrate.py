@@ -478,15 +478,19 @@ def placed(run: Sequence[str], agree: Agree, joins: Joins) -> dict[str, int]:
     }
 
 
-def replay(cases: Iterable[Case], points: Points, strictness: int, joins: Joins) -> Tally:
+def replay(cases: Iterable[Case], points: Points, agree: Agree, joins: Joins) -> Tally:
     """Score one setting against every label, naming what it got wrong.
 
-    The predicate is built once for the whole setting, by the `agreement`
-    `photolib.membership.place` builds the shipped grid's with, so what is scored is
-    the evidence the grid actually rests on. `points` is read straight afterwards
-    for the Match beside each mistake, and that is not a second copy of the
-    question: it is the number the pair scored, reported so a reader can see how far
-    off a wrong answer was, where the predicate only ever says yes or no.
+    **`agree` arrives built and is never made here**, which is what keeps `sweep` the
+    one place a rule is named. Taking a strictness and building the predicate from it
+    would be this function deciding that agreement is a threshold on the Match, which
+    is exactly the decision the seam took away from it.
+
+    `points` arrives as well and is not that argument twice over. The predicate only
+    ever says yes or no; the Match beside each mistake is how far off it was, which
+    is a number about the pair rather than the question the walk asked of it. A rule
+    that never reads the Match still reports one here, and that is what the column is
+    for.
 
     Every pair is counted into both conventions at once -- see `Tally`. `seen`
     holds the pairs already counted into `once`, ordered by sha256 rather than by
@@ -494,7 +498,6 @@ def replay(cases: Iterable[Case], points: Points, strictness: int, joins: Joins)
     in either order and the deduplication has to see through that.
     """
     tally = Tally()
-    agree = agreement(points, strictness)
     walked: dict[tuple[str, ...], dict[str, int]] = {}
     seen: set[tuple[str, str]] = set()
     for subject in cases:
@@ -540,9 +543,16 @@ def sweep(
     set one aside is made reproducible: a rule the labels cannot price is
     excluded by naming it on the command line rather than by arguing past the
     recommendation afterwards.
+
+    **This is the one place a setting becomes a rule**, and deliberately: `agreement`
+    is called here and nowhere below it, so a report that wants to price different
+    evidence builds a different predicate on this line rather than threading a
+    threshold through the scoring.
     """
     return {
-        Setting(strictness, linkage): replay(cases, points, strictness, LINKAGE[linkage])
+        Setting(strictness, linkage): replay(
+            cases, points, agreement(points, strictness), LINKAGE[linkage]
+        )
         for linkage in linkages
         for strictness in strictnesses
     }

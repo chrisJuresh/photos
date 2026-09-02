@@ -507,27 +507,41 @@ def test_a_greedy_walk_can_split_a_stack_the_rule_would_have_held(corpus: Stacks
 # lives here on purpose -- the prefactor's whole claim is that the grid did not
 # move, and a claim like that has to be asserted against what was actually replaced
 # rather than against a paraphrase of it.
+#
+# **It is dead code by design and nothing keeps it in step with `link`.** That is
+# the point: it is a photograph of the old rule and not a second live one. It is
+# also spent the moment the evidence moves -- the ticket that prices a rule over the
+# fingerprint is where this block and the test under it go, because an equivalence
+# to a rule nothing ships is a test that can only fail for the wrong reason.
 
 
-def _was_complete(holding, frame, points, strictness) -> bool:
+def _was_complete(
+    holding: Sequence[str], frame: str, points: dict[tuple[str, str], int], strictness: int
+) -> bool:
     return all(membership.match(points, member, frame) >= strictness for member in holding)
 
 
-def _was_majority(holding, frame, points, strictness) -> bool:
+def _was_majority(
+    holding: Sequence[str], frame: str, points: dict[tuple[str, str], int], strictness: int
+) -> bool:
     agreed = sum(
         1 for member in holding if membership.match(points, member, frame) >= strictness
     )
     return agreed * 2 > len(holding)
 
 
-def _was_neighbour(holding, frame, points, strictness) -> bool:
+def _was_neighbour(
+    holding: Sequence[str], frame: str, points: dict[tuple[str, str], int], strictness: int
+) -> bool:
     return membership.match(points, holding[-1], frame) >= strictness
 
 
 WAS = {"complete": _was_complete, "majority": _was_majority, "neighbour": _was_neighbour}
 
 
-def _was_link(run, points, strictness, joins) -> list[list[str]]:
+def _was_link(
+    run: Sequence[str], points: dict[tuple[str, str], int], strictness: int, joins
+) -> list[list[str]]:
     stacks: list[list[str]] = []
     holding: list[str] = []
     for frame in run:
@@ -587,8 +601,13 @@ def test_the_predicate_cuts_every_run_where_the_rule_it_replaced_did() -> None:
                 )
                 drawn.add(tuple(len(stack) for stack in cut))
 
-    # Not a vacuous agreement: the corpus really did draw a run whole, a run of
-    # singletons, and a good many cuts in between.
+    # Not a vacuous agreement. Two rules that never stack anything agree perfectly,
+    # so the corpus has to have exercised both ends and the middle: the whole run in
+    # one stack, the run in twelve stacks of one, and enough distinct shapes between
+    # them that the rules were plainly disagreeing with each other rather than all
+    # returning the same cut. 20 is a floor well under the 120 this corpus draws --
+    # what it rules out is a corpus collapsed to a handful of shapes, not a count
+    # worth tuning.
     assert (len(run),) in drawn
     assert (1,) * len(run) in drawn
     assert len(drawn) > 20

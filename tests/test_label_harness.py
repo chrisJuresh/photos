@@ -24,7 +24,7 @@ import pytest
 
 from harness import label
 from harness.label import STRICTNESS, Question
-from photolib import matches
+from photolib import matches, membership
 
 
 def sha_of(seed: str) -> str:
@@ -44,16 +44,19 @@ def scores(**pairs: int) -> dict[tuple[str, str], int]:
     return {(sha_of(early), sha_of(late)): points for (early, late), points in pairs.items()}
 
 
-def agreed(points: dict[tuple[str, str], int], *strictness: int) -> label.Agree:
+def agreed(
+    points: dict[tuple[str, str], int], strictness: int = membership.STRICTNESS
+) -> label.Agree:
     """Those scores as the seam the walk asks through: whether two frames agree.
 
     `label.agreement` and never a comparison spelled out here -- the predicate is
     the grid's, and a test written against a copy of it would assert about the copy.
-    The strictness is passed through rather than defaulted, so a bare call falls back
-    to the grid's exactly as `link` used to; every score below is plainly over that
-    line or plainly under it, so which line it is only matters where it is named.
+    The default is the *grid's* strictness and not this file's, which is what `link`
+    used to fall back to; the two have been the same number and are not now. Every
+    score below is plainly over both lines or plainly under them, so which one is in
+    force only matters where a test names it.
     """
-    return label.agreement(points, *strictness)
+    return label.agreement(points, strictness)
 
 
 # --- forming the stack the reader is shown -----------------------------------
