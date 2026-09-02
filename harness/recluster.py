@@ -23,6 +23,12 @@ merges more and a *higher* one merges less. Ticket 71 asks for "a sweep of thres
 below 0.363", which is the direction that would make the failure worse; the sweep runs
 from the standing value up, because coming apart is what is being measured.
 
+**The other direction is `harness.nesting`**, and it is a different report because it
+is a different question: not whether a tighter cut takes the flagged clusters apart,
+but whether a looser one rejoins the humans ADR 0004's nesting rule is splitting
+stacks over. It sweeps both ways and scores on a subject this module has no way to
+see -- what the rule would do to the grid.
+
 ## The two things it counts, kept apart
 
 **A flagged cluster coming apart** is the failure being fixed. **A judged friend coming

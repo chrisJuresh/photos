@@ -434,6 +434,51 @@ because complete linkage's merge order depends on every cluster at once, so the 
 friend columns can disagree. That one landed too: the cut is a column of `face_person`'s key
 at migration 013 and the pass stands at 0.02.
 
+To ask the same knob the other way — **what ADR 0004's nesting rule would do to the grid, and
+whether a looser clustering improves it.** `harness.recluster` swept upwards, because coming
+apart was what it measured; the direction that rejoins one human read as two is looser, and
+nothing had swept it, so "the threshold is the wrong knob" had evidence for one direction. This
+sweeps both ways from where it stands, the standing row first and still reporting whether it
+reproduces the stored assignment. What made the question answerable is a column that did not
+exist: **the stacks the rule would split where every frame holds somebody**, computed from
+stored rows by clustering the vectors, taking each frame's people at `photolib.people.FLOOR`,
+walking `stack_member` at `photolib.browse.STACK_SETTING` and asking nesting — the floor and
+the setting read, never copied. That qualifier is the whole of it: a stack that splits because
+some of its frames hold nobody is the rule firing as designed and no threshold moves a body
+row, so **ADR 0004's nobody clause is deliberately not simulated** and what is left is the part
+a clustering can reach. It is a ceiling on what a clustering could buy rather than a count of
+clustering errors, and the sweep is what tells the two apart. **The two things it counts stay
+apart and are never totalled**: the stacks a value buys back, and the answers it puts in
+question — and it says plainly that the second is unpriced rather than zero, because the reader
+was never asked whether two clusters are the same human. It names the stacks each value stops
+splitting, so a reader with a run in mind can find where theirs turns, and it prices the 0.02
+cut beside the sweep rather than inside it. **It is the measurement and never the pass**: both
+connections read-only, no population written, no substrate opened, `G:` never touched. There
+are no arguments and the sweep is not a knob. Eleven minutes of CPU and no disk to speak of —
+seven of them in the two loosest rows, because a lower threshold merges more and complete
+linkage's queue grows with it.
+
+```bash
+python -m harness.nesting
+```
+
+Its output is ADR 0004's "What the downward sweep settled", and the knob lost a third time.
+The rule would split **94** of the 3,984 multi-frame stacks, holding 707 frames — but only
+**346** of those stacks hold anybody at all at the floor, so it is a no-op on 91% of them, and
+only **53** of the 94 are stacks where every frame holds somebody. The other 41 hold a frame
+with nobody read in them, which is the rule meeting a mixed run and is a body's answer rather
+than this clustering's. Loosening buys the 53 down to 49 at 0.300 and only to
+**39 at 0.100**, where 2,043 persons have become 574 — so at most 14 of the 53 were ever the
+clustering's doing. Tightening is worse in the same terms — 0.400 splits 95 and 0.450 splits
+97, each losing a stack the standing value held together. The reader's own thirteen-frame case
+turns at 0.300 and not at 0.320, for 468 persons off the population and nine of their 202
+answers sharing a cluster, seven at the floor. **No value swept puts a friend and a stranger
+inside one person**, which is the one contradiction these answers can show. The cut changes
+nothing: 1,397 persons, the same 94 and the same 53.
+So **0.363 stands and no new population was written**, and what
+[#56](https://github.com/chrisJuresh/photos/issues/56) needs is a guard on the rule rather than
+a different clustering under it.
+
 To turn those answers into the two numbers the grid inherits — the **calibration report**.
 It replays every label against a sweep of strictness values and all three linkage rules,
 and says how well each setting reproduces what the reader actually said. **Precision and

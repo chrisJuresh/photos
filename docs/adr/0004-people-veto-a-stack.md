@@ -452,6 +452,95 @@ by name, and at `NO_CUT` there is no population behind the answers for them to h
 inherited from, so every input either report has is one the reader gave about the population it
 reads.
 
+### What the downward sweep settled: the rule needs a guard, not a looser clustering
+
+`python -m harness.nesting` is [#91](https://github.com/chrisJuresh/photos/issues/91), and it
+asked the question the two reports above could not. Both price a knob against the reader's
+answers about *persons*; neither can ask what the rule at the top of this document would do to
+a *stack*, because the rule reads a frame's people and they stop at a person's boxes. So the
+column this report brings is **the stacks the nesting rule would split where every frame holds
+somebody** — computed from stored rows, by clustering the vectors, taking each frame's people
+at `photolib.people.FLOOR`, walking `stack_member` at `photolib.browse.STACK_SETTING` and
+asking nesting. The floor and the setting are read and never copied.
+
+**Why the qualifier is the whole of it.** Priced against the shipped grid — strictness 10 with
+the chain — the rule would split **94** of the 3,984 multi-frame stacks, holding **707** frames
+between them. Only **53** of the 94 are stacks where every frame holds somebody; the other 41
+hold a frame with nobody read in it. Presence is a body's answer and no value of the person
+threshold moves a body row, so 41 of the 94 are fixed whatever the clustering does, and a sweep
+scored on all 94 would flatter every value equally. The nobody clause is therefore deliberately
+not simulated, and the 53 are the only part of the split count a threshold reaches.
+
+**And the rule is a no-op on 91% of stacks.** Only **346** of the 3,984 hold anybody at all at
+the floor. Whatever the rule costs or buys is concentrated in that population.
+
+**The sweep runs both ways now.** "What the sweep settled" above ran upwards, because *coming
+apart* was what it was measuring, and the direction that rejoins one human read as two is
+looser — so the finding that the threshold is the wrong knob had evidence for one direction
+only. It has evidence for both now, and it says the same thing.
+
+| threshold | persons | split | every frame holds somebody | bought back | lost | friends contested | …at the floor |
+|---|---|---|---|---|---|---|---|
+| 0.100 | 574 | 76 | **39** | 14 | 0 | 32 | 28 |
+| 0.200 | 989 | 81 | 44 | 9 | 0 | 23 | 19 |
+| 0.250 | 1,262 | 84 | 45 | 8 | 0 | 17 | 13 |
+| 0.300 | 1,575 | 88 | 49 | 4 | 0 | 9 | 7 |
+| 0.320 | 1,725 | 92 | 52 | 1 | 0 | 6 | 4 |
+| 0.340 | 1,874 | 92 | 52 | 1 | 0 | 4 | 2 |
+| **0.363** | 2,043 | 94 | **53** | — | — | — | — |
+| 0.400 | 2,375 | 95 | 54 | 0 | 1 | 0 | 0 |
+| 0.450 | 2,896 | 97 | 54 | 0 | 1 | 0 | 0 |
+
+The cost is carried over both of the populations "What the sweep settled" scores over — every
+judged cluster, and the ones carrying a box that reaches the floor — and the recommendation
+reads the second, because a person whose every box is under the floor is in no frame's people
+before a join or after.
+
+**Tightening is worse, which is the half that was already expected.** 0.400 and 0.450 each
+split *more* stacks and each lose one the standing value held together. That is the upward
+direction scored on this subject for the first time, and it agrees with what the flagged
+clusters said about it.
+
+**The subject survives the knob.** At 0.100, where the 2,043 persons have become 574, **39 of
+the 53 still split.** So at most 14 of them were ever the clustering's doing, and the 53 is a
+ceiling on what any threshold could buy rather than a count of clustering errors: the rest are
+the rule reading two sets of people because two sets of people were read, and no cosine changes
+that.
+
+**The reader's own case turns at 0.300, and it is not a bargain.** The thirteen-frame run
+`[18072],[21747,21009],[2905,…,13141]` — stack `665b42ee…`, twelve faces on one person and
+`15835` on its own at a box 0.208 of the frame's height — is one of the 53, and it stops
+splitting at 0.300 and not at 0.320. The report names it there, with the two other stacks that
+turn at the same value, so a reader with a run in mind finds theirs rather than being told.
+Buying it takes 468 persons off the population — 2,043 to 1,575 — for four of the 53 stacks,
+and leaves nine of the reader's 202 answers sharing a cluster with another of their answers,
+seven of them at the floor.
+
+**No value swept puts a friend and a stranger inside one person.** That is the one
+contradiction these answers can show, and none of them showed it, down to 0.100. It is not the
+same as loosening being free: the reader was never asked whether two clusters are the same
+human — `person_verdict` has no such answer — so two friends merging is **unpriced rather than
+priced at nothing**, and the `friends contested` column counts answers put in question and not
+mistakes made. The report says so where it prints the column, because a zero read as a licence
+would be an absence of evidence dressed as evidence of absence.
+
+**The cut changes nothing here.** Clustering at 0.363 over only the faces reaching
+`photolib.people.CUT` gives 1,397 persons and **the same 94 splits and the same 53**, and at the
+loosest value swept it gives 402 persons, 75 and 39 against the uncut 76 and 39. So the uncut
+population the reader's answers were given about is not answering a different question from the
+one the pass would ask, and the sweep above stands for both. It is priced rather than assumed,
+at both ends of the range, and the report prints the difference.
+
+**So 0.363 stands, for the third time, and no new population was written.** The 202 answers are
+intact and nothing was re-clustered. What this leaves for
+[#56](https://github.com/chrisJuresh/photos/issues/56) is that the nesting rule needs a **guard
+on the rule** rather than a different clustering under it — the two candidates the evidence
+points at being the reader's own *these two clusters are one person* answer, which does not
+exist yet and is [#88](https://github.com/chrisJuresh/photos/issues/88)'s user story 11, and a
+guard on how much of a run a person has to appear in before their absence may veto it. This
+report does not choose between them; it establishes that the person threshold is not one of
+them.
+
 ## The cover, and the surprise it introduces
 
 **Most people first, then the existing rule among the frames tied at the top** — the sharpest
