@@ -34,6 +34,12 @@ against them, **rejoined and wrongly merged apart and never totalled** -- the sa
 the two counts above obey, for the same reason. It runs only when there are answers to
 run it on, so a reader who has never opened that mode pays nothing for it.
 
+**The other direction is `harness.nesting`**, and it is a different report because it
+is a different question: not whether a tighter cut takes the flagged clusters apart,
+but whether a looser one rejoins the humans ADR 0004's nesting rule is splitting
+stacks over. It sweeps both ways and scores on a subject this module has no way to
+see -- what the rule would do to the grid.
+
 ## The two things it counts, kept apart
 
 **A flagged cluster coming apart** is the failure being fixed. **A judged friend coming
