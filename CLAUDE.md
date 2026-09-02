@@ -717,24 +717,54 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   There is no contention check to run first: two writers in one tree share an index and a
   `HEAD`, so one's commit sweeps up the other's half-finished work and neither `git status`
   means anything, and the only rule that reliably prevents that is one with no exception in it.
+  **A second hook (`.claude/hooks/worktree-owner.py`) closes the half that rule does not**:
+  the guard isolates *changes*, so two sessions in one worktree pass every check it makes,
+  and the first write into a tree claims it for that session. Reading another tree stays
+  allowed, and a claim lapses rather than locking. Both are pinned by digest in
+  `.claude/worktree-per-change.json` and gated by `tests/test_worktree_guard.py` and
+  `tests/test_worktree_owner.py`; neither is this repository's to edit — a fix goes upstream.
 
   ```bash
+  git fetch origin development
   git worktree add .claude/worktrees/<name> -b <short-slug> origin/development
   ```
+
+  **The fetch is not optional.** The base is the fetched remote tip, and the main checkout
+  is routinely behind it — every change that lands moves the base under every change still
+  open, so a stale local ref reintroduces work already merged as a conflict.
 
   Then **enter it with `EnterWorktree`**, not `cd` — entering is what makes reaching back into
   the main checkout refused rather than merely discouraged. A bare `EnterWorktree` cuts from
   `main`, which is the wrong base here.
 - **Land the change at the end of every request, without being asked.** Stage the paths you
   changed by name (`git status` first — never `git add -A`, and never commit media, database or
-  vault state; rule 5 above still applies), commit, then `git push -u origin HEAD`,
-  `gh pr create --base development --fill`, `gh pr merge --squash --delete-branch`. Do not
-  wait for permission, and do not leave a finished change on a local branch. If nothing
-  changed, say so and skip it.
+  vault state; rule 5 above still applies), commit, then hand the rest to `land.py`, which is
+  the same four commands with the verification each of them needs:
+
+  ```bash
+  python .claude/scripts/land.py
+  ```
+
+  Do not wait for permission, and do not leave a finished change on a local branch. If
+  nothing changed, say so and skip it.
+
+  By hand it is `git push -u origin HEAD`, `gh pr create --base development --fill`,
+  `gh pr merge --squash`, and then the branch delete — and **never
+  `gh pr merge --delete-branch`.** The flag makes `gh` check out the *base* branch to do the
+  local delete, and the main checkout permanently holds `development`, so it fails *after*
+  the merge: `gh` exits 1, the PR is `MERGED`, and the branch it was asked to remove is the
+  one left standing. So a non-zero exit from `gh pr merge` is a question, not an answer —
+  ask the forge, and finish by asking the **remote** rather than a tracking ref, because the
+  fetch that would refresh one fails on exactly the ref your own merge just moved:
+
+  ```bash
+  git ls-remote --heads origin <short-slug>
+  git push origin --delete <short-slug>
+  ```
 - Leave the worktree standing until its PR merges and name the path in your reply. The hook
   denies further edits in a worktree whose PR has merged: the next change takes a new one.
-- **Once it has merged, take all three down** — remote branch (`--delete-branch` above),
-  worktree, then the local branch, in that order. A merged branch left standing is a live
+- **Once it has merged, take all three down** — remote branch (above), worktree, then the
+  local branch, in that order. A merged branch left standing is a live
   push target after the PR that reviewed it has closed. **`ExitWorktree` with
   `action: "remove"` will not take the tree down**: it removes only a worktree it created
   itself, and every tree here is made with `git worktree add` and entered by path, so it
@@ -742,8 +772,22 @@ open `archive/v1/docs/` when you need the detail behind a finding.
   the removal from there — nothing can remove the tree it is standing in, so the two are
   separate steps in that order. **Confirm the merge against GitHub, not git**: `--squash`
   keeps no ancestry, so `git branch -d`, `--merged` and `merge-base --is-ancestor` read every
-  merged branch here as unmerged. `gh pr view <n> --json state --jq .state` for `MERGED`,
-  then `git worktree remove <path>` and `git branch -D <slug>`.
+  merged branch here as unmerged.
+
+  ```bash
+  gh pr view <n> --json state --jq .state
+  git -C .claude/worktrees/<name> status --porcelain --untracked-files=no
+  git worktree remove --force .claude/worktrees/<name>
+  git branch -D <short-slug>
+  ```
+
+  `--force` is not optional here — every worktree holds ignored files by construction, and
+  some git versions refuse over them — so take back the check it switches off explicitly,
+  one line earlier, where it can still say something: anything in that `status` is a change
+  that never landed, and that is a tree to go back into rather than one to clear. And check
+  the **directory** as well as `git worktree list`: `git worktree remove` deregisters first
+  and deletes second, and it keeps the deregistration when the delete fails, so a full
+  checkout can be sitting there that nothing you would think to run mentions.
 - **Never stash** — `refs/stash` is one stack for the whole repository, worktrees included, so
   a push here renumbers every other tree's entries. Commit instead. And **never restore a
   `HEAD` you moved by accident** — say what you ran and stop.

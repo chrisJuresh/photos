@@ -2,7 +2,18 @@
   "integrationBranch": "development",
   "guard": {
     "source": "https://github.com/chrisJuresh/skills worktree-per-change/scripts/worktree_guard.py",
-    "syncedFrom": "139366efa779f6ac0787de3e8a26c7d6e50758bd",
-    "sha256": "04179756ef81c82bdfbd587231ec0a7c74873f6e2b399d3cb48fdee8096f42c7"
+    "syncedFrom": "c8574fd565f07531bb0a317b4c0b7af1b8d5af05",
+    "sha256": "4adb88ea2dfff3dc2d49a99b2d3eb4812695f24e9f728ff17ea31172cbcd3535"
+  },
+  "sessionOwnership": true,
+  "owner": {
+    "source": "https://github.com/chrisJuresh/skills worktree-per-change/scripts/worktree_owner.py",
+    "syncedFrom": "c8574fd565f07531bb0a317b4c0b7af1b8d5af05",
+    "sha256": "3c577a7a3ebbbf2ed912260b339d49679bdc0ec425e2cf39821b3324b84c0c6b"
+  },
+  "land": {
+    "source": "https://github.com/chrisJuresh/skills worktree-per-change/scripts/land.py",
+    "syncedFrom": "c8574fd565f07531bb0a317b4c0b7af1b8d5af05",
+    "sha256": "86e07d18eebbb09a9f67aed20c69e81801a05e3e844888da6358cf94a96b234c"
   }
 }

@@ -102,21 +102,34 @@ def test_the_integration_branch_comes_from_the_committed_config(repo: Path) -> N
     assert guard.integration_branch(repo) == "development"
 
 
-def test_the_committed_guard_is_still_the_file_its_record_describes() -> None:
+@pytest.mark.parametrize(
+    "key,path",
+    [
+        ("guard", Path(".claude") / "hooks" / "worktree-guard.py"),
+        ("owner", Path(".claude") / "hooks" / "worktree-owner.py"),
+        ("land", Path(".claude") / "scripts" / "land.py"),
+    ],
+)
+def test_a_committed_copy_is_still_the_file_its_record_describes(key: str, path: Path) -> None:
     """A copied hook is a fork the moment upstream moves, and a stale one looks fine.
 
-    `.claude/worktree-per-change.json` names the upstream commit the copy came from and
+    `.claude/worktree-per-change.json` names the upstream commit each copy came from and
     hashes the file itself. Only the offline half of that is checkable here — is the
-    committed guard still what the record says — and it is the half that catches a hook
+    committed file still what the record says — and it is the half that catches a hook
     edited in place and a resync that forgot to write itself down. Whether upstream has
     moved on since needs a clone, and this suite has no business fetching one.
+
+    It covers all three vendored files rather than the guard alone. The guard is the one
+    that denies, so it was the one gated first, but an ungated copy is ungated whatever
+    it does: `worktree-owner.py` denies too, and `land.py` pushes and merges. A record
+    written for a file nothing checks is the same as no record.
 
     The digest is over LF-normalised bytes, which is what git stores: the record crosses
     machines and the line endings on disk do not.
     """
     record = json.loads((ROOT / ".claude" / "worktree-per-change.json").read_text(encoding="utf-8"))
-    normalised = HOOK.read_bytes().replace(b"\r\n", b"\n")
-    assert hashlib.sha256(normalised).hexdigest() == record["guard"]["sha256"]
+    normalised = (ROOT / path).read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(normalised).hexdigest() == record[key]["sha256"]
 
 
 @pytest.mark.parametrize(
