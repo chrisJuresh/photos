@@ -111,20 +111,28 @@ from photolib.config import load, substrate_path
 # has to be what the grid draws, or a round measures something adjacent to it.
 # `agreement` is there for the same reason one layer down: the evidence a stack rests
 # on is the grid's decision too, so a round asks about it through the predicate the
-# pass builds rather than through a threshold of its own.
+# pass builds rather than through a threshold of its own. `resemblance` and `either`
+# are the other two answers to that same question, imported here for ticket 93 --
+# nothing in this harness samples with them, and `harness.calibrate` prices them
+# against the reader's answers through this one door rather than growing a predicate
+# of its own.
 # Imported by name rather than reached through the module so that `label.link` and
 # `label.LINKAGE` go on meaning what they have always meant here.
 from photolib.membership import (  # noqa: F401 -- re-exported for `harness.calibrate`
     LINKAGE,
     Agree,
+    Cosines,
     Joins,
     Points,
     agreement,
     complete,
+    cosine,
+    either,
     link,
     majority,
     match,
     neighbour,
+    resemblance,
 )
 
 # The line the sets are drawn at. It was **not** the answer this harness exists to

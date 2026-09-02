@@ -24,13 +24,15 @@ They are on this side of the seam because the harness is deleted when the grid
 ticket lands and the arrow between them points one way.
 
 **What a stack rests on is a value and not a threshold spelled out three times.**
-`agreement` answers *do these two frames agree?* and the linkage rules take that
+An `Agree` answers *do these two frames agree?* and the linkage rules take that
 answer without knowing what it is made of, so the evidence is one decision with one
 name rather than an implicit seam inside `complete`, `majority` and `neighbour`
-alike. Today the answer is the Match against the reader's strictness and nothing a
-reader can see turns on the seam existing; what it buys is that moving the evidence
--- ADR 0003 leaves the fingerprint's own threshold unsettled -- is another `Agree`
-and never another walk.
+alike. **What the grid draws with is still `agreement`** -- the Match against the
+reader's strictness -- and nothing a reader can see has moved. What the seam bought
+is that the fingerprint's own threshold, which ADR 0003 left unsettled, is
+`resemblance` beside it and `either` between them rather than a second walk: three
+predicates over one walk, which is why `harness.calibrate` can price all of them
+and still be describing what a pass would write.
 
 **The setting is part of the key and never a column beside it**, the relationship
 008's vectors and 010's Matches already have with the model and the method that
@@ -113,6 +115,12 @@ class MembershipRefused(RuntimeError):
 # --- the rule ----------------------------------------------------------------
 
 Points = dict[tuple[str, str], int]
+# The other stored number a pair carries: `candidate_pair.screen`, the cosine
+# between the two frames' fingerprints. Read by `resemblance` and by nothing the
+# grid draws with yet -- ADR 0003 stored it per candidate rather than reduced to a
+# verdict so that a threshold on it could be a re-read, and `harness.calibrate`
+# is where that re-read is priced.
+Cosines = dict[tuple[str, str], float]
 # **Whether two frames agree, as a value: the evidence a stack rests on.** Every
 # linkage rule below asks exactly this question and none of them knows what the
 # answer is made of, so there is one place where a stack's evidence is decided and
@@ -152,13 +160,12 @@ def match(points: Points, a: str, b: str) -> int:
 def agreement(points: Points, strictness: int = STRICTNESS) -> Agree:
     """The evidence the grid ships: the Match at or above the reader's strictness.
 
-    The one `Agree` there is, and the reason this seam exists rather than the three
-    rules below each spelling it out: what a stack rests on is a decision of its own,
-    separable from how much of a stack a frame has to agree with, and until now the
-    two were the same four lines written three times. Moving the evidence is
-    therefore building another one of these -- ADR 0003 leaves the fingerprint's own
-    threshold unsettled precisely so a rule over the stored cosine can be one -- and
-    never another walk.
+    The first `Agree` there was, and the reason this seam exists rather than the
+    three rules below each spelling it out: what a stack rests on is a decision of
+    its own, separable from how much of a stack a frame has to agree with, and until
+    the seam appeared the two were the same four lines written three times. Moving
+    the evidence is therefore building another one of these -- and never another
+    walk.
 
     Absent evidence reads as no agreement, which is `match`'s doing rather than this
     function's, and either order for the same reason it gives.
@@ -166,6 +173,65 @@ def agreement(points: Points, strictness: int = STRICTNESS) -> Agree:
 
     def agrees(early: str, late: str) -> bool:
         return match(points, early, late) >= strictness
+
+    return agrees
+
+
+def cosine(cosines: Cosines, a: str, b: str) -> float | None:
+    """The screen between two frames, or None where the pair is no candidate.
+
+    `match`'s shape one table across, and the difference from it is deliberate:
+    absent is `None` and not zero. A cosine of zero is a real reading -- two
+    fingerprints at right angles -- and 813,227 of this catalog's candidates are
+    near it, so folding "no row" into it would make a pair nobody enumerated
+    indistinguishable from one the fingerprint plainly disagreed about. What both
+    absences come to is the same drawing, and `resemblance` is where that is
+    decided rather than here.
+
+    Either order, for `match`'s reason: the enumeration keys a pair one way round
+    and a caller asking about two frames should not have to reproduce it.
+    """
+    found = cosines.get((a, b))
+    return cosines.get((b, a)) if found is None else found
+
+
+def resemblance(cosines: Cosines, threshold: float) -> Agree:
+    """The other evidence ADR 0003 stored: the fingerprint cosine, at a threshold.
+
+    The Match is unused here, which is the whole point of it being a separate
+    `Agree`. ADR 0003 stored the cosine per candidate rather than reducing it to a
+    yes-or-no precisely so that "a number chosen later must be a re-read of these
+    rows rather than another pass", and this is that re-read expressed as a rule.
+
+    **It is not `photolib.candidates.SCREEN` and it never moves it.** The screen is
+    the frozen fence that decided which pairs earned a geometric check at all; this
+    is a threshold on the same stored number asked a different question. A value
+    under 0.40 is therefore meaningful and reaches pairs carrying no Match row --
+    which is a fact about the evidence, not a loosening of the screen.
+
+    Nothing in the shipped grid builds one of these yet: `harness.calibrate` prices
+    it against the reader's answers and ticket 95 is where acting on that lives.
+    """
+
+    def agrees(early: str, late: str) -> bool:
+        found = cosine(cosines, early, late)
+        return found is not None and found >= threshold
+
+    return agrees
+
+
+def either(*rules: Agree) -> Agree:
+    """Two frames agree when any of these says they do: a second way in.
+
+    Strictly a loosening of every rule it is given, which is the property it exists
+    for -- a pair one rule already agreed about cannot stop agreeing because another
+    was offered beside it, so ground already held cannot be lost. What it can buy is
+    the pairs where the two measures disagree, and what it costs is whatever the
+    looser of them is wrong about.
+    """
+
+    def agrees(early: str, late: str) -> bool:
+        return any(rule(early, late) for rule in rules)
 
     return agrees
 

@@ -510,9 +510,14 @@ def test_a_greedy_walk_can_split_a_stack_the_rule_would_have_held(corpus: Stacks
 #
 # **It is dead code by design and nothing keeps it in step with `link`.** That is
 # the point: it is a photograph of the old rule and not a second live one. It is
-# also spent the moment the evidence moves -- the ticket that prices a rule over the
-# fingerprint is where this block and the test under it go, because an equivalence
-# to a rule nothing ships is a test that can only fail for the wrong reason.
+# also spent the moment the evidence moves, because an equivalence to a rule nothing
+# ships is a test that can only fail for the wrong reason.
+#
+# **Ticket 93 named itself as where it goes and left it standing, deliberately.**
+# That ticket prices a rule over the fingerprint and moves nothing: the grid still
+# draws `agreement`, so this is still an equivalence to the shipped rule and still
+# worth what it costs, which is nothing. The ticket that *moves* the grid onto other
+# evidence is where the block and the test under it go.
 
 
 def _was_complete(
@@ -642,6 +647,107 @@ def test_a_rule_asks_the_predicate_and_never_the_table() -> None:
         ["d"],
     ]
     assert asked == [("a", "b"), ("a", "c"), ("c", "d")]
+
+
+# --- the other evidence ---------------------------------------------------------
+#
+# The fingerprint cosine as a predicate, which is what ticket 93 prices and what
+# nothing the grid draws reads yet. What is under test is the reading -- either
+# order, absent against zero, and that an OR only ever adds -- because that is all
+# this side of the seam decides.
+#
+# **What a fingerprint cosine *means* is not asserted here and cannot be.** The
+# spec behind ticket 88 asks for the treatment `tests/test_matches.py` gives the
+# Match, which draws two pictures and passes them through the two-image seam. The
+# fingerprint has no such seam in this suite: the encoder is a stand-in every test
+# passes through and no test loads `torch` or a model, so a cosine computed here
+# would be a fact about the stand-in. That assertion belongs with the ticket that
+# ships a fingerprint rule into the grid and can afford a real encoder.
+
+
+def test_the_cosine_predicate_reads_a_pair_in_either_order() -> None:
+    """`match`'s reading, and the enumeration keys a candidate one way round only."""
+    early, late = sha_of("a"), sha_of("b")
+    agrees = membership.resemblance({(late, early): 0.95}, 0.85)
+
+    assert agrees(early, late) is True
+    assert agrees(late, early) is True
+
+
+def test_a_pair_that_is_no_candidate_is_not_agreement() -> None:
+    """Absent evidence and no agreement come to the same drawing, so a rule over the
+    cosine invents no stack out of a pair nobody enumerated."""
+    assert membership.resemblance({}, 0.85)(sha_of("a"), sha_of("b")) is False
+
+
+def test_a_cosine_of_zero_is_a_reading_and_not_an_absence() -> None:
+    """Which is the one place this differs from `match`: a Match of zero and no Match
+    row are folded together on purpose, and a cosine of zero is a real measurement of
+    two fingerprints at right angles. 813,227 of this catalog's candidates are near
+    it, so a lookup that returned zero for both would make the largest population in
+    the table indistinguishable from a pair that was never enumerated."""
+    early, late = sha_of("a"), sha_of("b")
+
+    assert membership.cosine({(early, late): 0.0}, early, late) == 0.0
+    assert membership.cosine({}, early, late) is None
+    assert membership.resemblance({(early, late): 0.0}, 0.0)(early, late) is True
+    assert membership.resemblance({}, 0.0)(early, late) is False
+
+
+def test_either_only_ever_adds_to_what_the_rules_it_was_given_agree_about() -> None:
+    """The property rule 3 rests on: an OR is strictly a loosening, so a pair one rule
+    already agreed about cannot stop agreeing because another was offered beside it.
+    Asserted of the predicate and not of the walk, which is where it is true -- a
+    looser predicate can still cut a run differently, because the walk is greedy and a
+    frame consumed early is a stack drawn somewhere else."""
+    run = [sha_of(seed) for seed in "abcdefgh"]
+    draw = random.Random(11)
+    points = awkward_matches(3, run)
+    screens = {
+        (early, late): draw.random()
+        for index, early in enumerate(run)
+        for late in run[index + 1 :]
+        if draw.random() < 0.8
+    }
+    match_rule = agreement(points, 20)
+    cosine_rule = membership.resemblance(screens, 0.6)
+    both = membership.either(match_rule, cosine_rule)
+
+    agreed = [
+        (early, late)
+        for index, early in enumerate(run)
+        for late in run[index + 1 :]
+        if match_rule(early, late) or cosine_rule(early, late)
+    ]
+    assert agreed  # not vacuous: the corpus has pairs each rule agrees about
+    assert all(both(early, late) for early, late in agreed)
+    assert [pair for pair in agreed if match_rule(*pair)] != agreed
+
+
+def test_the_cosine_keeps_a_run_whole_that_the_match_cuts_into_frames() -> None:
+    """Ticket 88's case C in miniature, and the whole reason ticket 93 exists.
+
+    A run of one subject the camera moved towards: every adjacent Match is inside the
+    band 4 to 9, which is where a homography's own noise floor sits and where the
+    Match has no resolving power, while every adjacent cosine is 0.95 or better. The
+    shipped strictness draws five tiles and the fingerprint draws one.
+    """
+    run = [sha_of(seed) for seed in "abcde"]
+    points = {
+        (early, late): 6
+        for index, early in enumerate(run)
+        for late in run[index + 1 :]
+    }
+    screens = {
+        (early, late): 0.96
+        for index, early in enumerate(run)
+        for late in run[index + 1 :]
+    }
+
+    assert link(run, agreement(points, membership.STRICTNESS), membership.neighbour) == [
+        [sha256] for sha256 in run
+    ]
+    assert link(run, membership.resemblance(screens, 0.85), membership.neighbour) == [run]
 
 
 def test_the_linkage_vocabulary_is_the_schema_s_and_not_a_convention(corpus: Stacks) -> None:
