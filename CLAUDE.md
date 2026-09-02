@@ -263,6 +263,12 @@ column ticket 34 has to read — `accept` means the frames the reader was shown 
 that the stack is complete. Answers go to a `labels.sqlite3` of its own beside the catalog,
 **never `state.sqlite3`**, and it is not a migrated database because a table nothing shipped
 reads has no business in the shipped schema. Frames come from the substrate tree.
+**An answer is keyed on the set and the round that asked**, so a later round asking the same
+question again lands beside the earlier answer rather than over it: a sitting drawn to retest
+the reader cannot spend itself destroying the evidence it was run to check. The key stops at
+the round on purpose — revising a misclick is a move back through the sitting in hand and has
+to replace, and a finer key would read a slip of the finger as the reader contradicting
+themselves. A file keyed the old way is widened on open with every row carried across.
 
 **A round is one sitting bounded by the reader stopping**, and `--round` says which one it is —
 3 by default, `--strictness` and `--linkage` still saying what the sets are drawn at. **Nothing
@@ -499,6 +505,15 @@ harness's window. The frame past the end of the run is separated out for the sam
 in reverse: no strictness reaches it, so what the reader said about it is evidence about
 the 3600s fence. Confident labels are scored apart from the not-sure ones, and every
 setting **names the labelled cases it gets wrong** rather than only counting them.
+
+**A set the reader answered two ways is scored against nothing**, and the report says so in
+its own words rather than only in a docstring. Now that a re-ask lands beside the answer it
+checks, one set can carry two rounds' answers; where they contradict, every rule is right
+about the pair once and wrong about it once, so including them would add the same count to
+every setting's errors, move no ranking, and drag every precision toward a floor that is a
+real threshold. They are named instead. What the re-asked sets do settle is the number the
+floor has never had beside it — how often the reader reproduces their own answer — and a
+rate over no repeats is refused rather than printed as 100%.
 
 **The floor is 85% and it used to be 95%**, a named constant carrying its reasoning so that
 moving it again is a decision rather than an edit: the reader browsed the 95% result,

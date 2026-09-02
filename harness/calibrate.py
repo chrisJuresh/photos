@@ -80,6 +80,17 @@ its sets are drawn where a *chain* crosses a boundary the settled rule drew, so 
 is still the only round that can price the rule ADR 0003 declined by argument. See
 `rounds`, `check` and `chained`.
 
+**A set the reader answered two ways is scored against nothing.** Since ticket 90
+a re-ask no longer overwrites the answer it is checking, so one set can carry two
+rounds' answers -- and where those contradict, every rule is right about the pair
+once and wrong about it once whichever way it goes. Including them would add the
+same count to every setting's errors, move no ranking, and pull every precision
+toward a floor that is a real threshold, so they are named and counted nowhere.
+What the re-asked sets do settle is the number the floor has never had beside it:
+how often the reader reproduces their own answer. The floor has moved twice and a
+rule reproducing them at 97% reads differently depending on whether they reproduce
+themselves at 99% or at 80%. See `contested` and `repeats`.
+
 **A quarter of the newest round is held back, so the pick checks itself.** The
 round is partitioned by a stable hash of the answer's own key -- not a random
 draw, so two runs over one labels file agree and re-running cannot quietly re-roll
@@ -98,11 +109,13 @@ output is to say how many there were and choose nothing.
 It reads the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate
 and never touches `G:`. It writes no label and no report -- its output is a
 recommendation for `docs/adr/0003-stack-on-verified-match.md`, which a person
-writes down. The one thing it can put in the labels file is the round-one stamp
-`harness.label._carry_over` would have written anyway, because it opens that file
+writes down. The only thing it can change in the labels file is what
+`harness.label._carry_over` would have done anyway -- the round-one stamp, and the
+re-keying that lets a set carry a second answer -- because it opens that file
 through the same `store`: reading answers whose round is not recorded yet is what
-would otherwise be impossible. It stays here as long as the harness does, which is
-for good: every round of labelling wants replaying, not only the first two.
+would otherwise be impossible. No answer is written, revised or dropped. It stays
+here as long as the harness does, which is for good: every round of labelling wants
+replaying, not only the first two.
 """
 
 from __future__ import annotations
@@ -111,7 +124,7 @@ import argparse
 import hashlib
 import sqlite3
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from harness import label
@@ -274,6 +287,15 @@ def pairs(subject: Case) -> list[tuple[str, str, bool]]:
     return together + [(early, late, False) for early, late in split]
 
 
+def filed(subject: Case) -> str:
+    """The set this answer is about, as `harness.label` keys it.
+
+    Half of that key: the round is the other half, which is why two answers can
+    share this and be two answers rather than one read twice.
+    """
+    return label.key(subject.members)
+
+
 def confident(cases: Iterable[Case]) -> list[Case]:
     return [subject for subject in cases if subject.confident]
 
@@ -320,7 +342,7 @@ def held_back(subject: Case) -> bool:
     answers because an answer is the unit the reader gave and the unit `choose`
     scores. It is not a claim that the two slices are independent photographs.
     """
-    digest = hashlib.sha256(label.key(subject.members).encode()).digest()
+    digest = hashlib.sha256(filed(subject).encode()).digest()
     return int.from_bytes(digest[:8], "big") % HOLDBACK == 0
 
 
@@ -331,6 +353,77 @@ def partition(subjects: Iterable[Case]) -> tuple[list[Case], list[Case]]:
         [subject for subject in ordered if not held_back(subject)],
         [subject for subject in ordered if held_back(subject)],
     )
+
+
+# --- a set the reader has answered twice --------------------------------------
+
+
+def statements(subject: Case) -> dict[tuple[str, str], bool]:
+    """Every pair this label places, as a lookup: kept together, or pushed apart."""
+    return {(early, late): same for early, late, same in pairs(subject)}
+
+
+def disagree(one: Case, other: Case) -> list[tuple[str, str]]:
+    """The pairs two answers about one set place differently.
+
+    **Only the pairs both of them place**, which is what makes this a
+    contradiction rather than a difference. A re-ask can be answered with the view
+    widened further than the first time, and the frames only the second answer saw
+    are not something the first one denied -- scoring them as disagreement would
+    measure how far the reader scrolled. See the module docstring on scope.
+    """
+    mine, theirs = statements(one), statements(other)
+    return sorted(pair for pair in mine.keys() & theirs.keys() if mine[pair] != theirs[pair])
+
+
+def asked_again(read: Iterable[Case]) -> dict[str, list[Case]]:
+    """Every set carrying an answer from more than one round, earliest round first.
+
+    Answers about one set, and never one answer read twice: `harness.label` keys on
+    the set *and* the round, so two entries here are two sittings. Before ticket 90
+    the second overwrote the first and this could only ever be empty.
+    """
+    found: dict[str, list[Case]] = {}
+    for subject in read:
+        found.setdefault(filed(subject), []).append(subject)
+    return {
+        members: sorted(about, key=lambda subject: subject.round)
+        for members, about in found.items()
+        if len(about) > 1
+    }
+
+
+def contested(read: Iterable[Case]) -> dict[str, list[Case]]:
+    """The re-asked sets whose answers contradict each other.
+
+    **A contested set is scored against no setting**, and that is this module's
+    answer to the question ticket 90 left open. The reasoning is arithmetic rather
+    than taste: for a pair the reader kept together in one round and pushed apart in
+    another, every rule is right about it once and wrong about it once, whichever
+    way the rule goes. So including contested sets adds the same count to every
+    setting's errors -- no ranking moves, and the only thing that changes is that
+    every precision is dragged toward a floor that is a real threshold. Evidence
+    that cannot discriminate and can disqualify is worth less than nothing.
+
+    The alternatives were priced and both hide something. Scoring the most recent
+    answer buys a verdict with a preference for recency that nothing here supports.
+    Scoring both is the arithmetic above, stated as a ceiling on every rule at once
+    -- which is a real finding, and it is `repeats` that reports it, without letting
+    it into the sweep.
+
+    Set aside everywhere and not per round: the rounds are scored apart, so a
+    contested set is never double-counted inside one population, but each round on
+    its own would still be scoring a set whose truth is not known.
+    """
+    return {
+        members: given
+        for members, given in asked_again(read).items()
+        if any(
+            disagree(one, other)
+            for index, one in enumerate(given)
+            for other in given[index + 1 :]
+        )
+    }
 
 
 # --- scoring a setting --------------------------------------------------------
@@ -817,6 +910,74 @@ def fence(cases: Sequence[Case]) -> list[str]:
     return lines
 
 
+def repeats(read: Sequence[Case], contests: Mapping[str, Sequence[Case]]) -> list[str]:
+    """What the sets answered more than once say -- about the reader, and about here.
+
+    Two things, and the first is the one the precision floor has been missing. The
+    floor has moved twice, 95% to 85%, and nothing has ever measured how repeatable
+    the answers it is scored against are: a rule reproducing the reader at 97% means
+    something different if the reader reproduces themselves at 99% than if they do
+    at 80%. That rate is the ceiling the table below is read against.
+
+    The second is which sets are set aside and why, in the report's own words rather
+    than only in `contested`'s docstring -- a convention a reader has to open the
+    source to find is one they will read the numbers without.
+
+    `contests` is handed in rather than worked out here, so that the sets this names
+    are the same objects the caller removes from the sweep and not a second
+    computation that could come to disagree with it.
+    """
+    twice = asked_again(read)
+    if not twice:
+        return [
+            "\nre-asked  no set carries an answer from more than one round, so there is"
+            " no self-consistency rate to read the precision below against -- the floor"
+            " has moved twice and how repeatable the answers under it are has never"
+            " been measured. A round drawn to ask again is what settles that. Nothing"
+            " is set aside here."
+        ]
+    steady = len(twice) - len(contests)
+    lines = [
+        f"\nre-asked  {len(twice)} set(s) carry an answer from more than one round, and"
+        f" {steady} of them agree wherever both",
+        "          answers place the same pair -- a self-consistency rate of"
+        f" {steady / len(twice):.1%}, which is the ceiling every",
+        "          precision below is read against. Over the shared pairs, since an"
+        " answer given with the view",
+        "          widened further is not denying a frame the earlier one never saw.",
+    ]
+    if not contests:
+        lines.append(
+            "          none of them contradicts, so every answer in the file is scored."
+        )
+        return lines
+    lines += [
+        f"          {len(contests)} of them contested, and none of those is scored"
+        " against any setting at all. The reader",
+        "          placed the same pair together in one round and apart in another, so"
+        " every rule is right about it",
+        "          once and wrong about it once: including them would add the same count"
+        " to every setting's errors,",
+        "          move no ranking, and drag every precision toward a floor that is a"
+        " real threshold. Scoring only",
+        "          the newest answer would buy a verdict with a preference for recency"
+        " the labels do not support.",
+        "          So they are named here and counted nowhere:",
+    ]
+    for given in contests.values():
+        said = ", ".join(f"round {subject.round} {subject.verdict}" for subject in given)
+        crossed = {
+            pair
+            for index, one in enumerate(given)
+            for other in given[index + 1 :]
+            for pair in disagree(one, other)
+        }
+        lines.append(
+            f"            {given[0].name}   {said}   {len(crossed)} pair(s) placed both ways"
+        )
+    return lines
+
+
 def evidence(read: Sequence[Case], points: Points) -> list[str]:
     """What the labels are made of, before any setting is scored against them.
 
@@ -1119,6 +1280,19 @@ def report(
         for members in orphans:
             print(f"          {members}")
     if not split:
+        return None
+
+    # Set aside before anything is scored, and before the round split, so that no
+    # population -- the evidence, the quarter held back from it, or an earlier
+    # round replayed as a check -- is scored against a set the reader answered two
+    # ways. See `contested` for why that is the convention and what it costs.
+    contests = contested(read)
+    print(*repeats(read, contests), sep="\n")
+    read = [subject for subject in read if filed(subject) not in contests]
+    split = rounds(read)
+    if not split:
+        # Every answer in the file is contested, which the block above has just
+        # named. There is nothing left to score and nothing further to say.
         return None
 
     # The **newest** round is the evidence and every earlier one is a check on what

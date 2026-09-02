@@ -77,6 +77,15 @@ with what the reader said about it, and `h` is how they reach it. A new sitting 
 fresh sets rather than yesterday's over again, which is the trade `already` makes in
 `main`: dealing forty answered sets before the first new one is the wrong way to
 spend an evening, and a misclick is revised in the moment it is made.
+
+**A later round asking the same question again does not overwrite the answer.**
+Revising is bounded by the sitting because that is what revising means; being asked
+again is a different act, and what the reader said in an earlier round stays exactly
+where it is. So a sitting drawn to retest them on what they have already answered
+cannot spend itself destroying the evidence it was run to check, and a set answered
+two ways becomes a fact a report can read rather than a row that is gone. See
+`SCHEMA` for the key that says so and `harness.calibrate.contested` for what is made
+of it.
 """
 
 from __future__ import annotations
@@ -889,6 +898,9 @@ def key(members: Sequence[str]) -> str:
     The frames and not a set number, because the sample moves when the
     provisional strictness does -- so an answer keyed on its position in a list
     would come back attached to a different photograph.
+
+    Half of what it is filed under: the round is the other half, and `SCHEMA` is
+    where that decision is written down.
     """
     return ",".join(members)
 
@@ -927,6 +939,22 @@ REASONS = ("people", "moment", "close")
 # and every later round's are a check on it, so pooling them would let the check vote
 # for the thing it is checking.
 #
+# **It is half the primary key, so a re-ask cannot destroy the answer it checks.**
+# The key was the members alone and `_RECORD` is an upsert, so a second answer about
+# one set overwrote the first -- and the only thing standing between the reader and
+# that was `answered_before`, which is a *sampling* rule and not a constraint. A
+# sitting drawn to retest a hundred existing answers would have spent itself
+# destroying the very evidence it was run to check.
+#
+# **The round and nothing finer**, which is a decision about what "again" means. A
+# timestamp or an asking-id would let one sitting hold two answers about one set --
+# and a sitting already does that, every time the reader presses `h`, goes back and
+# fixes a misclick. Under a finer key that correction is a second row, and a slip of
+# the finger reads afterwards as the reader contradicting themselves. So a revision
+# inside the round replaces, a round is the unit of being asked again, and the
+# carry-over costs nothing beyond re-keying: the column is already here and every
+# answer already carries it. See `_rekeyed`.
+#
 # **`reasons` says why each evicted frame does not belong**, as a JSON object keyed
 # by sha256 -- per frame and never per set, because a stack split for two different
 # reasons is a fact about which frames, and a reason recorded against the set would
@@ -946,7 +974,7 @@ REASONS = ("people", "moment", "close")
 # is all that had run. See `_carry_over`.
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS answer (
-  members     TEXT PRIMARY KEY,  -- the stack as drawn, comma-joined. See `key`.
+  members     TEXT NOT NULL,     -- the stack as drawn, comma-joined. See `key`.
   camera      TEXT,
   surrounding TEXT NOT NULL,     -- JSON: the frames outside it the reader saw
   margin      INTEGER NOT NULL,
@@ -955,9 +983,16 @@ CREATE TABLE IF NOT EXISTS answer (
   included    TEXT NOT NULL,     -- JSON: neighbours the reader said should be in
   answered_at TEXT NOT NULL DEFAULT (datetime('now')),
   round       INTEGER NOT NULL DEFAULT 1,
-  reasons     TEXT               -- JSON: sha256 -> one of `REASONS`, or NULL
+  reasons     TEXT,              -- JSON: sha256 -> one of `REASONS`, or NULL
+  PRIMARY KEY (members, round)
 )
 """
+
+# The key as it stood before a set could be answered twice, and what it is now.
+# `_carry_over` compares the table's own key against `KEY` rather than looking for a
+# column, because this widening adds none: the discriminator was already there and
+# the file that needs rebuilding is the one that is not keyed on it.
+KEY = ("members", "round")
 
 _ROUND_COLUMN = "ALTER TABLE answer ADD COLUMN round INTEGER NOT NULL DEFAULT 1"
 
@@ -976,6 +1011,52 @@ INSERT INTO answer
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
 """
 
+_REKEY = """
+INSERT INTO answer
+  (members, camera, surrounding, margin, verdict, evicted, included, answered_at,
+   round, reasons)
+SELECT members, camera, surrounding, margin, verdict, evicted, included, answered_at,
+       round, reasons
+FROM answer_before_the_re_ask
+"""
+
+
+def _keyed_on(conn: sqlite3.Connection) -> tuple[str, ...]:
+    """The primary key of the answer table as it stands, in its own order.
+
+    `PRAGMA table_info` numbers a key's columns from 1 in key order and gives every
+    other column 0, so this is the stored key read back rather than inferred.
+    """
+    return tuple(
+        name
+        for _, name, _, _, _, position in sorted(
+            conn.execute("PRAGMA table_info(answer)"), key=lambda row: row[5]
+        )
+        if position
+    )
+
+
+def _rekeyed(conn: sqlite3.Connection) -> str:
+    """Re-key a table that could hold only one answer per set, keeping every row.
+
+    Ticket 90's widening, and it is `people.ensure`'s move rather than a migration:
+    SQLite cannot alter a primary key, so the table is renamed aside, created in the
+    current shape and copied across whole. Nothing is stamped and nothing is
+    defaulted -- every column the rows need already exists and the round they were
+    given in is the round they keep.
+    """
+    conn.execute("BEGIN")
+    conn.execute("ALTER TABLE answer RENAME TO answer_before_the_re_ask")
+    conn.execute(SCHEMA)
+    (older,) = conn.execute("SELECT count(*) FROM answer_before_the_re_ask").fetchone()
+    conn.execute(_REKEY)
+    conn.execute("DROP TABLE answer_before_the_re_ask")
+    conn.execute("COMMIT")
+    return (
+        f"carried {older} answer(s) forward onto a key that keeps a re-ask beside the"
+        " answer it is checking"
+    )
+
 
 def _carry_over(conn: sqlite3.Connection) -> str | None:
     """Bring answers written under an older shape of this table into the current one.
@@ -988,7 +1069,13 @@ def _carry_over(conn: sqlite3.Connection) -> str | None:
     next stored no reasons, and every answer in it has reasons *unknown* rather than
     absent, which is what a NULL column says on its own -- so the sixty answers
     rounds one and two hold are still evidence and are still not a denial that people
-    are the problem.
+    are the problem. The last is keyed on the members alone and could hold one answer
+    per set, and its rows carry across untouched: what widened is what the table can
+    say next, not what it already says. See `_rekeyed`.
+
+    More than one of those can be owed at once -- a file from before rounds existed
+    is also a file keyed on the members alone -- so what comes back is every message
+    the open earned, joined.
 
     The alternative was refusing and asking the reader to move the file aside,
     which is what this did first. That is the wrong trade: their answers are the
@@ -1009,10 +1096,16 @@ def _carry_over(conn: sqlite3.Connection) -> str | None:
         if "reasons" not in columns:
             conn.execute(_REASONS_COLUMN)
             gained.append("reasons unknown")
-        if not gained:
-            return None
-        (stamped,) = conn.execute("SELECT count(*) FROM answer").fetchone()
-        return f"carried {stamped} answer(s) forward as {' and '.join(gained)}"
+        carried = []
+        if gained:
+            (stamped,) = conn.execute("SELECT count(*) FROM answer").fetchone()
+            carried.append(f"carried {stamped} answer(s) forward as {' and '.join(gained)}")
+        # Last, because it is the shape the appended columns are part of: a table
+        # that has just gained `round` is keyed on the members alone and is exactly
+        # the file this rebuilds.
+        if _keyed_on(conn) != KEY:
+            carried.append(_rekeyed(conn))
+        return "; ".join(carried) or None
 
     conn.execute("BEGIN")
     conn.execute("ALTER TABLE answer RENAME TO answer_before_widening")
@@ -1086,7 +1179,12 @@ def record(
     round: int,
     reasons: dict[str, str] | None = None,
 ) -> str:
-    """File one answer, replacing whatever the reader said about it before.
+    """File one answer, replacing whatever the reader said about it **this round**.
+
+    Which is the whole of what the upsert may replace, and ticket 90 is why: a
+    revision inside the sitting is the reader fixing a misclick and must overwrite,
+    and an answer given in a later round is the reader being asked again and must
+    not. The primary key is what tells the two apart -- see `SCHEMA`.
 
     The question rather than five of its fields, because reading the labels
     afterwards means asking how the verdicts fell across the grey band and across
@@ -1122,19 +1220,25 @@ def record(
     return given
 
 
-def answers(conn: sqlite3.Connection, round: int | None = None) -> dict[str, dict]:
-    """Every answer given, by the stack it was about.
+def answers(conn: sqlite3.Connection, round: int | None = None) -> dict[tuple[str, int], dict]:
+    """Every answer given, by the stack it was about **and the round that asked**.
+
+    The mapping's key is the table's key, which is what keeps a re-ask from
+    destroying the answer it is checking on the way out of the database as well as
+    on the way in: a caller that indexed by the members alone would put two rounds'
+    answers about one set back into one slot. See `SCHEMA`.
 
     `round` narrows it to one round, which is what the counter the reader is shown
     is about: how much of *this* sitting they have judged, and not how many evenings
-    they have spent here.
+    they have spent here. Narrowed, the members are unique again -- one round holds
+    one answer per set -- but the key does not change shape with the argument.
 
     `reasons` comes back None where the column is NULL, which says the answer was
     given before there was anything to press -- and never `{}`, which says the reader
     was asked and pressed nothing.
     """
     return {
-        row[0]: {
+        (row[0], row[6]): {
             "members": row[0].split(","),
             "camera": row[1],
             "verdict": row[2],
@@ -1462,7 +1566,7 @@ class LabelServer(ThreadingHTTPServer):
                 ],
                 "camera": question.camera,
                 "margin": question.margin,
-                "answer": given.get(key(question.members)),
+                "answer": given.get((key(question.members), self.round)),
             }
             # Which band each set came from is deliberately not here. It is the one
             # thing that would prime the reader -- being told a set is one no

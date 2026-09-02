@@ -770,6 +770,11 @@ def given(conn, **marks) -> None:
     )
 
 
+def stored(conn, members=(A, B), round: int = label.ROUND) -> dict:
+    """The one answer filed under this set in this round -- the table's own key."""
+    return label.answers(conn)[label.key(members), round]
+
+
 def test_an_answer_survives_the_harness_being_stopped(tmp_path: Path) -> None:
     path = tmp_path / "labels.sqlite3"
     conn = label.store(path)
@@ -778,7 +783,7 @@ def test_an_answer_survives_the_harness_being_stopped(tmp_path: Path) -> None:
 
     reopened = label.store(path)
     try:
-        assert label.answers(reopened)[label.key((A, B))]["verdict"] == "accept"
+        assert stored(reopened)["verdict"] == "accept"
     finally:
         reopened.close()
 
@@ -787,9 +792,9 @@ def test_an_answer_can_be_revised(answers) -> None:
     given(answers)
     given(answers, evicted=(B,))
 
-    stored = label.answers(answers)[label.key((A, B))]
-    assert stored["verdict"] == "split"
-    assert stored["evicted"] == [B]
+    revised = stored(answers)
+    assert revised["verdict"] == "split"
+    assert revised["evicted"] == [B]
     assert len(label.answers(answers)) == 1
 
 
@@ -799,13 +804,13 @@ def test_an_answer_records_the_stack_it_was_about() -> None:
     conn = label.store(Path(":memory:"))
     try:
         given(conn, included=(C,))
-        stored = label.answers(conn)[label.key((A, B))]
+        recorded = stored(conn)
     finally:
         conn.close()
 
-    assert stored["members"] == [A, B]
-    assert stored["included"] == [C]
-    assert stored["camera"] == "Lumix"
+    assert recorded["members"] == [A, B]
+    assert recorded["included"] == [C]
+    assert recorded["camera"] == "Lumix"
 
 
 def test_this_sitting_is_stamped_as_round_three(answers) -> None:
@@ -814,7 +819,7 @@ def test_this_sitting_is_stamped_as_round_three(answers) -> None:
     given(answers)
 
     assert label.ROUND == 3
-    assert label.answers(answers)[label.key((A, B))]["round"] == 3
+    assert stored(answers)["round"] == 3
     assert len(label.answers(answers, 3)) == 1
     assert label.answers(answers, 2) == {}
 
@@ -824,19 +829,16 @@ def test_a_reason_says_why_the_frame_it_is_keyed_on_does_not_belong(answers) -> 
     indistinguishable from "this is a different photograph" until this column."""
     given(answers, evicted=(A,), reasons={A: "people"})
 
-    stored = label.answers(answers)[label.key((A, B))]
-    assert stored["evicted"] == [A]  # the shape rounds one and two wrote, unchanged
-    assert stored["reasons"] == {A: "people"}
+    recorded = stored(answers)
+    assert recorded["evicted"] == [A]  # the shape rounds one and two wrote, unchanged
+    assert recorded["reasons"] == {A: "people"}
 
 
 def test_a_set_split_for_two_different_reasons_reads_as_such(answers) -> None:
     """Which is why the reasons are stored per frame and not per set."""
     given(answers, evicted=(A, B), reasons={A: "people", B: "close"})
 
-    assert label.answers(answers)[label.key((A, B))]["reasons"] == {
-        A: "people",
-        B: "close",
-    }
+    assert stored(answers)["reasons"] == {A: "people", B: "close"}
 
 
 def test_an_answer_nobody_could_be_asked_why_about_reads_as_unknown(answers) -> None:
@@ -845,13 +847,13 @@ def test_an_answer_nobody_could_be_asked_why_about_reads_as_unknown(answers) -> 
     look smaller than it is."""
     given(answers, evicted=(A,))
 
-    assert label.answers(answers)[label.key((A, B))]["reasons"] is None
+    assert stored(answers)["reasons"] is None
 
 
 def test_a_reader_asked_and_pressing_nothing_is_a_different_fact(answers) -> None:
     given(answers, evicted=(A,), reasons={})
 
-    assert label.answers(answers)[label.key((A, B))]["reasons"] == {}
+    assert stored(answers)["reasons"] == {}
 
 
 def reasonless(path: Path, rows: list[tuple]) -> None:
@@ -881,15 +883,16 @@ def test_an_answer_from_before_the_column_existed_still_reads(tmp_path: Path) ->
 
     conn = label.store(path)
     try:
-        stored = label.answers(conn)[label.key((A, B))]
+        carried = stored(conn, round=2)
         given(conn, evicted=(A,), reasons={A: "moment"})
-        fresh = label.answers(conn)[label.key((A, B))]
+        fresh = stored(conn)
     finally:
         conn.close()
 
-    assert (stored["round"], stored["verdict"], stored["evicted"]) == (2, "split", [B])
-    assert stored["reasons"] is None
-    # And the column it gained is writable, so the round in hand records into it.
+    assert (carried["round"], carried["verdict"], carried["evicted"]) == (2, "split", [B])
+    assert carried["reasons"] is None
+    # And the column it gained is writable, so the round in hand records into it --
+    # beside round two's answer about the same set rather than over the top of it.
     assert fresh["reasons"] == {A: "moment"}
 
 
@@ -899,7 +902,7 @@ def test_an_answer_records_which_round_asked_it(answers) -> None:
     checking."""
     given(answers, round=2)
 
-    assert label.answers(answers)[label.key((A, B))]["round"] == 2
+    assert stored(answers, round=2)["round"] == 2
 
 
 def test_the_counter_reads_the_round_in_hand(answers) -> None:
@@ -910,6 +913,43 @@ def test_the_counter_reads_the_round_in_hand(answers) -> None:
     assert label.answers(answers, 2) == {}
     assert len(label.answers(answers, 1)) == 1
     assert len(label.answers(answers)) == 1  # every round, which is what the report reads
+
+
+def test_a_later_round_asking_the_same_question_does_not_destroy_the_answer(
+    answers,
+) -> None:
+    """Ticket 90, and the reason the round is half the key. The sampling rule that
+    keeps an answered run out of a later draw is a sampling rule; a sitting drawn to
+    retest the reader deliberately breaks it, and before this the retest overwrote
+    the evidence it was run to check."""
+    given(answers, round=1, evicted=(A,))
+    given(answers, round=4)
+
+    assert stored(answers, round=1)["verdict"] == "split"
+    assert stored(answers, round=4)["verdict"] == "accept"
+    assert len(label.answers(answers)) == 2
+
+
+def test_revising_inside_the_sitting_still_replaces(answers) -> None:
+    """The other half of the same decision: `h` goes back through the sets dealt
+    tonight, and a misclick corrected there is one answer and not the reader
+    contradicting themselves. Which is why the key stops at the round."""
+    given(answers, round=4)
+    given(answers, round=4, evicted=(B,))
+
+    assert stored(answers, round=4)["verdict"] == "split"
+    assert len(label.answers(answers)) == 1
+
+
+def test_the_counter_counts_a_re_ask_once(answers) -> None:
+    """The counter is the round in hand's, so an earlier round's answer about the
+    same set is not one of tonight's -- with both of them in the file, which is what
+    the count of every round says and the old shape could not have produced."""
+    given(answers, round=1)
+    given(answers, round=4)
+
+    assert len(label.answers(answers, 4)) == 1
+    assert len(label.answers(answers)) == 2
 
 
 def test_only_an_earlier_round_keeps_a_run_out_of_the_draw(answers) -> None:
@@ -931,9 +971,9 @@ def test_an_answer_records_which_frames_outside_the_stack_were_on_screen() -> No
     conn = label.store(Path(":memory:"))
     try:
         given(conn, shown=1)
-        narrow = label.answers(conn)[label.key((A, B))]["surrounding"]
+        narrow = stored(conn)["surrounding"]
         given(conn, shown=2)
-        wide = label.answers(conn)[label.key((A, B))]["surrounding"]
+        wide = stored(conn)["surrounding"]
     finally:
         conn.close()
 
@@ -1010,13 +1050,13 @@ def test_answers_from_before_the_view_could_widen_are_carried_over(tmp_path: Pat
     finally:
         conn.close()
 
-    assert carried[label.key((A, B))]["surrounding"] == [C, D]
-    assert carried[label.key((A, B))]["verdict"] == "merge"
-    assert carried[label.key((A, B))]["included"] == [C]
-    assert carried[label.key((A, B))]["round"] == 1
+    assert carried[label.key((A, B)), 1]["surrounding"] == [C, D]
+    assert carried[label.key((A, B)), 1]["verdict"] == "merge"
+    assert carried[label.key((A, B)), 1]["included"] == [C]
+    assert carried[label.key((A, B)), 1]["round"] == 1
     # Nothing either side of it, which is a real state and not a missing one.
-    assert carried[label.key((D, E))]["surrounding"] == []
-    assert carried[label.key((D, E))]["verdict"] == "accept"
+    assert carried[label.key((D, E)), 1]["surrounding"] == []
+    assert carried[label.key((D, E)), 1]["verdict"] == "accept"
 
 
 def roundless(path: Path, rows: list[tuple]) -> None:
@@ -1049,8 +1089,8 @@ def test_answers_written_before_rounds_existed_are_round_one(tmp_path: Path) -> 
     finally:
         conn.close()
 
-    assert carried[label.key((A, B))]["round"] == 1
-    assert carried[label.key((A, B))]["surrounding"] == [C]
+    assert carried[label.key((A, B)), 1]["round"] == 1
+    assert carried[label.key((A, B)), 1]["surrounding"] == [C]
     assert settled == {A, B}
 
 
@@ -1070,12 +1110,127 @@ def test_naming_the_round_happens_once_and_a_second_open_leaves_it_alone(
 
     conn = label.store(path)
     try:
-        stored = label.answers(conn)
+        kept = label.answers(conn)
     finally:
         conn.close()
 
-    assert stored[label.key((A, B))]["round"] == 1
-    assert stored[label.key((C, D))]["round"] == 2
+    assert kept[label.key((A, B)), 1]["round"] == 1
+    assert kept[label.key((C, D)), 2]["round"] == 2
+
+
+def one_per_set(path: Path, rows: list[tuple]) -> None:
+    """A labels file in the shape written before a set could be answered twice."""
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE answer (members TEXT PRIMARY KEY, camera TEXT, surrounding TEXT,"
+        " margin INTEGER, verdict TEXT, evicted TEXT, included TEXT, answered_at TEXT,"
+        " round INTEGER NOT NULL DEFAULT 1, reasons TEXT)"
+    )
+    old.executemany("INSERT INTO answer VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    old.commit()
+    old.close()
+
+
+ANSWERED = [
+    (label.key((A, B)), "Lumix", f'["{C}"]', 2, "split", f'["{B}"]', "[]", "2026-08-11",
+     2, None),
+    (label.key((D, E)), "Sony", "[]", 7, "accept", "[]", "[]", "2026-08-11", 1, None),
+]
+
+
+def test_a_file_keyed_on_the_set_alone_is_re_keyed_and_keeps_every_answer(
+    tmp_path: Path,
+) -> None:
+    """Ticket 90's widening. The reader's 153 answers are the one thing here that is
+    not re-derivable, so they are carried across rather than asked to move aside --
+    and nothing is stamped or defaulted, the round they were given in being the round
+    they keep."""
+    path = tmp_path / "labels.sqlite3"
+    one_per_set(path, ANSWERED)
+
+    conn = label.store(path)
+    try:
+        carried = label.answers(conn)
+        when = dict(conn.execute("SELECT members, answered_at FROM answer"))
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+
+    assert len(carried) == len(ANSWERED)
+    assert carried[label.key((A, B)), 2]["verdict"] == "split"
+    assert carried[label.key((A, B)), 2]["evicted"] == [B]
+    assert carried[label.key((A, B)), 2]["reasons"] is None  # still unknown, not none
+    assert carried[label.key((D, E)), 1]["verdict"] == "accept"
+    # When it was answered rides across too. The column has a default, so losing it
+    # would stamp the reader's whole evening with the day of the upgrade in silence.
+    assert when == {label.key((A, B)): "2026-08-11", label.key((D, E)): "2026-08-11"}
+    assert tables == {"answer", "person_verdict", "same_person"}
+
+
+def test_a_re_ask_against_the_old_shape_persists_once_it_has_been_re_keyed(
+    tmp_path: Path,
+) -> None:
+    """The acceptance criterion read from the reader's side: the file they have is
+    the old shape, and the sitting that retests them has to leave both answers in
+    it."""
+    path = tmp_path / "labels.sqlite3"
+    one_per_set(path, ANSWERED)
+
+    conn = label.store(path)
+    try:
+        given(conn, round=4)  # the same set (A, B), asked again
+        both = label.answers(conn)
+    finally:
+        conn.close()
+
+    assert both[label.key((A, B)), 2]["verdict"] == "split"
+    assert both[label.key((A, B)), 4]["verdict"] == "accept"
+
+
+def test_re_keying_happens_once_and_a_second_open_changes_nothing(tmp_path: Path) -> None:
+    path = tmp_path / "labels.sqlite3"
+    one_per_set(path, ANSWERED)
+
+    label.store(path).close()
+    conn = label.store(path)
+    try:
+        assert label.answers(conn)[label.key((A, B)), 2]["evicted"] == [B]
+        assert label._keyed_on(conn) == label.KEY
+        # The rebuild renames the old table aside and drops it, so a leftover copy
+        # would show up here -- and a second rebuild would drop the first's rows.
+        assert {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        } == {"answer", "person_verdict", "same_person"}
+    finally:
+        conn.close()
+
+
+def test_a_file_from_before_rounds_existed_is_stamped_and_re_keyed_at_once(
+    tmp_path: Path, capsys
+) -> None:
+    """Two widenings are owed by one file, and it says both. A table that has just
+    gained `round` is still keyed on the members alone, and a reader whose file was
+    rebuilt under them should be told so rather than told only the last of it."""
+    path = tmp_path / "labels.sqlite3"
+    roundless(
+        path,
+        [(label.key((A, B)), "Lumix", f'["{C}"]', 2, "accept", "[]", "[]", "2026-08-10")],
+    )
+
+    conn = label.store(path)
+    try:
+        said = capsys.readouterr().out
+        assert label.answers(conn)[label.key((A, B)), 1]["surrounding"] == [C]
+        assert label._keyed_on(conn) == label.KEY
+        given(conn, round=4)
+        assert len(label.answers(conn)) == 2
+    finally:
+        conn.close()
+
+    assert "as round one and reasons unknown" in said
+    assert "onto a key that keeps a re-ask" in said
 
 
 def test_carrying_over_happens_once_and_a_second_open_changes_nothing(tmp_path: Path) -> None:
@@ -1092,7 +1247,7 @@ def test_carrying_over_happens_once_and_a_second_open_changes_nothing(tmp_path: 
     finally:
         conn.close()
 
-    assert carried[label.key((A, B))]["surrounding"] == [C]
+    assert carried[label.key((A, B)), 1]["surrounding"] == [C]
     # Every mode's table and nothing else: the widening renames the old `answer`
     # aside and drops it, so a leftover copy beside the real one would show up here.
     assert tables == {"answer", "person_verdict", "same_person"}
