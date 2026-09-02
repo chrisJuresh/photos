@@ -18,6 +18,8 @@ photograph.
 
 from __future__ import annotations
 
+import pytest
+
 from harness import calibrate
 
 STRICT = 20
@@ -438,6 +440,24 @@ def test_the_frontier_drops_a_setting_beaten_on_both_counts() -> None:
     assert front == [better]
 
 
+def test_the_frontier_prints_one_row_per_distinct_result_and_keeps_the_strictest() -> None:
+    """`beats` needs a difference, so two settings scoring identically never dominate
+    each other and both survive. A two-dimensional sweep makes them by the dozen -- a
+    cosine floor loose enough to stack a run on its own returns the same tally at
+    every strictness above it -- and sixteen rows saying one thing is the unreadable
+    frontier the ticket warned about."""
+    same = calibrate.Tally(together=8, wrongly_together=1, missed=1)
+    front = calibrate.frontier(
+        {
+            calibrate.Setting(10, "neighbour", 0.30): same,
+            calibrate.Setting(20, "neighbour", 0.30): same,
+            calibrate.Setting(100, "neighbour", 0.30): same,
+        }
+    )
+
+    assert front == [calibrate.Setting(100, "neighbour", 0.30)]
+
+
 def test_a_setting_that_claims_nothing_is_not_chosen() -> None:
     """Precision is undefined rather than perfect when a setting stacks nothing
     at all, and a report that read it as 100% would recommend the useless one."""
@@ -687,7 +707,7 @@ def test_the_pick_comes_from_the_choosing_slice_and_the_checking_slice_only_chec
     choosing, checking = calibrate.partition(cases)
     points = told(cases, wrong_in=checking)
 
-    chosen = calibrate.report(cases, points, [], strictnesses=(STRICT,))
+    chosen = calibrate.report(cases, points, {}, [], strictnesses=(STRICT,))
 
     printed = capsys.readouterr().out
     assert chosen == calibrate.Setting(STRICT, "complete")
@@ -738,7 +758,7 @@ def test_a_pick_the_held_back_quarter_agrees_with_is_printed_as_checking_out(
 ) -> None:
     cases = sitting(40)
 
-    chosen = calibrate.report(cases, told(cases, wrong_in=[]), [], strictnesses=(STRICT,))
+    chosen = calibrate.report(cases, told(cases, wrong_in=[]), {}, [], strictnesses=(STRICT,))
 
     assert chosen == calibrate.Setting(STRICT, "complete")
     assert "the pick checks out" in capsys.readouterr().out
@@ -806,7 +826,7 @@ def test_a_contested_set_is_scored_against_no_setting(capsys) -> None:
     twice = [*asked, again(argued, round=1, evicted=[argued.members[1]], verdict="split")]
     choosing, _ = calibrate.partition([one for one in asked if one is not argued])
 
-    chosen = calibrate.report(twice, told(asked, wrong_in=[argued]), [], strictnesses=(STRICT,))
+    chosen = calibrate.report(twice, told(asked, wrong_in=[argued]), {}, [], strictnesses=(STRICT,))
 
     printed = capsys.readouterr().out
     assert chosen == calibrate.Setting(STRICT, "complete")
@@ -820,7 +840,7 @@ def test_the_contested_sets_are_named_and_the_convention_is_stated(capsys) -> No
     argued = asked[0]
     twice = [*asked, again(argued, round=1, evicted=[argued.members[1]], verdict="split")]
 
-    calibrate.report(twice, told(asked, wrong_in=[]), [], strictnesses=(STRICT,))
+    calibrate.report(twice, told(asked, wrong_in=[]), {}, [], strictnesses=(STRICT,))
 
     printed = capsys.readouterr().out
     assert "1 set(s) carry an answer from more than one round, and 0 of them agree" in printed
@@ -834,7 +854,7 @@ def test_a_repeat_that_agrees_is_a_rate_and_sets_nothing_aside(capsys) -> None:
     asked = sitting(40)
     twice = [*asked, again(asked[0], round=1), again(asked[1], round=1)]
 
-    calibrate.report(twice, told(asked, wrong_in=[]), [], strictnesses=(STRICT,))
+    calibrate.report(twice, told(asked, wrong_in=[]), {}, [], strictnesses=(STRICT,))
 
     printed = capsys.readouterr().out
     assert "2 set(s) carry an answer from more than one round, and 2 of them agree" in printed
@@ -847,7 +867,7 @@ def test_no_set_asked_twice_is_said_plainly_and_never_a_rate(capsys) -> None:
     this number never measured, and the report says so rather than printing 100%."""
     asked = sitting(40)
 
-    calibrate.report(asked, told(asked, wrong_in=[]), [], strictnesses=(STRICT,))
+    calibrate.report(asked, told(asked, wrong_in=[]), {}, [], strictnesses=(STRICT,))
 
     printed = capsys.readouterr().out
     assert "no set carries an answer from more than one round" in printed
@@ -870,12 +890,285 @@ def test_the_newest_round_chooses_and_the_earlier_ones_are_replayed_as_checks(
     ]
     points = told(newest, wrong_in=[])
 
-    chosen = calibrate.report([*earlier, *newest], points, [], strictnesses=(STRICT,))
+    chosen = calibrate.report([*earlier, *newest], points, {}, [], strictnesses=(STRICT,))
 
     printed = capsys.readouterr().out
     assert chosen == calibrate.Setting(STRICT, "complete")
     assert "round 3, the evidence the setting is chosen from" in printed
     assert "round 1, a check on complete linkage" in printed
+
+
+# --- the four rules -----------------------------------------------------------
+#
+# Ticket 93. What is under test is that the rules are priced **apart**, that a rule
+# the labels contradict is printed as refuted, and that the report says in its own
+# output what a good score is and is not worth. Nothing here asserts what a cosine
+# means over photographs -- see the note in `tests/test_membership.py` for why that
+# assertion has nowhere to stand in this suite.
+
+
+def seen(cases, *, wrong_in) -> dict[tuple[str, str], float]:
+    """Cosines that agree exactly where `told`'s Matches do, except where told not to.
+
+    `told`'s shape one table across, so a rule reading the cosine and a rule reading
+    the Match can be given the same corpus and disagree only where a test says they
+    should.
+    """
+    poisoned = {case.name for case in wrong_in}
+    screens: dict[tuple[str, str], float] = {}
+    for case in cases:
+        x, y, z = case.run
+        screens[(x, y)] = 1.0
+        screens[(x, z)] = screens[(y, z)] = 1.0 if case.name in poisoned else 0.0
+    return screens
+
+
+def test_a_setting_says_which_rule_it_is_by_which_thresholds_it_carries() -> None:
+    """No discriminator field, so the two cannot be made to disagree with each other."""
+    assert calibrate.Setting(20, "complete").name == "20"
+    assert calibrate.Setting(None, "complete", 0.85).name == "cosine 0.85"
+    assert calibrate.Setting(20, "complete", 0.85).name == "20 or cosine 0.85"
+    assert "the Match unused" in calibrate.describes(calibrate.Setting(None, "complete", 0.85))
+
+
+def test_the_rule_a_setting_becomes_is_built_from_the_shipped_seam() -> None:
+    """Every rule this report prices comes out of `photolib.membership` through
+    `harness.label`, which is the whole argument that the numbers describe what a pass
+    would write rather than something adjacent to it."""
+    points = scores(ab=HIGH)
+    screens = {(A, B): 0.9}
+
+    assert calibrate.rule(calibrate.Setting(STRICT, "complete"), points, None)(A, B) is True
+    assert calibrate.rule(calibrate.Setting(None, "complete", 0.85), {}, screens)(A, B) is True
+    # Either way in, and neither measure alone would have said yes.
+    both = calibrate.rule(calibrate.Setting(STRICT, "complete", 0.85), scores(ab=1), screens)
+    assert both(A, B) is True
+
+
+def test_a_cosine_threshold_with_no_cosines_read_is_an_error_and_not_a_refuted_rule() -> None:
+    """It would print as a rule the labels refute, which is a finding, so it is not
+    allowed to be the shape of a caller mistake."""
+    with pytest.raises(ValueError):
+        calibrate.rule(calibrate.Setting(None, "complete", 0.85), {}, None)
+    with pytest.raises(ValueError):
+        calibrate.rule(calibrate.Setting(None, "complete"), {}, {})
+
+
+def test_the_report_prices_all_four_rules_and_scores_them_apart(capsys) -> None:
+    cases = sitting(40)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=[]),
+        seen(cases, wrong_in=[]),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    printed = capsys.readouterr().out
+    assert "rule 1 -- the Match at or above strictness" in printed
+    assert "rule 2 -- the fingerprint cosine at or above a floor" in printed
+    assert "rule 3 -- the Match at or above strictness *or* the cosine" in printed
+    assert f"rule 4 -- the Match at or above {calibrate.NOISE_FLOOR}" in printed
+    assert "what the rules say together" in printed
+
+
+def test_the_report_states_the_sampling_caveat_in_its_own_output(capsys) -> None:
+    """A reader of the output alone has to be able to tell that a good score for a
+    rule reading the fingerprint is weak evidence. Ticket 93 makes that an acceptance
+    criterion rather than a docstring."""
+    cases = sitting(40)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=[]),
+        seen(cases, wrong_in=[]),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    printed = capsys.readouterr().out
+    assert "can refute a rule and it cannot confirm one" in printed
+    assert "banded on the Match" in printed
+    assert "Refuted means refuted; survived means not yet refuted." in printed
+
+
+def test_a_cosine_rule_the_labels_contradict_is_printed_as_refuted(capsys) -> None:
+    """The strong reading this report is allowed to make. Here every cosine says one
+    picture, so the rule stacks the frame the reader pushed out of every set."""
+    cases = sitting(40)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=[]),
+        seen(cases, wrong_in=cases),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    printed = capsys.readouterr().out
+    assert "refute the cosine on its own at every value swept" in printed
+    assert "rule 2  refuted" in printed
+
+
+def test_the_control_is_what_comes_back_however_the_other_rules_scored(capsys) -> None:
+    """The grid is not moved from here: ticket 93 prices the alternatives and ticket
+    95 acts on them, so the return value is the pick the checks below are checks on."""
+    cases = sitting(40)
+
+    chosen = calibrate.report(
+        cases,
+        told(cases, wrong_in=[]),
+        seen(cases, wrong_in=[]),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    assert chosen == calibrate.Setting(STRICT, "complete")
+    assert chosen.cosine is None
+
+
+def test_rule_three_is_printed_as_a_surface_and_a_frontier_and_not_one_pick(capsys) -> None:
+    """A single pick hides the exchange rate between the two thresholds, and a
+    frontier nobody can read is worse than a table, so both are printed."""
+    cases = sitting(40)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=[]),
+        seen(cases, wrong_in=[]),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    printed = capsys.readouterr().out
+    assert "rule 3's surface at complete linkage" in printed
+    assert "the frontier -- every setting here buys recall with precision" in printed
+    # Every cosine floor swept is a row of the surface.
+    assert all(f"  {value:<6.2f}" in printed for value in calibrate.COSINES)
+
+
+def test_the_noise_floor_is_priced_even_where_the_sweep_leaves_it_out(capsys) -> None:
+    """Four is the lowest Match a homography can return, so the belief that a
+    strictness of 4 is catastrophic is the thing being replaced with a number --
+    and it cannot depend on `--strictness` happening to contain the value."""
+    cases = sitting(40)
+    assert calibrate.NOISE_FLOOR not in (STRICT,)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=[]),
+        seen(cases, wrong_in=[]),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    printed = capsys.readouterr().out
+    noise = printed.split("rule 4 --")[-1].split("rule 2 --")[0]
+    rows = [
+        line
+        for line in noise.splitlines()
+        if line.startswith("  complete") and line.split()[1] == str(calibrate.NOISE_FLOOR)
+    ]
+    assert len(rows) == 1
+    assert "--" in rows[0].split()[2]  # and it reads no cosine: this is rule 1's shape
+    # And it is read at the linkage the grid is drawn with, because "not catastrophic
+    # at some linkage" is a different claim from "not catastrophic here".
+    assert "at complete linkage, which is what the control chose" in noise
+
+
+def test_the_held_back_quarter_checks_every_rule_s_pick(capsys) -> None:
+    """The one population in this report that can refute a fingerprint rule without a
+    fresh sitting: same round, so the same bias and no confirmation, but a pick that
+    fails here has contradicted answers it never saw."""
+    cases = sitting(40)
+    _, checking = calibrate.partition(cases)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=checking),
+        seen(cases, wrong_in=checking),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    printed = capsys.readouterr().out.split("held-back quarter")[-1]
+    assert "rule 1  " in printed and "rule 2  " in printed and "rule 3  " in printed
+    assert printed.count("fails its own check") == 3
+
+
+def test_the_synthesis_is_printed_after_the_check_that_can_refute_a_rule(capsys) -> None:
+    """A synthesis above the held-back quarter would hand a reader "rule 3 reaches
+    further" and leave them to find the refutation eighty lines down. So it is last,
+    after every check, and it reads the holdout's own verdict rather than scoring the
+    picks a second time."""
+    cases = sitting(40)
+    _, checking = calibrate.partition(cases)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=checking),
+        seen(cases, wrong_in=checking),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    printed = capsys.readouterr().out
+    assert printed.index("held-back quarter") < printed.index("what the rules say together")
+    verdict = printed.split("what the rules say together")[-1]
+    assert "fall under the 85% floor" in verdict
+    assert "which is a refutation and" in verdict
+
+
+def test_a_pick_the_held_back_quarter_leaves_standing_is_not_called_confirmed(
+    capsys,
+) -> None:
+    """The other half of the asymmetry. Nothing here is refuted and the report still
+    refuses the word the reader would want."""
+    cases = sitting(40)
+
+    calibrate.report(
+        cases,
+        told(cases, wrong_in=[]),
+        seen(cases, wrong_in=[]),
+        [],
+        strictnesses=(STRICT,),
+    )
+
+    verdict = capsys.readouterr().out.split("what the rules say together")[-1]
+    assert "nothing here is refuted" in verdict
+    assert "nothing here is confirmed either" in verdict
+
+
+def test_the_bias_counts_how_much_of_the_disagreement_the_answers_reach() -> None:
+    """The number the caveat is made of. Counted over the runs the answers sit in and
+    not over the catalog, so the denominator is pairs the reader could have been asked
+    about rather than every pair there is."""
+    case = calibrate.case(answer([B, C], surrounding=[A]), (A, B, C))
+    # B/C: the fingerprint says one picture and the Match says nothing -- the reader's
+    # complaint. A/B: the mirror, which nothing has ever asked about. A/C: agreed.
+    points = scores(ab=STRICT, ac=STRICT, bc=1)
+    screens = {(B, C): 0.95, (A, B): 0.1, (A, C): 0.9}
+
+    measured = calibrate.bias([case], points, screens, strictness=STRICT)
+
+    assert (measured.cosine_only, measured.match_only) == (1, 1)
+    assert measured.disagreeing == 2
+    # All three pairs of this run are placed by the answer, so both are reached.
+    assert (measured.placed, measured.labelled) == (2, 3)
+    assert measured.reached == 1.0
+
+
+def test_a_run_with_no_disagreement_in_it_is_said_plainly_and_never_a_share() -> None:
+    """A share over nothing is worse than no share, which is `repeats`' rule for the
+    self-consistency rate applied to the same shape of absence."""
+    case = calibrate.case(answer([B, C]), (B, C))
+    measured = calibrate.bias([case], scores(bc=HIGH), {(B, C): 0.95}, strictness=STRICT)
+
+    assert measured.reached is None
+    said = "\n".join(calibrate.caveat(measured))
+    assert "never contradict each other at all" in said
+    assert "%" not in said.split("caveat")[-1].split("None of the three")[0]
 
 
 def test_too_few_answers_is_a_refusal_with_the_count_and_never_a_choice(capsys) -> None:
@@ -884,7 +1177,7 @@ def test_too_few_answers_is_a_refusal_with_the_count_and_never_a_choice(capsys) 
     cases = sitting(8)
     choosing, _ = calibrate.partition(cases)
 
-    chosen = calibrate.report(cases, told(cases, wrong_in=[]), [], strictnesses=(STRICT,))
+    chosen = calibrate.report(cases, told(cases, wrong_in=[]), {}, [], strictnesses=(STRICT,))
 
     printed = capsys.readouterr().out
     assert chosen is None

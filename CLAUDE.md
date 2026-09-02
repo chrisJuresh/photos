@@ -594,14 +594,41 @@ strictness, which is the comparison round one's labels could not make, naming th
 itself what was chosen, it is asked whether it clears the floor on the sets drawn to break
 it rather than asked to beat itself.
 
+**Four rules are replayed and not one**, because ADR 0003's Match has a hard noise floor at
+exactly 4 — a homography cannot return fewer inliers, 117,744 pairs score exactly that, and
+all three of the runs the reader reported as wrongly split live in the band 4 to 9, where it
+has no resolving power at all. So the sweep runs over the Match against strictness (**the
+control**, and what the grid draws), the fingerprint cosine against a floor with the Match
+unused, either of the two as a second way in, and the noise floor itself priced whether or
+not `--strictness` contains it. They are **scored apart and never pooled into one ranking**,
+each choosing inside itself, and the one the report returns is the control: the grid is not
+moved from here. No new pass was needed — the cosine is stored on all 3,632,211 candidates
+precisely so a threshold on it is a re-read, and every value is answered from
+`candidate_pair.screen` and never from `verdict`, with `harness.screen`'s refusal borrowed
+whole. Rule 3's two thresholds are printed as a **surface and then a frontier**, because a
+single pick hides the exchange rate between them and a frontier of forty rows hides
+everything; identical results are one row, keeping the strictest of them.
+
+**The report says in its own output that it can refute a rule and cannot confirm one.** The
+sets these answers were drawn from were banded on the Match, so they under-represent exactly
+the disagreement a fingerprint rule turns on — it counts and prints how much: 6.0% of the
+23,788 pairs where the two measures contradict each other inside these runs is placed by any
+answer at all — and none of the reader's three failing runs is among the answers. So a bad
+score is a refutation and a good one is not a confirmation, and the **synthesis is printed
+last, after the held-back quarter**, which is the one population here that can refute a
+fingerprint rule without a fresh sitting. A verdict above it would hand a reader *rule 3
+reaches further* and leave them to find the refutation eighty lines down.
+
 `--precision` moves the floor and `--linkage` narrows which rules are
 in the running, so a decision to set one aside is a command rather than an argument made
-afterwards. It reads
+afterwards. The cosine sweep is deliberately **not** a knob: the whole point of rule 3 is a
+frontier rather than a pick, and a flag would let the report be asked a narrower question
+than the one it exists to answer. It reads
 the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate and never touches
 `G:`; it writes no label and no report, and the only thing it can put in the labels file is
 the round-one stamp the harness would have written anyway. The ceiling is not a knob: it is the fence the Match rows
 were computed behind, so cutting the runs anywhere else would replay the labels over pairs
-that were never checked.
+that were never checked, and neither is the 0.40 screen, which stays frozen.
 
 ```bash
 python -m harness.calibrate
@@ -616,6 +643,20 @@ floor did. The two earlier sections, "What the labels settled" and "What round t
 describe the setting this superseded and the run that returned it is still
 `python -m harness.calibrate --linkage complete,majority`; that setting's population is
 still in `stack_member` and still offered by the Stacks panel.
+
+**What the four rules settled: nothing moves.** Both fingerprint rules reach further than
+the control on the choosing slice and pay precision for it — the cosine alone at 0.50 with
+*matches most members*, 86.2% and 95.1%; either way in at strictness 10 or cosine 0.80 with
+*the chain*, 96.6% and 94.3% against the control's 97.0% and 93.2% — and **both then fail
+the quarter held back**, at 59.5% and 81.3% against the 85% floor the control clears at
+90.2%. A pick that fails a slice it never chose from has contradicted answers the reader
+really gave, so these labels refute both and leave the control standing. That is the third
+report here to recommend changing nothing. What it does **not** say is that the Match is
+right: 6.0% of the disagreement is reached at all, so the sample cannot answer the question
+#88 raised, and #94's round is what would. Strictness 4 is priced beside them and is
+catastrophic where it matters — 69.0% precision at *the chain*, with 2,880 wrongly stacked
+pairs in one case — while clearing the floor at 85.2% under *matches most members*, so what
+the noise floor costs turns on the linkage and not only on the threshold.
 
 To price the **fingerprint screen** — the other thing ADR 0003 left open, and the one the
 labels turned round: at 0.40 the screen costs 5.2% of the pairs the reader kept together,
