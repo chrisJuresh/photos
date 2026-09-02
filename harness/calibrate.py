@@ -7,6 +7,28 @@ threshold on the Match -- whether **complete linkage** needs softening to
 answers the first two by replaying the reader's own answers against every setting
 and saying how well each one reproduces what they said.
 
+**Four rules are replayed and not one, because ticket 88 says the Match is the
+wrong question.** It has a hard noise floor at exactly 4 -- a RANSAC homography
+cannot return fewer than four inliers, 117,744 pairs score exactly that, and all
+three of the runs the reader reported as wrongly split live in the band 4 to 9,
+where the Match has no resolving power at all. So the sweep now runs over the
+Match against strictness (the control, and what the grid draws), the fingerprint
+cosine against a floor with the Match unused, either of the two as a second way in,
+and the noise floor itself priced explicitly. They are **scored apart and never
+pooled into one ranking**, and the one that comes back is the control: what the
+grid draws is not moved from here. No new pass was needed for any of it -- ADR
+0003 stored the cosine per candidate rather than reduced to a verdict so that "a
+number chosen later must be a re-read of these rows rather than another pass".
+
+**This report can refute a rule and it cannot confirm one, and it says so in its
+own output.** The sets these answers were drawn from were banded on the Match, so
+they under-represent exactly the disagreement a fingerprint rule turns on, and none
+of the reader's three failing runs is among them. A rule that scores badly here
+contradicts answers the reader really gave. A rule that scores well has been shown
+not to break what the Match already got right, on a sample drawn to be easy for the
+Match. See `caveat`, which prints the share of the disagreement these answers reach
+at all, and `Bias`, which counts it.
+
 **Precision and recall are reported apart and never blended.** They are not
 equally important here: the reader's binding constraint is precision -- *never
 open a stack and see two unrelated photographs* -- and recall is best-effort
@@ -107,7 +129,12 @@ output is to say how many there were and choose nothing.
     python -m harness.calibrate
 
 It reads the catalog and `labels.sqlite3`, both on the NVMe, opens no substrate
-and never touches `G:`. It writes no label and no report -- its output is a
+and never touches `G:`. Every question about the cosine is answered from the stored
+`candidate_pair.screen` and never from `verdict`, which is `screen >= 0.40` frozen
+at the moment the pass ran, and `photolib.candidates.refuse_if_rethresholded` is
+borrowed whole rather than weakened -- pricing a threshold on those numbers means
+nothing if the rows on the disk were decided somewhere else. Nothing here moves
+`SCREEN`. It writes no label and no report -- its output is a
 recommendation for `docs/adr/0003-stack-on-verified-match.md`, which a person
 writes down. The only thing it can change in the labels file is what
 `harness.label._carry_over` would have done anyway -- the round-one stamp, and the
@@ -128,9 +155,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from harness import label
-from harness.label import Agree, Joins, Points, agreement
-from photolib import candidates, matches
+from harness.label import Agree, Cosines, Joins, Points, agreement, either, resemblance
+from photolib import candidates, fingerprints, matches
 from photolib.config import load
+
+# The strictness the *grid* ships, read for `bias` alone -- the line the two
+# measures are asked to contradict each other about has to be the one actually
+# drawn. Deliberately not `harness.label.STRICTNESS`, which is the sampler's 20 and
+# is a different number on purpose: the bands round three was drawn in are cut
+# around it and re-pointing it is round four's business.
+from photolib.membership import STRICTNESS
 
 # The strictness values a run sweeps. Dense where the two populations
 # `photolib.matches` measured overlap -- pairs a second or less apart have a
@@ -138,6 +172,42 @@ from photolib.config import load
 # arguable is under 30 -- and coarse above it, where a set of frames either
 # agrees plainly or does not agree at all.
 SWEEP = (1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 60, 100)
+
+# The cosine floors a run sweeps, for the two rules that read the fingerprint.
+#
+# Dense between 0.60 and 0.95 because that is where the arguable pairs are: the
+# cosine is bimodal with a genuine valley -- 813,227 of this catalog's candidates
+# sit in the 0.00 bucket, a trough of 26,441 at 0.75, rising again to 40,551 at
+# 0.90 -- and the three runs the reader reported as wrongly split have least
+# adjacent cosines of 0.620, 0.843 and 0.938, so a threshold that decides them at
+# all decides them in here. Coarse below, where a floor stacks whole runs.
+#
+# **0.30 is deliberately under `photolib.candidates.SCREEN` and is not a move of
+# it.** A pair below 0.40 carries no Match row, so a cosine rule reaching one is
+# reaching evidence the geometry never saw -- `harness.rejected` measured 297 such
+# pairs among the reader's kept pairs and found 134 of them would clear strictness
+# 10. That row is here so the report says what including them buys rather than
+# assuming it away; the screen itself is frozen and the refusal below guards it.
+COSINES = (0.30, 0.40, 0.50, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95)
+
+# The Match's noise floor, priced explicitly whatever `--strictness` says.
+#
+# A RANSAC homography cannot return fewer than four inliers, so four is not a low
+# score -- it is the lowest score there is. 117,744 of this catalog's pairs score
+# exactly 4, the largest bucket in `pair_match`, and 1, 2 and 3 hold 15,062 between
+# them. All three of the reader's failing runs sit in the band 4 to 9. So the
+# expectation that a strictness of 4 is catastrophic is an assertion, and this
+# constant is what turns it into a number: the rule is priced here whether or not
+# the sweep happens to contain the value.
+NOISE_FLOOR = 4
+
+# The two thresholds the caveat's disagreement is counted at, and neither is a
+# rule: `HIGH_COSINE` is where the fingerprint plainly says one picture, and the
+# Match side is the grid's own shipped strictness, so the count says how often the
+# two measures contradict each other about the line the grid is actually drawn at.
+# `LOW_COSINE` is the mirror -- the direction nothing has ever asked about.
+HIGH_COSINE = 0.85
+LOW_COSINE = 0.60
 
 # The precision a setting has to reach before its recall is allowed to speak.
 #
@@ -431,8 +501,82 @@ def contested(read: Iterable[Case]) -> dict[str, list[Case]]:
 
 @dataclass(frozen=True)
 class Setting:
-    strictness: int
+    """One rule, as the report scores it: the thresholds it reads and the linkage.
+
+    **Which rule this is, is which thresholds are present**, and there is no field
+    saying so on purpose: a discriminator beside two optional numbers is the same
+    fact twice and can be made to disagree with itself.
+
+    | `strictness` | `cosine` | the rule |
+    |---|---|---|
+    | set | absent | the Match at or above strictness -- what the grid draws |
+    | absent | set | the cosine at or above a floor, the Match unused |
+    | set | set | either of them, which is strictly a loosening of the first |
+
+    `strictness` stays the first positional field and `cosine` is added after the
+    linkage, so `Setting(20, "complete")` goes on meaning exactly what it meant
+    before ticket 93: the Match rule, which is the control every other rule is
+    read against.
+    """
+
+    strictness: int | None
     linkage: str
+    cosine: float | None = None
+
+    @property
+    def name(self) -> str:
+        """The thresholds, in the order the rule reads them.
+
+        A Match-only setting prints as its bare strictness, which is what it printed
+        before there was anything else to print.
+        """
+        if self.cosine is None:
+            return str(self.strictness)
+        if self.strictness is None:
+            return f"cosine {self.cosine:.2f}"
+        return f"{self.strictness} or cosine {self.cosine:.2f}"
+
+
+def describes(setting: Setting) -> str:
+    """One setting in words, for the lines a reader reads instead of the table."""
+    if setting.cosine is None:
+        return f"{setting.linkage} linkage at strictness {setting.strictness}"
+    if setting.strictness is None:
+        return (
+            f"{setting.linkage} linkage at cosine {setting.cosine:.2f},"
+            " the Match unused"
+        )
+    return (
+        f"{setting.linkage} linkage at strictness {setting.strictness}"
+        f" or cosine {setting.cosine:.2f}"
+    )
+
+
+def rule(setting: Setting, points: Points, cosines: Cosines | None) -> Agree:
+    """The predicate one setting asks its question through: the four rules, in one place.
+
+    **Every rule this report prices is built here and nowhere else**, out of the
+    seam `photolib.membership` owns. That is the whole argument that these numbers
+    describe what the grid would draw: `agreement`, `resemblance` and `either` are
+    the pass's own, the walk they are handed to is the pass's own, and what this
+    function contributes is which of them a row of the table means. A rule spelled
+    out here would be a rule the grid cannot be moved onto.
+
+    A cosine threshold with no cosines read is a caller mistake rather than a rule
+    that agrees about nothing, and it would show up as a refuted rule instead of as
+    an error, so it is one.
+    """
+    match_rule = None if setting.strictness is None else agreement(points, setting.strictness)
+    if setting.cosine is None:
+        if match_rule is None:
+            raise ValueError("a setting has to read the Match, the cosine, or both")
+        return match_rule
+    if cosines is None:
+        raise ValueError(
+            f"cosine {setting.cosine} asked for and no stored cosine was read"
+        )
+    resembles = resemblance(cosines, setting.cosine)
+    return resembles if match_rule is None else either(match_rule, resembles)
 
 
 @dataclass(frozen=True)
@@ -627,8 +771,10 @@ def replay(cases: Iterable[Case], points: Points, agree: Agree, joins: Joins) ->
 def sweep(
     cases: Sequence[Case],
     points: Points,
-    strictnesses: Sequence[int] = SWEEP,
+    strictnesses: Sequence[int | None] = SWEEP,
     linkages: Sequence[str] = tuple(LINKAGE),
+    thresholds: Sequence[float | None] = (None,),
+    cosines: Cosines | None = None,
 ) -> dict[Setting, Tally]:
     """Every setting, scored. The order is the order the table is printed in.
 
@@ -637,17 +783,26 @@ def sweep(
     excluded by naming it on the command line rather than by arguing past the
     recommendation afterwards.
 
-    **This is the one place a setting becomes a rule**, and deliberately: `agreement`
-    is called here and nowhere below it, so a report that wants to price different
-    evidence builds a different predicate on this line rather than threading a
-    threshold through the scoring.
+    `thresholds` is the cosine axis and defaults to the one value that means *no
+    cosine at all*, so a call that says nothing about the fingerprint sweeps the
+    Match rule exactly as it did before ticket 93. A rule reading the cosine and
+    not the Match is a `strictnesses` of `(None,)`, which is why that sequence
+    admits one.
+
+    **A setting becomes a rule in `rule` and nowhere else.** This function decides
+    which settings exist; what each one reads is one call away, so the four rules
+    are four shapes of argument here rather than four branches inside the scoring.
     """
     return {
-        Setting(strictness, linkage): replay(
-            cases, points, agreement(points, strictness), LINKAGE[linkage]
+        setting: replay(
+            cases, points, rule(setting, points, cosines), LINKAGE[setting.linkage]
         )
-        for linkage in linkages
-        for strictness in strictnesses
+        for setting in (
+            Setting(strictness, linkage, threshold)
+            for linkage in linkages
+            for threshold in thresholds
+            for strictness in strictnesses
+        )
     }
 
 
@@ -672,10 +827,16 @@ def choose(scored: dict[Setting, Tally], floor: float = PRECISION) -> Setting | 
     stack of nine holding four unrelated photographs is the complaint. See
     `Tally.concentration` for the count and `HAIR` for how wide "a hair" is and
     why it is a tolerance rather than an equality. Inside the band recall decides
-    again, then the stricter setting, on the grounds that two settings the labels
-    cannot tell apart are not equally safe on the frames nobody labelled, and then
-    complete linkage, because it is ADR 0003's default and a softening has to earn
-    itself.
+    again, then the stricter setting -- the higher Match floor, then the higher
+    cosine floor -- on the grounds that two settings the labels cannot tell apart
+    are not equally safe on the frames nobody labelled, and then complete linkage,
+    because it is ADR 0003's default and a softening has to earn itself.
+
+    **One rule at a time and never a pooled ranking.** Every caller hands in the
+    settings of a single rule, because the four rules are scored apart: a `choose`
+    over all of them at once would return one winner and hide the comparison this
+    report exists to print -- and on labels drawn in bands cut on the Match, it
+    would hide it in the Match's favour.
 
     Precision does not rank even here. It is the floor and nothing else, and
     slipping it in as a tie-break would quietly restore the ordering the floor
@@ -703,7 +864,8 @@ def choose(scored: dict[Setting, Tally], floor: float = PRECISION) -> Setting | 
         key=lambda setting: (
             -scored[setting].concentration,
             recall(setting),
-            setting.strictness,
+            setting.strictness or 0,
+            setting.cosine or 0.0,
             -order.index(setting.linkage),
         ),
     )
@@ -730,17 +892,34 @@ def frontier(scored: dict[Setting, Tally]) -> list[Setting]:
 
     The trade the report exists to show: every setting here buys recall with
     precision or the other way about, and everything not here is beaten on both.
+
+    **One row per distinct result, because the frontier has to be readable.** Two
+    settings scoring identically on every column printed are indistinguishable to
+    the labels -- `beats` requires a difference, so neither dominates the other and
+    both survive -- and a two-dimensional sweep produces them by the dozen: a cosine
+    floor loose enough to stack a run on its own returns the same tally at every
+    strictness above it, which is sixteen rows saying one thing. So a group is
+    printed once, and the survivor kept is the strictest of it -- the higher Match
+    floor, then the higher cosine floor -- which is `choose`'s tie-break and its
+    reasoning: two settings the labels cannot tell apart are not equally safe on the
+    frames nobody labelled.
     """
     scoreable = {
         setting: tally for setting, tally in scored.items() if tally.precision is not None
     }
+    undominated = [
+        setting
+        for setting, tally in scoreable.items()
+        if not any(beats(other, tally) for other in scoreable.values())
+    ]
+    kept: dict[tuple, Setting] = {}
+    for setting in sorted(
+        undominated, key=lambda one: (one.strictness or 0, one.cosine or 0.0)
+    ):
+        tally = scoreable[setting]
+        kept[(tally.precision, tally.recall, tally.concentration)] = setting
     return sorted(
-        (
-            setting
-            for setting, tally in scoreable.items()
-            if not any(beats(other, tally) for other in scoreable.values())
-        ),
-        key=lambda setting: -(scoreable[setting].recall or 0),
+        kept.values(), key=lambda setting: -(scoreable[setting].recall or 0)
     )
 
 
@@ -788,11 +967,195 @@ def checked(
     }
 
 
+def screens(
+    conn: sqlite3.Connection,
+    wanted: set[str],
+    floor: float = min(COSINES),
+    *,
+    model: str = fingerprints.MODEL,
+    version: str = fingerprints.VERSION,
+) -> Cosines:
+    """The stored cosine of every candidate inside the runs the labels sit in.
+
+    **`screen` and never `verdict`**, which is `harness.screen`'s rule borrowed
+    whole: the verdict is `screen >= 0.40` frozen at the moment the pass ran, so a
+    sweep that read it would answer every threshold at 0.40 while appearing to
+    sweep. `candidates.refuse_if_rethresholded` is what stops those two drifting
+    apart and `main` borrows that too.
+
+    **Filtered twice, and the second filter is load-bearing.** The catalog holds a
+    cosine for 3,632,211 candidates and 1,974,461 of them are inside the runs the
+    reader was shown, which is more than this report needs to hold in memory at
+    once: a pair whose cosine is under every value the sweep asks about is a pair
+    no rule in the sweep agrees on, and dropping it reads as no agreement, which is
+    the same answer. So `floor` is the least threshold that will be asked and
+    defaults to the least in `COSINES` -- passing a threshold below what was read
+    would answer it wrongly rather than expensively, which is why the two are the
+    same constant and there is one call site.
+
+    `sys.intern` for `photolib.membership.points`' reason: a few hundred thousand
+    rows name a few thousand frames, and without it every row arrives as a fresh
+    pair of 64-character strings.
+    """
+    return {
+        (sys.intern(early), sys.intern(late)): screen
+        for early, late, screen in conn.execute(
+            "SELECT sha_early, sha_late, screen FROM candidate_pair"
+            " WHERE model = ? AND version = ? AND screen >= ?",
+            (model, version, floor),
+        )
+        if early in wanted and late in wanted
+    }
+
+
+# --- how much of the question the labels reach --------------------------------
+
+
+@dataclass(frozen=True)
+class Bias:
+    """How much of the disagreement between the two measures the answers reach.
+
+    The number the caveat below is made of, and it is counted rather than quoted:
+    the pairs where the Match and the fingerprint contradict each other about the
+    line the grid is drawn at, inside the runs the reader was actually shown, and
+    how many of those any answer places at all. A share near zero is the caveat --
+    the sample was drawn in bands cut on the Match, so it can say when a cosine rule
+    breaks something the Match got right and it cannot say what a cosine rule would
+    fix.
+    """
+
+    cosine_only: int  # cosine plainly agrees, the Match does not
+    match_only: int  # the Match agrees, the cosine plainly does not
+    placed: int  # of those two populations, the pairs an answer places
+    labelled: int  # every pair the answers place, whatever the two measures say
+    strictness: int  # the Match line the contradiction was counted at
+
+    @property
+    def disagreeing(self) -> int:
+        return self.cosine_only + self.match_only
+
+    @property
+    def reached(self) -> float | None:
+        """The share of the disagreement the answers place. None where there is none."""
+        return self.placed / self.disagreeing if self.disagreeing else None
+
+
+def bias(
+    read: Sequence[Case],
+    points: Points,
+    cosines: Cosines,
+    strictness: int = STRICTNESS,
+) -> Bias:
+    """Count the disagreement, and how much of it the labels place.
+
+    Over the runs the labels sit in and never over the whole catalog, which is the
+    tighter and more honest scope: what is being asked is whether *these answers*
+    reach the disagreement, so counting pairs in runs no answer touches would
+    flatter the denominator with pairs the reader was never going to be asked about.
+
+    The Match side reads `photolib.membership.STRICTNESS` -- the strictness the grid
+    ships -- so the count is about the line actually drawn rather than about a value
+    of this report's choosing. The cosine side is `HIGH_COSINE` and `LOW_COSINE`,
+    which are not rules and are never swept.
+    """
+    seen = {
+        (min(early, late), max(early, late))
+        for subject in read
+        for early, late, _ in pairs(subject)
+    }
+    cosine_only: set[tuple[str, str]] = set()
+    match_only: set[tuple[str, str]] = set()
+    for (early, late), screen in cosines.items():
+        agreed = label.match(points, early, late)
+        if screen >= HIGH_COSINE and agreed < strictness:
+            cosine_only.add((min(early, late), max(early, late)))
+        elif screen < LOW_COSINE and agreed >= strictness:
+            match_only.add((min(early, late), max(early, late)))
+    return Bias(
+        cosine_only=len(cosine_only),
+        match_only=len(match_only),
+        placed=len((cosine_only | match_only) & seen),
+        labelled=len(seen),
+        strictness=strictness,
+    )
+
+
+def caveat(measured: Bias) -> list[str]:
+    """Why a good score here is weak evidence, in the report's own words.
+
+    **This is an acceptance criterion of ticket 93 and not a nicety.** The rules
+    below are scored against answers whose sets were drawn in bands cut on the
+    Match, so the sample systematically under-represents exactly the disagreement
+    the two fingerprint rules turn on, and none of the three runs the reader
+    reported as wrongly split is among the answers at all. A reader of this output
+    alone has to be able to tell that, without reading a ticket or a docstring, or
+    the report is a good score waiting to be misread as a decision.
+
+    The asymmetry is the point and it is not a hedge: refuting is cheap here and
+    confirming is impossible. A rule that scores badly contradicts answers the
+    reader really gave, whichever way the sample was drawn. A rule that scores well
+    has been shown not to break what the Match already got right -- on a sample
+    drawn to be easy for the Match.
+    """
+    lines = [
+        "\ncaveat    **this report can refute a rule and it cannot confirm one.** That is"
+        " a fact about the labels",
+        "          and not about the rules. The sets these answers were drawn from were"
+        " banded on the Match, so",
+        "          they under-represent the pairs where the two measures disagree -- and"
+        " that disagreement is",
+        "          the whole of what a rule reading the fingerprint turns on.",
+    ]
+    if measured.reached is None:
+        lines.append(
+            "          Inside the runs these answers sit in, the two measures never"
+            " contradict each other at all,"
+        )
+        lines.append(
+            "          so these labels hold no evidence about the question either way."
+        )
+    else:
+        lines += [
+            f"          Inside the runs these answers sit in, {measured.cosine_only:,}"
+            f" pairs reach cosine {HIGH_COSINE:.2f} with a Match",
+            f"          under {measured.strictness}, and {measured.match_only:,}"
+            f" the other way. The answers place {measured.placed:,}",
+            f"          of those {measured.disagreeing:,}"
+            f" -- {measured.reached:.1%} -- out of"
+            f" {measured.labelled:,} labelled pairs in all.",
+        ]
+    lines += [
+        "          None of the three runs the reader reported as wrongly split is among"
+        " these answers.",
+        "          So a rule that scores badly below is refuted: it contradicts answers"
+        " the reader gave. A rule",
+        "          that scores well has only been shown not to break what the Match"
+        " already got right, on a",
+        "          sample drawn to be easy for the Match. Confirming one needs a round"
+        " drawn on the disagreement",
+        "          itself, which is ticket 94. A ticket that reads a good score here as a"
+        " decision has misread it.",
+    ]
+    return lines
+
+
 # --- the report ---------------------------------------------------------------
 
 
 def percent(value: float | None) -> str:
     return "     --" if value is None else f"{value:7.1%}"
+
+
+def threshold(value: int | float | None) -> str:
+    """One axis of a setting, or a dash where that rule reads nothing on it.
+
+    A dash and never a zero: a strictness of 0 admits every pair the fence enumerated
+    and a cosine of 0 admits two fingerprints at right angles, so both are settings a
+    sweep could really hold and neither means *unused*.
+    """
+    if value is None:
+        return "--"
+    return str(value) if isinstance(value, int) else f"{value:.2f}"
 
 
 def table(scored: dict[Setting, Tally], total: int) -> list[str]:
@@ -811,13 +1174,15 @@ def table(scored: dict[Setting, Tally], total: int) -> list[str]:
     setting whose errors scatter from one that buries them all in one stack.
     """
     lines = [
-        "                          ------------ per answer ------------   ----- per pair ----",
-        "  linkage    strictness   precision    recall   wrong   missed   "
+        "                                   ------------ per answer ------------"
+        "   ----- per pair ----",
+        "  linkage    strictness   cosine   precision    recall   wrong   missed   "
         "precision    recall   worst   cases wrong",
     ]
     for setting, tally in scored.items():
         lines.append(
-            f"  {setting.linkage:<10} {setting.strictness:>10}   "
+            f"  {setting.linkage:<10} {threshold(setting.strictness):>10} "
+            f"{threshold(setting.cosine):>8}   "
             f"{percent(tally.precision)}   {percent(tally.recall)}   "
             f"{tally.wrongly_together:>5}   {tally.missed:>6}   "
             f"{percent(tally.once.precision)}   {percent(tally.once.recall)}   "
@@ -836,7 +1201,7 @@ def diagnosis(scored: dict[Setting, Tally]) -> list[str]:
     """
     lines: list[str] = []
     for setting, tally in scored.items():
-        lines.append(f"\n  {setting.linkage} at {setting.strictness}")
+        lines.append(f"\n  {setting.linkage} at {setting.name}")
         if not tally.wrong:
             lines.append("    nothing -- it reproduces every label it was shown")
             continue
@@ -902,6 +1267,343 @@ def softening(scored: dict[Setting, Tally], strictness: int) -> list[str]:
         lines.append(
             "  nothing softer beats complete linkage on both counts, so it stands:"
             " a softer rule here buys recall with precision, which is the constraint."
+        )
+    return lines
+
+
+def noise_floor(
+    subjects: Sequence[Case],
+    points: Points,
+    floor: float = PRECISION,
+    linkages: Sequence[str] = tuple(LINKAGE),
+    chosen: Setting | None = None,
+) -> list[str]:
+    """Strictness 4 priced explicitly, whatever `--strictness` happens to contain.
+
+    **Because four is not a low Match, it is the lowest Match there is.** A RANSAC
+    homography cannot return fewer than four inliers, so a pair scoring exactly 4
+    is a pair the geometry could not say anything about -- 117,744 of this catalog's
+    pairs are that pair, the largest bucket in `pair_match`, and 1, 2 and 3 hold
+    15,062 between them. All three of the runs the reader reported as wrongly split
+    live in the band 4 to 9, so a strictness of 4 merges all three and the belief
+    that it does so at a catastrophic cost is exactly that: a belief. This section
+    is where it becomes a number.
+
+    Scored on its own rather than read off the sweep, so that narrowing the sweep
+    cannot quietly drop it: the value is `NOISE_FLOOR` and never an entry of `SWEEP`
+    that happens to coincide with it.
+    """
+    scored = sweep(subjects, points, (NOISE_FLOOR,), linkages)
+    lines = [
+        f"\nrule 4 -- the Match at or above {NOISE_FLOOR}, which is its noise floor"
+        " rather than a low score",
+        f"  a homography cannot return fewer than {NOISE_FLOOR} inliers, so this is the"
+        " loosest question the Match can",
+        "  be asked. It merges all three of the runs the reader reported as wrongly"
+        " split, and what it costs",
+        "  everywhere else is the assertion this section replaces:",
+        *table(scored, len(subjects)),
+    ]
+    # At the linkage the control chose first, because that is the one the grid is
+    # actually drawn with: "not catastrophic at some linkage" is a different claim
+    # from "not catastrophic here", and the reader's grid only has the one.
+    if chosen is not None:
+        here = scored.get(Setting(NOISE_FLOOR, chosen.linkage))
+        if here is not None:
+            verdict = (
+                "clears" if (here.precision or 0.0) >= floor else "falls under"
+            )
+            lines.append(
+                f"  at {chosen.linkage} linkage, which is what the control chose, it"
+                f" {verdict} the {floor:.0%} floor:"
+                f" {percent(here.precision)} precision and {percent(here.recall)}"
+                f" recall, worst case {here.concentration} wrongly stacked."
+            )
+    clearing = [
+        setting
+        for setting, tally in scored.items()
+        if tally.precision is not None and tally.precision >= floor
+    ]
+    if not clearing:
+        worst = max(
+            (tally.precision for tally in scored.values() if tally.precision is not None),
+            default=None,
+        )
+        lines.append(
+            f"  and no linkage clears the floor at all -- the best precision the noise"
+            f" floor reaches is {percent(worst)} -- so the expectation holds and this"
+            " is the number behind it."
+        )
+    else:
+        best = max(clearing, key=lambda setting: scored[setting].recall or 0.0)
+        under = (
+            "every rule in the running"
+            if len(clearing) == len(scored)
+            else f"{len(clearing)} of the {len(scored)} rules in the running"
+        )
+        lines.append(
+            f"  it clears the floor under {under}, the best of them being"
+            f" {describes(best)} at {percent(scored[best].precision)} precision and"
+            f" {percent(scored[best].recall)} recall -- so what the noise floor costs"
+            " is a question about the linkage and not only about the threshold."
+        )
+    return lines
+
+
+def crossing(
+    scored: dict[Setting, Tally],
+    strictnesses: Sequence[int],
+    thresholds: Sequence[float],
+    linkage: str,
+    floor: float = PRECISION,
+) -> list[str]:
+    """Rule 3's two thresholds as a surface, because a single pick hides the exchange.
+
+    **A frontier and a table, and the table comes first.** The frontier is the
+    honest object -- every point on it buys recall with precision or the other way
+    about, and picking one would hide the rate at which the two thresholds trade --
+    but a frontier of a dozen pairs of numbers is not something a reader can see the
+    shape of. So the surface is printed as two matrices, recall over precision, and
+    the frontier is printed under them as the short list of settings nothing else
+    beats on both counts.
+
+    One linkage, because rule 3 is the control pick with a second way in and the
+    linkage is the half of that pick this rule is not asking about. A third axis
+    here would be a table nobody reads and a population count in `stack_member`
+    that multiplies for a question nobody asked.
+    """
+    lines = [
+        f"\nrule 3's surface at {linkage} linkage -- rows are the cosine floor, columns"
+        " the strictness",
+        "  every cell is that pair of thresholds read as *either*, so no cell asks less"
+        " of the labels than its",
+        "  column does with no cosine at all: rule 3 is a loosening of rule 1. Both"
+        " thresholds tighten away from",
+        "  the top left. A cell of . stacked nothing, so it has no precision to report.",
+    ]
+    for reading in ("recall", "precision"):
+        said = f" -- the floor is {floor:.0%}" if reading == "precision" else ""
+        lines.append(f"\n  {reading}, %{said}")
+        lines.append("  cosine  " + "".join(f"{value:>6}" for value in strictnesses))
+        for one in thresholds:
+            cells = []
+            for strictness in strictnesses:
+                tally = scored.get(Setting(strictness, linkage, one))
+                value = None if tally is None else getattr(tally, reading)
+                cells.append("     ." if value is None else f"{value * 100:6.1f}")
+            lines.append(f"  {one:<6.2f}  " + "".join(cells))
+    lines.append(
+        "\n  the frontier -- every setting here buys recall with precision or the other"
+        " way about"
+    )
+    for setting in frontier(scored):
+        tally = scored[setting]
+        lines.append(
+            f"  {threshold(setting.strictness):>10} {threshold(setting.cosine):>8}   "
+            f"precision {percent(tally.precision)}   recall {percent(tally.recall)}"
+            f"   worst case {tally.concentration:>5}"
+        )
+    return lines
+
+
+@dataclass(frozen=True)
+class Priced:
+    """One rule, and the best setting of it the labels allow -- or none at all.
+
+    A rule with no setting is a **refuted** rule and that is the strong reading this
+    report is allowed to make: nothing it can be set to reproduces the reader's own
+    answers well enough to clear the floor. The other direction has no such word,
+    which is what `caveat` is about.
+    """
+
+    name: str
+    chosen: Setting | None
+    tally: Tally | None
+
+
+def priced(
+    name: str, scored: dict[Setting, Tally], floor: float = PRECISION
+) -> Priced:
+    """One rule's own best setting, chosen inside that rule and never across rules."""
+    chosen = choose(scored, floor)
+    return Priced(name=name, chosen=chosen, tally=None if chosen is None else scored[chosen])
+
+
+def together(
+    rules: Sequence[Priced],
+    control: Priced,
+    measured: Bias,
+    held: Mapping[str, Tally],
+    floor: float = PRECISION,
+) -> list[str]:
+    """The four rules side by side, read against what the labels can actually say.
+
+    **The comparison and never a choice.** Ticket 93 asks whether a fingerprint-based
+    rule survives the reader's existing answers, and the answer it can return is a
+    survival and not a decision: acting on it is ticket 95's, and the last lines here
+    say so in the report's own words rather than leaving it to whoever opens the
+    ticket. The prior going in was that rule 3 wins, on the reasoning that an OR
+    cannot lose ground already held; a prior is not a finding, so what is printed is
+    what the tallies say and the prior is not mentioned.
+
+    **It is printed last, after every check, and that is the whole of why.** The
+    choosing slice can only ever say that a rule reaches further and pays precision
+    for it -- the trade -- and the held-back quarter is the one population here that
+    can refute a fingerprint rule outright. A synthesis printed above it would hand a
+    reader "rule 3 reaches further" and leave them to find the refutation eighty
+    lines down. `held` is handed in rather than worked out here so that the verdicts
+    this reads are the same tallies `holdout` printed and never a second scoring that
+    could come to disagree with it.
+    """
+    lines = [
+        "\nwhat the rules say together, which is the whole reason they are scored apart"
+    ]
+    for one in rules:
+        if one.chosen is None or one.tally is None:
+            lines.append(
+                f"  {one.name:<7} refuted -- no setting of it reaches the"
+                f" {floor:.0%} precision floor on these labels"
+            )
+            continue
+        lines.append(
+            f"  {one.name:<7} {describes(one.chosen)}:"
+            f" precision {percent(one.tally.precision)},"
+            f" recall {percent(one.tally.recall)},"
+            f" worst case {one.tally.concentration}"
+        )
+    if control.tally is None or control.chosen is None:
+        lines.append(
+            "\n  the control is refuted, so there is no ground already held to compare"
+            " against: what the grid draws"
+        )
+        lines.append(
+            "  today does not clear the floor on the round that chose it, and that is the"
+            " finding rather than any rule below it."
+        )
+        return lines
+    better = [
+        one
+        for one in rules
+        if one is not control and one.tally is not None and beats(one.tally, control.tally)
+    ]
+    # Identity and never equality: a `Priced` carries a whole `Tally`, and two rules
+    # that happened to score the same would compare equal and drop each other.
+    reaches = [
+        one
+        for one in rules
+        if one is not control
+        and one.tally is not None
+        and (one.tally.recall or 0.0) > (control.tally.recall or 0.0)
+        and not any(one is already for already in better)
+    ]
+    if better:
+        listed = ", ".join(one.name for one in better)
+        lines.append(
+            f"\n  {listed} {'beats' if len(better) == 1 else 'beat'} the control on"
+            " precision *and* recall at once, which is the"
+        )
+        lines.append(
+            "  strongest thing these labels can say for a rule -- and it is still not a"
+            " confirmation."
+        )
+    elif reaches:
+        listed = ", ".join(one.name for one in reaches)
+        one_of_them = len(reaches) == 1
+        lines.append(
+            f"\n  {listed} {'reaches' if one_of_them else 'reach'} further than the"
+            f" control and {'pays' if one_of_them else 'pay'} precision for it,"
+        )
+        lines.append(
+            "  which is the trade this report never blends: whether it is worth taking"
+            " is a question about the floor."
+        )
+    else:
+        lines.append(
+            "\n  nothing beats the control and nothing reaches further than it, so these"
+            " labels hold no case for"
+        )
+        lines.append(
+            "  moving the grid. That is a real finding and it is the third time a report"
+            " here has returned it."
+        )
+    lines += standing(rules, control, held, floor)
+    lines.append(
+        f"\n  read all of that against the caveat: {percent(measured.reached)} of the"
+        f" {measured.disagreeing:,} disagreeing pairs in these"
+    )
+    lines.append(
+        "  runs are placed by any answer at all, so a rule surviving here has survived a"
+        " sample drawn to be"
+    )
+    lines.append(
+        "  easy for the Match. Refuted means refuted; survived means not yet refuted."
+    )
+    return lines
+
+
+def standing(
+    rules: Sequence[Priced],
+    control: Priced,
+    held: Mapping[str, Tally],
+    floor: float,
+) -> list[str]:
+    """What the held-back quarter leaves standing, which is the report's verdict.
+
+    **A pick that failed a slice it never saw is refuted, and that outranks anything
+    the choosing slice said for it.** The trade above is measured on the labels that
+    chose the pick; this is measured on labels that had no part in choosing it, and a
+    rule that contradicts those has contradicted answers the reader really gave. The
+    bias runs the other way here and cannot be argued around: the checking slice is
+    banded on the Match exactly as the choosing slice is, so it can refute a
+    fingerprint rule and it still cannot confirm one.
+    """
+    if not held:
+        return [
+            "\n  the held-back quarter scored nothing, so no pick has been checked"
+            " against labels that did not choose it."
+        ]
+    kept, lost = [], []
+    for one in rules:
+        tally = held.get(one.name)
+        if tally is None or tally.precision is None:
+            continue
+        (kept if tally.precision >= floor else lost).append(one)
+    if not lost:
+        return [
+            "\n  every pick also clears the floor on the quarter held back, so nothing"
+            " here is refuted -- and, for",
+            "  the caveat's reason, nothing here is confirmed either.",
+        ]
+    lines = [
+        f"\n  on the quarter held back, {', '.join(one.name for one in lost)}"
+        f" {'falls' if len(lost) == 1 else 'fall'} under the {floor:.0%} floor"
+        f" -- the block above. A pick"
+    ]
+    lines.append(
+        "  that fails a slice it never saw has contradicted answers the reader gave,"
+        " which is a refutation and"
+    )
+    if kept:
+        held_control = any(one is control for one in kept)
+        lines.append(
+            "  outranks the trade above. What these labels leave standing is"
+            f" {', '.join(one.name for one in kept)}"
+            + (
+                ", which is the control."
+                if len(kept) == 1 and held_control
+                else ", the control among them."
+                if held_control
+                else " -- and not the control."
+            )
+        )
+    else:
+        lines.append(
+            "  outranks the trade above. No pick survives it, the control included,"
+            " which is a finding about the"
+        )
+        lines.append(
+            "  choosing slice rather than about any rule: it did not have enough in it"
+            " to settle this."
         )
     return lines
 
@@ -1164,8 +1866,8 @@ def check(
     """
     sure, band = confident(subjects), grey(subjects)
     lines = [
-        f"\nround {number}, a check on {chosen.linkage} linkage at strictness"
-        f" {chosen.strictness} -- scored apart and never pooled into the evidence above",
+        f"\nround {number}, a check on {describes(chosen)}"
+        " -- scored apart and never pooled into the evidence above",
         f"labels    {len(subjects)} answers -- {len(sure)} confident,"
         f" {len(band)} not sure",
         *made_of(subjects, points),
@@ -1186,15 +1888,53 @@ def check(
     return lines
 
 
+def checks(
+    subjects: Sequence[Case],
+    points: Points,
+    picks: Sequence[Priced],
+    cosines: Cosines | None = None,
+) -> dict[str, Tally]:
+    """Each rule's pick, scored on the slice of the round that never voted on it.
+
+    Scored once and read twice -- `holdout` prints it and `standing` reads the
+    verdict out of it -- because a second scoring of the same picks against the same
+    labels is a second thing that can come to disagree with the first.
+    """
+    sure = confident(subjects)
+    if not sure:
+        return {}
+    return {
+        one.name: sweep(
+            sure,
+            points,
+            (one.chosen.strictness,),
+            (one.chosen.linkage,),
+            (one.chosen.cosine,),
+            cosines,
+        )[one.chosen]
+        for one in picks
+        if one.chosen is not None
+    }
+
+
 def holdout(
-    subjects: Sequence[Case], points: Points, chosen: Setting, floor: float
+    subjects: Sequence[Case],
+    picks: Sequence[Priced],
+    held: Mapping[str, Tally],
+    floor: float,
 ) -> list[str]:
-    """The quarter of the newest round held back, scored against a pick it did not make.
+    """The quarter of the newest round held back, scored against picks it did not make.
 
     This is the confirmation a second sitting used to provide, taken out of the
     same round rather than out of another evening. The slice never entered the
     sweep, so the number it returns is a check and not an echo -- see `partition`
     for why the split is a hash of the answer's key and not a draw.
+
+    **Every rule's pick and not only the control's.** The slice is the one
+    population in this report that can refute a fingerprint rule without a fresh
+    sitting: it is drawn from the same round, so it carries the same sampling bias
+    and cannot confirm anything, but a pick that fails here has contradicted answers
+    it never saw. Refuting is what these labels are for.
 
     **A pick that fails its check is printed as failing.** The report does not
     re-choose from the checking slice and then present that as the answer: the
@@ -1210,32 +1950,45 @@ def holdout(
         f" ({len(sure)} confident) that never entered the sweep"
     ]
     if not sure:
-        return [*lines, "  no confident answer was held back, so the pick is unchecked"]
-    tally = sweep(sure, points, (chosen.strictness,), (chosen.linkage,))[chosen]
-    lines.append(
-        f"  {chosen.linkage} linkage at strictness {chosen.strictness}:"
-        f" precision {percent(tally.precision)}, recall {percent(tally.recall)},"
-        f" worst case {tally.concentration} wrongly stacked,"
-        f" {len(tally.wrong)}/{len(sure)} cases wrong"
-    )
-    if tally.precision is None:
+        return [*lines, "  no confident answer was held back, so the picks are unchecked"]
+    scored: dict[Setting, Tally] = {}
+    for one in picks:
+        if one.chosen is None or one.name not in held:
+            lines.append(
+                f"  {one.name:<7} refuted on the choosing slice, so there is no pick to"
+                " check"
+            )
+            continue
+        tally = held[one.name]
+        scored[one.chosen] = tally
         lines.append(
-            "  it stacked nothing at all here, so the slice cannot confirm or deny it"
+            f"  {one.name:<7} {describes(one.chosen)}:"
+            f" precision {percent(tally.precision)}, recall {percent(tally.recall)},"
+            f" worst case {tally.concentration} wrongly stacked,"
+            f" {len(tally.wrong)}/{len(sure)} cases wrong"
         )
-    elif tally.precision >= floor:
-        lines.append(
-            f"  which clears the same {floor:.0%} floor it was chosen under, on labels"
-            " that had no part in choosing it: the pick checks out."
-        )
-    else:
-        lines.append(
-            f"  which is under the {floor:.0%} floor it was chosen to clear. **The pick"
-            " fails its own check.** It is reported rather than re-chosen -- the slice"
-            " would stop being a check the moment it picked -- and what it says is that"
-            " the choosing slice did not have enough in it to settle this."
-        )
-    lines.append("\nwhere the pick goes wrong on the held-back labels")
-    lines += diagnosis({chosen: tally})
+        if tally.precision is None:
+            lines.append(
+                "          it stacked nothing at all here, so the slice cannot confirm"
+                " or deny it"
+            )
+        elif tally.precision >= floor:
+            lines.append(
+                f"          which clears the same {floor:.0%} floor it was chosen under,"
+                " on labels that had no part in choosing it: the pick checks out."
+            )
+        else:
+            lines.append(
+                f"          which is under the {floor:.0%} floor it was chosen to clear."
+                " **The pick fails its own check.** It is reported rather than"
+                " re-chosen -- the slice would stop being a check the moment it picked"
+                " -- and what it says is that the choosing slice did not have enough in"
+                " it to settle this."
+            )
+    if not scored:
+        return lines
+    lines.append("\nwhere the picks go wrong on the held-back labels")
+    lines += diagnosis(scored)
     return lines
 
 
@@ -1256,7 +2009,7 @@ def report_choice(
     best = scored[chosen]
     scope = "" if cases_scored is None else f", {len(best.wrong)}/{cases_scored} cases wrong"
     print(
-        f"\nchosen    {chosen.linkage} linkage at strictness {chosen.strictness}: "
+        f"\nchosen    {describes(chosen)}: "
         f"precision {percent(best.precision)}, recall {percent(best.recall)}, "
         f"worst case {best.concentration} wrongly stacked{scope}"
     )
@@ -1283,11 +2036,21 @@ def report_choice(
 def report(
     read: Sequence[Case],
     points: Points,
+    cosines: Cosines,
     orphans: Sequence[str],
     strictnesses: Sequence[int] = SWEEP,
     floor: float = PRECISION,
     linkages: Sequence[str] = tuple(LINKAGE),
+    thresholds: Sequence[float] = COSINES,
 ) -> Setting | None:
+    """Every rule, scored apart, and the control returned.
+
+    **The control is what comes back and never the winner of a comparison.** What
+    the grid draws is the Match against strictness, `holdout` and `check` are
+    checks on that pick, and ADR 0003 records it -- so the return value is that
+    pick, whatever the two fingerprint rules turned out to score. Moving the grid
+    is ticket 95's and the caveat says why the numbers alone are not enough to.
+    """
     split = rounds(read)
     print(f"labels    {len(read)} answers over {len(split)} round(s):")
     for number, subjects in split.items():
@@ -1316,6 +2079,12 @@ def report(
         # named. There is nothing left to score and nothing further to say.
         return None
 
+    # Counted once and printed twice: at the top, before any number, because a
+    # reader of the output alone has to reach the tables already knowing what they
+    # can and cannot settle -- and again in the synthesis at the very bottom.
+    measured = bias(read, points, cosines)
+    print(*caveat(measured), sep="\n")
+
     # The **newest** round is the evidence and every earlier one is a check on what
     # it chose -- see `rounds` for why the inversion, and the module docstring for
     # why it was deliberate. Three quarters of that round choose and the other
@@ -1338,15 +2107,18 @@ def report(
         )
         return None
 
+    # Rule 1: the Match against strictness. The control, and the only rule whose
+    # pick this function returns -- it is what the grid draws and what the checks
+    # below are checks on.
     scored = sweep(sure, points, strictnesses, linkages)
-    print("\nconfident labels")
+    print("\nrule 1 -- the Match at or above strictness, which is what the grid draws")
     print(*table(scored, len(sure)), sep="\n")
 
     print("\nthe trade, which is the whole reason the two are never blended")
     for setting in frontier(scored):
         tally = scored[setting]
         print(
-            f"  {setting.linkage:<10} {setting.strictness:>10}   "
+            f"  {setting.linkage:<10} {threshold(setting.strictness):>10}   "
             f"precision {percent(tally.precision)}   recall {percent(tally.recall)}"
             f"   worst case {tally.concentration:>5}"
         )
@@ -1358,9 +2130,55 @@ def report(
             f" {newest}'s choosing slice, so there is no recommendation to make and"
             " nothing for the held-back quarter or an earlier round to check"
         )
-        return None
-    report_choice(scored, chosen, floor, len(sure))
-    print(*softening(scored, chosen.strictness), sep="\n")
+    else:
+        report_choice(scored, chosen, floor, len(sure))
+        print(*softening(scored, chosen.strictness), sep="\n")
+    control = Priced("rule 1", chosen, None if chosen is None else scored[chosen])
+
+    # Rule 4: the noise floor, priced whether or not the sweep contains it.
+    print(*noise_floor(sure, points, floor, linkages, chosen), sep="\n")
+
+    # Rule 2: the cosine alone. A strictness of `None` is what says the Match is
+    # unused -- see `Setting`.
+    cosine_scored = sweep(sure, points, (None,), linkages, thresholds, cosines)
+    print(
+        "\nrule 2 -- the fingerprint cosine at or above a floor, the Match unused"
+        f" ({len(thresholds)} values)"
+    )
+    print(*table(cosine_scored, len(sure)), sep="\n")
+    resembles = priced("rule 2", cosine_scored, floor)
+    if resembles.chosen is None:
+        print(
+            f"  nothing clears the {floor:.0%} floor, so these labels refute the cosine"
+            " on its own at every value swept"
+        )
+    else:
+        report_choice(cosine_scored, resembles.chosen, floor, len(sure))
+
+    # Rule 3: either of them, at the linkage the control chose. Rule 3 is the
+    # control with a second way in, so its linkage is the control's; with no
+    # control there is nothing to loosen and the first rule in the running stands
+    # in, which the line below says out loud rather than leaving to be inferred.
+    crossed = chosen.linkage if chosen is not None else linkages[0]
+    either_scored = sweep(sure, points, strictnesses, (crossed,), thresholds, cosines)
+    print(
+        "\nrule 3 -- the Match at or above strictness *or* the cosine at or above a"
+        " floor: a second way in"
+    )
+    if chosen is None:
+        print(
+            f"  swept at {crossed} linkage because the control chose nothing to loosen,"
+            " so the first rule in the running stands in"
+        )
+    print(*crossing(either_scored, strictnesses, thresholds, crossed, floor), sep="\n")
+    both = priced("rule 3", either_scored, floor)
+    if both.chosen is None:
+        print(
+            f"  nothing clears the {floor:.0%} floor, so these labels refute every pair"
+            " of thresholds swept"
+        )
+    else:
+        report_choice(either_scored, both.chosen, floor, len(sure))
 
     print("\nthe grey band, scored the same way and never fitted to")
     if band:
@@ -1371,12 +2189,23 @@ def report(
     print("\nwhere each setting goes wrong, over the confident labels")
     print(*diagnosis(scored), sep="\n")
 
-    print(*holdout(checking, points, chosen, floor), sep="\n")
+    rules = [control, resembles, both]
+    held = checks(checking, points, rules, cosines)
+    print(*holdout(checking, rules, held, floor), sep="\n")
 
-    # Every other round, replayed. Earlier and not later now: rounds one and two
-    # answered a stricter question, so they check the pick rather than make it.
-    for number in earlier:
-        print(*check(number, split[number], points, chosen, floor), sep="\n")
+    # Every other round, replayed against the control. Earlier and not later now:
+    # rounds one and two answered a stricter question, so they check the pick
+    # rather than make it. They check the control alone -- their sets were drawn
+    # on the Match under a stricter floor still, so they are the population least
+    # able to say anything about a rule that reads the fingerprint, and the
+    # held-back quarter above is where those two picks are checked instead.
+    if chosen is not None:
+        for number in earlier:
+            print(*check(number, split[number], points, chosen, floor), sep="\n")
+
+    # Last, after every check: see `together` for why the synthesis cannot sit
+    # above the one population that can refute a rule reading the fingerprint.
+    print(*together(rules, control, measured, held, floor), sep="\n")
     return chosen
 
 
@@ -1429,9 +2258,16 @@ def main(argv: list[str] | None = None) -> int:
     # value would replay the labels over pairs that were never checked.
     conn = candidates.catalog(config.catalog_db, read_only=True)
     try:
+        # `harness.screen`'s refusal, borrowed whole rather than weakened: two of
+        # the rules below are thresholds on `candidate_pair.screen`, and a table
+        # whose verdicts were decided at some screen other than the frozen one
+        # cannot be re-read at any threshold. Nothing here moves `SCREEN`.
+        candidates.refuse_if_rethresholded(conn)
         frames = candidates.population(conn)
         read, orphans = cases(answers, candidates.runs(frames, candidates.CEILING))
-        points = checked(conn, {sha256 for subject in read for sha256 in subject.run})
+        wanted = {sha256 for subject in read for sha256 in subject.run}
+        points = checked(conn, wanted)
+        cosines = screens(conn, wanted)
     finally:
         conn.close()
 
@@ -1439,11 +2275,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"labels    {labels_db}")
     print(
         f"window    {candidates.CEILING}s ceiling, {matches.METHOD} "
-        f"version {matches.VERSION}\n"
+        f"version {matches.VERSION}"
     )
-    report(read, points, orphans, strictnesses, args.precision, linkages)
+    print(
+        f"screen    {fingerprints.MODEL} version {fingerprints.VERSION}, frozen at"
+        f" {candidates.SCREEN:.2f}; {len(cosines):,} stored cosines read at"
+        f" {min(COSINES):.2f} and above\n"
+    )
+    report(read, points, cosines, orphans, strictnesses, args.precision, linkages)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except candidates.CandidatesRefused as exc:
+        sys.exit(f"refused: {exc}")
