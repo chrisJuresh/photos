@@ -116,10 +116,15 @@ is a property of the view. Nothing is drawn stacked until
 `python -m photolib.membership` has run. The Stacks panel's two knobs — **strictness** and
 **linkage** — pick *which* stored assignment to read, and offer only the settings a pass has
 written, so a knob is a choice between populations rather than a threshold dialled live;
-the window is not among them, being the fence the Match rows were computed behind.
-Two populations exist: **strictness 10 with *the chain*, which is the default**, and
+the window is not among them, being the fence the Match rows were computed behind, and
+neither is **the people**, ADR 0004's veto being part of what a stack is rather than a dial
+on how much of one — `browse.DEFAULT_PEOPLE` points at the population and `none` is the walk
+with no veto. Two populations exist at that column's `none`: **strictness 10 with *the
+chain*, which is the default**, and
 strictness 20 with *matches most members*, which was the default until 2026-08-21 and is
-kept so that the change is something the reader can see rather than be told about.
+kept so that the change is something the reader can see rather than be told about. The
+vetoed population is what the grid now names and it is **owed a pass** — see
+`python -m photolib.membership` below.
 Moving one regroups, which empties the selected set, so the panel says so before it happens
 rather than after. It is grid-only: `/api/triage/*` is untouched and
 a triage screen never collapses anything. **Every grid tile opens that overlay**, stack or
@@ -261,8 +266,11 @@ the same photograph is a wrong timestamp, and nothing else on the screen could s
 answer says is bounded by what was on screen for it**, which is stored per answer and is the
 column ticket 34 has to read — `accept` means the frames the reader was shown are right, never
 that the stack is complete. Answers go to a `labels.sqlite3` of its own beside the catalog,
-**never `state.sqlite3`**, and it is not a migrated database because a table nothing shipped
-reads has no business in the shipped schema. Frames come from the substrate tree.
+**never `state.sqlite3`**, and it is not a migrated database: the harness that owns it creates
+it. One column of it is shipped-read since ADR 0004's veto landed — `photolib.membership`
+opens `person_verdict` read-only for the strangers, and every way it can be absent is *no
+strangers* rather than an error — and nothing else in `photolib/` names the file.
+Frames come from the substrate tree.
 **An answer is keyed on the set and the round that asked**, so a later round asking the same
 question again lands beside the earlier answer rather than over it: a sitting drawn to retest
 the reader cannot spend itself destroying the evidence it was run to check. The key stops at
@@ -663,11 +671,11 @@ the one `harness.calibrate` replayed the labels against, imported from here rath
 copied, so ADR 0003's numbers describe what the grid draws and not something adjacent
 to it; `harness/label.py` re-exports it and keeps working. A stack is named by its earliest
 member's sha256 and never by an id, and that is not the **cover**, which is resolved per
-query. **The strictness, the linkage and the window are part of the key**, the relationship
-the Match rows already have with the method that produced them, so moving one adds a
-population rather than overwriting one and `--strictness`/`--linkage` are how a caller says
-so; the ceiling is stored and is deliberately not a flag, being the fence the Match rows
-were computed behind. Every EXIF-dated published tile gets exactly one row, a frame that
+query. **The strictness, the linkage, the window and the people are part of the key**, the
+relationship the Match rows already have with the method that produced them, so moving one
+adds a population rather than overwriting one and `--strictness`/`--linkage`/`--no-people`
+are how a caller says so; the ceiling is stored and is deliberately not a flag, being the
+fence the Match rows were computed behind. Every EXIF-dated published tile gets exactly one row, a frame that
 shot alone included; a tile the filesystem dated gets none, because a copy date is not when
 the photograph was taken; and a video gets a stack that is always its own — nothing
 verifies one — without breaking the run around it. **A pair carrying no Match row is read as
@@ -684,6 +692,27 @@ Match row**, so nothing is owed. The setting this superseded — strictness 20 w
 most members*, 9,108 stacks and 19,106 tiles collapsed — is **still in the table**, because a
 setting is part of the key: the Stacks panel offers both and the reader flips between them.
 Each population costs about 5 MB of catalog.
+
+**ADR 0004's veto is applied here now, after the walk and before anything is stored**, and
+it is the sixth column of that key: `regroup(members, who)` takes one Match-proposed stack
+and a mapping from a frame to its people, and returns the stack partitioned until every part
+has a member whose people contain the rest. It can only ever split. It is a pure function
+over sets of person names — no image, no database, no model — so the reader's worked example
+in ADR 0004 is a test case verbatim. A frame's people are the persons whose faces reach
+`photolib.people.FLOOR` at the clustering the key names, minus the ones the reader marked as
+strangers, and **the three states are three**: a set, `None` for the body detector finding
+nobody, and *absent* for a frame the people pass never examined, which is exempt from both
+halves so an incomplete pass degrades to the grid without the rule rather than to a split.
+The column holds `face_person`'s whole key as one value and the rows walked before it
+existed are stamped `none` by migration 014, so the grid the reader had is still drawable
+and `--no-people` writes more of it. The pass says how many stacks the veto split, how many
+frames moved, and **names every split stack**, which is ADR 0004's "How it will be judged".
+The floor and the strangers are read when it runs and are deliberately not in the key: an
+answer given since is a `DELETE FROM stack_member WHERE people = …` and a re-run, which the
+pass prints. **The people population is owed a run** — `browse.STACK_SETTING` names it and
+nothing has written it yet, so the grid draws every tile as its own stack until this has
+been run once. `harness.nesting` prices what to expect: 94 of the 3,984 multi-frame stacks
+split, 53 of them with every frame holding somebody.
 
 ```bash
 python -m photolib.membership
@@ -732,8 +761,10 @@ a run 320 frames in on 2026-08-22, in the same minute as six `nvlddmkm` resets a
 graphics bugchecks the same night. A lost context poisons every call after it, so there is
 nothing to retry in the process: the pass stores the frames it had in hand, clusters nothing,
 and exits 2 saying that everything it counted is stored and a re-run resumes there. Re-running
-it is the whole of the answer from this side; the fault is the driver's. Nothing reads any of
-these rows yet.
+it is the whole of the answer from this side; the fault is the driver's. **`photolib
+.membership` is what reads these rows** — ADR 0004's veto takes a frame's people from
+`face_person` at `FLOOR` and its presence from `frame_body` — and this pass still applies
+none of it: nothing it writes splits a stack or moves a cover by itself.
 Measured: 23,904 frames, the last 22,432 of them in one uninterrupted pass of 35m39s at
 10.5/s on an RTX 3080 Ti — eleven times the fingerprint pass's cost per frame, which is what
 three models instead of one costs. Two tiles have no substrate and are named; nothing failed

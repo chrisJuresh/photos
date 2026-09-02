@@ -77,7 +77,10 @@ ending in a traceback that leaves it unclear whether anything was kept. It exits
 there, and clusters nothing: a clustering of the fraction of the vectors the pass
 reached would be reported as this library's persons without being them.
 
-Nothing reads any of these rows yet.
+`photolib.membership` is what reads these rows: ADR 0004's veto takes a frame's
+people from `face_person` at `FLOOR`, and its presence from `frame_body`. Nothing
+here applies any of it -- no stack is split and no cover moves by writing a row --
+and moving `FLOOR` moves what that rule reads without touching anything stored.
 """
 
 from __future__ import annotations

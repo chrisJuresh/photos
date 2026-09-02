@@ -174,10 +174,20 @@ stack. Necessary, never sufficient: it fences a stack to one stretch of shooting
 keeps stacks contiguous in capture order, and the match decides everything inside the
 fence. It stopped being the only number stacking has — see `docs/adr/0003` — and then
 stopped being a number a reader sets: at 3600s it is the fence the stored Matches were
-computed behind, so moving it would ask about pairs nothing ever checked. It is the one
-part of a setting the Stacks panel does not offer, and `docs/adr/0003` records that this
-is settled rather than pending.
+computed behind, so moving it would ask about pairs nothing ever checked. It is one of the
+two parts of a setting the Stacks panel does not offer — the other is which **persons** the
+veto read — and `docs/adr/0003` records that this is settled rather than pending.
 _Avoid_: threshold, tolerance, distance, sensitivity
+
+**Veto**:
+Who is in the frames, applied to what the match proposed. A stack needs one member whose
+people contain every other member's; where there is no such member the stack is split until
+every part has one, and a frame with nobody in it never joins a frame with somebody. It only
+ever splits — nothing is ever one stack *because* the same people are in it — which is why
+it is a veto and not a grouping. Which persons it read is part of a setting, like the
+strictness and the linkage, and the walk it was not applied to is still a population the
+grid can be pointed at. See `docs/adr/0004`.
+_Avoid_: people rule as a grouping, filter, nesting check
 
 **Candidate**:
 Two frames the window has not ruled out — a pair inside one run of consecutive
