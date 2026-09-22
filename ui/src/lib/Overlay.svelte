@@ -420,8 +420,8 @@
      a 2px blur and a tint tuned to be seen through, which is right for five
      words floating over a photograph and wrong for a surface whose whole job is
      to put the grid behind it out of the way. The panels already answer this —
-     glass.js's `deepen()` and app.css's `--glass-tint-sheet` are one material at
-     two depths — but the class that applies it is scoped to Header.svelte, so
+     app.css's `--glass-tint-sheet` and `--glass-blur-sheet` are the frosted half
+     of one material — but the class that applies it is scoped to Header.svelte, so
      the deep half is declared here off the same custom properties. `/tune` still
      moves it, and there is still only one material.
 
@@ -433,7 +433,7 @@
     z-index: 40;
     border-radius: 0;
     background-color: var(--glass-tint-sheet);
-    backdrop-filter: blur(calc(var(--glass-blur, 2px) + 12px))
+    backdrop-filter: blur(var(--glass-blur-sheet))
       saturate(var(--glass-saturate, 130%)) brightness(var(--glass-bright-sheet));
     animation: rise 200ms ease both;
   }

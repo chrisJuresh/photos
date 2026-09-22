@@ -115,7 +115,17 @@ export const STUDIO = {
  * at, and the two literals are now one number: the panels are the same material
  * as the bar, and only depth — blur and tint — distinguishes them.
  *
- * The last four pairs are not the studio's at all — its editor tints a blob with
+ * `sheet` is the panels' tint, and it is a pair of its own rather than the
+ * bar's pushed towards opaque, which is what it was. The bar is the studio's
+ * clear glass — Apple's `.clear`, the variant for a few controls over media —
+ * and a panel of dense text wants the other one, `.regular`: frosted hard enough
+ * that no edge of the photograph survives under a word, and dark in the dark
+ * theme. Derived from a clear white tint it could only be milky, a grey lift
+ * over a dimmed backdrop, which over a bright sky left light text on a mid-grey
+ * ground. Now it is a near-black 0.42 over a backdrop dimmed less, so the
+ * colour of what is behind still comes through; in light, a whiter 0.6.
+ *
+ * The last four pairs are not the studio's either — its editor tints a blob with
  * nothing written on it, and this one carries a count and five controls. They
  * are here because the tint alone cannot answer for legibility: a pane tuned
  * clear enough to see the photograph through is a pane whose text has no ground,
@@ -176,6 +186,8 @@ export const SHIPPED = {
   glareConvergence: 100,
   blurRadius: 2,
   tintLight: { r: 255, g: 255, b: 255, a: 0.13 },
+  sheet: { r: 22, g: 22, b: 26, a: 0.42 },
+  sheetLight: { r: 255, g: 255, b: 255, a: 0.6 },
   shadowFactor: 50,
   shapeRoundness: 2,
   saturation: 130,
@@ -201,6 +213,7 @@ export const SHIPPED = {
  */
 export const COLOURS = [
   { dark: "tint", light: "tintLight", base: STUDIO },
+  { dark: "sheet", light: "sheetLight", base: SHIPPED },
   { dark: "control", light: "controlLight", base: SHIPPED },
   { dark: "ink", light: "inkLight", base: SHIPPED },
   { dark: "tally", light: "tallyLight", base: SHIPPED },
@@ -272,14 +285,6 @@ function rgba({ r, g, b, a }) {
 function round(value, places = 2) {
   const factor = 10 ** places;
   return Math.round(value * factor) / factor;
-}
-
-// A panel of dense text needs more ground under it than a bar of five words
-// does. Rather than a second parameter set nobody would keep in step with the
-// first, the sheet is the bar's own tint pushed towards opaque and its own blur
-// deepened — one material, two depths.
-function deepen({ r, g, b, a }) {
-  return { r, g, b, a: clamp(a * 1.7 + 0.22, 0, 1) };
 }
 
 // The ring the shader draws as a per-pixel falloff off the signed distance
@@ -408,8 +413,8 @@ export function apply() {
   root.setProperty("--glass-saturate", `${round(Math.max(s.saturation, 0))}%`);
   root.setProperty("--glass-tint-dark", rgba(s.tint));
   root.setProperty("--glass-tint-light", rgba(s.tintLight));
-  root.setProperty("--glass-tint-sheet-dark", rgba(deepen(s.tint)));
-  root.setProperty("--glass-tint-sheet-light", rgba(deepen(s.tintLight)));
+  root.setProperty("--glass-tint-sheet-dark", rgba(s.sheet));
+  root.setProperty("--glass-tint-sheet-light", rgba(s.sheetLight));
   root.setProperty("--glass-ctl-dark", rgba(s.control));
   root.setProperty("--glass-ctl-light", rgba(s.controlLight));
   root.setProperty("--glass-text-dark", rgba(s.ink));
@@ -652,14 +657,25 @@ export function refract(node) {
     node.style.setProperty("--glass-post", live.blurEdge ? url : "");
   }
 
+  // The settings with this pane's own corner in them. `shapeRadius` is the bar's,
+  // and a pane the stylesheet rounds differently — the panels hanging off the bar
+  // — says so in `--glass-radius`; the map and the glare have to bend and light
+  // the corner that is painted, not the bar's. Only a length is taken: the
+  // overlay's round arrows say `50%`, which the clamp to half the pane already
+  // draws from the tuned radius.
+  function shaped() {
+    const own = getComputedStyle(node).getPropertyValue("--glass-radius").trim();
+    return own.endsWith("px") ? { ...live, shapeRadius: Number.parseFloat(own) } : live;
+  }
+
   function paint() {
     if (width < 2 || height < 2) return;
-    node.style.setProperty("--glass-glare", glare(width, height, live));
+    node.style.setProperty("--glass-glare", glare(width, height, shaped()));
   }
 
   function draw() {
     if (width < 2 || height < 2) return;
-    const s = live;
+    const s = shaped();
     const map = encode(width, height, sampler(width, height, s));
     // Their chromatic aberration, `offset * (1 - (N - 1) * factor)` with the
     // three indices 0.98, 1.0 and 1.02: red comes out wider than blue by twice

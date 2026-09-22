@@ -147,9 +147,14 @@
      so nothing in the script has to know that `data-theme` flipped. The literals
      here are only what shows before it has run. */
   --glass-tint: var(--glass-tint-dark, rgba(255, 255, 255, 0));
-  --glass-tint-sheet: var(--glass-tint-sheet-dark, rgba(255, 255, 255, 0.22));
+  --glass-tint-sheet: var(--glass-tint-sheet-dark, rgba(22, 22, 26, 0.42));
   --glass-bright: 0.88;
-  --glass-bright-sheet: 0.6;
+  --glass-bright-sheet: 0.8;
+  /* The panels' frost: the bar's tuned blur and then enough on top that no edge
+     of a photograph survives under a line of small text, which is Apple's
+     `.regular` glass against the bar's `.clear`. One declaration because two
+     surfaces read it — the header's panels and the stack overlay. */
+  --glass-blur-sheet: calc(var(--glass-blur, 2px) + 28px);
   --glass-ink: #fff;
   /* The fill behind a control on glass and the ink written on it. Separate from
      the tint because they answer a different question: the tint decides how much
@@ -206,7 +211,7 @@
      control fill below — an all but opaque pill — that gives near-black text a
      ground over a black interior. */
   --glass-tint: var(--glass-tint-light, rgba(255, 255, 255, 0.13));
-  --glass-tint-sheet: var(--glass-tint-sheet-light, rgba(255, 255, 255, 0.441));
+  --glass-tint-sheet: var(--glass-tint-sheet-light, rgba(255, 255, 255, 0.6));
   --glass-bright: 1.08;
   --glass-bright-sheet: 1.2;
   --glass-ink: #14141a;

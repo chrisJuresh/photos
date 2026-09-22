@@ -163,8 +163,16 @@
       note:
         "Studio's own control, and it opens at alpha 0 — a clear pane, with nothing under the " +
         "text. This one is per theme, because which way the ground has to move is what the " +
-        "palette decides about this material. It is the bar and the panels that drop out of " +
-        "it; the count has its own, below.",
+        "palette decides about this material. It is the bar alone; the panels that drop out " +
+        "of it and the count each have their own, below.",
+    },
+    sheet: {
+      title: "Panel tint",
+      note:
+        "The ground under the Sort, Filters and Stacks panels and behind the stack overlay. " +
+        "Frosted rather than clear: a panel of small text needs the photograph gone from " +
+        "under it, so this is dark in the dark theme where the bar's tint is clear. No studio " +
+        "value — the default is what ships.",
     },
     control: {
       title: "Control fill",
@@ -233,7 +241,7 @@
 
   // What a control's name is amber against, and what its ↺ goes back to.
   // Upstream has a value for nearly all of these; for the ones it has not — the
-  // saturation stage its shader does not have, and the four colours its editor
+  // saturation stage its shader does not have, and the five colours its editor
   // has no control for — there is nothing to return to but what ships. `COLOURS`
   // carries its own `base` for exactly this reason.
   const baseOf = (key) => (key in STUDIO ? STUDIO : SHIPPED);
