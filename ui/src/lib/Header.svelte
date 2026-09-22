@@ -344,6 +344,7 @@
               panel = "";
             }}
           >
+            <span class="mark" aria-hidden="true">{entry.value === sort ? "✓" : ""}</span>
             {entry.label}
           </button>
         {/each}
@@ -766,16 +767,26 @@
   /* A panel of dense text needs more ground under it than a bar of five words
      does: the same material as the bar leaves the section labels sitting on
      whatever happens to be behind them, and over a bright photograph that is not
-     a background, it is noise. Deeper blur, harder dim, same glass — the tuned
-     tint pushed towards opaque by lib/glass.js and the tuned blur deepened here,
-     so there is one material and not two parameter sets to keep in step. The
-     saturation is deepened by nothing: it is not a depth, so a panel takes the
-     bar's own `--glass-saturate` rather than a second literal beside it. */
+     a background, it is noise. So a panel is the frosted glass and the bar the
+     clear one — the same rim, refraction and shadow, over a far deeper blur and a
+     tint of its own, both of which lib/glass.js and app.css hold so that `/tune`
+     moves them. The saturation is deepened by nothing: it is not a depth, so a
+     panel takes the bar's own `--glass-saturate` rather than a second literal
+     beside it.
+
+     Its corner is its own too. The bar's tuned radius is 80px, which on a 56px
+     capsule the browser clamps to a pill, and on a panel it is not clamped at
+     all: an 80px arc out of a 210px menu cut the first and last rows off. A menu
+     is a card, so it takes the scale's largest card radius, and the rows inside it
+     are rounded concentrically — the outer radius less the padding between them —
+     which is what keeps a highlighted row's corner parallel to the pane's.
+     `refract()` reads this back, so the rim bends where the corner is painted. */
   .sheet {
+    --glass-radius: var(--r-4);
     position: absolute;
     top: calc(100% + var(--s-2));
     background-color: var(--glass-tint-sheet);
-    backdrop-filter: var(--glass-pre, ) blur(calc(var(--glass-blur, 2px) + 12px))
+    backdrop-filter: var(--glass-pre, ) blur(var(--glass-blur-sheet))
       saturate(var(--glass-saturate, 130%)) brightness(var(--glass-bright-sheet))
       var(--glass-post, );
     /* Whatever is left of the window below the bar, less the inset it keeps at
@@ -785,6 +796,10 @@
     );
     overflow-y: auto;
     overscroll-behavior: contain;
+    /* Thin, and in the pane's own ink: the platform's scrollbar, arrows and all,
+       is an opaque grey strip laid into a rounded glass corner. */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--glass-ink) 28%, transparent) transparent;
   }
 
   .sorts {
@@ -936,10 +951,32 @@
 
   .sorts .option {
     justify-content: flex-start;
-    border-radius: var(--r-1);
+    border-radius: calc(var(--r-4) - var(--s-2));
     min-height: var(--ctl);
-    padding: 0 var(--s-3);
+    padding: 0 var(--s-3) 0 var(--s-2);
     background: none;
+  }
+
+  /* The sort is one choice out of ten, not a set of them, so the chosen row is
+     marked the way a menu marks it — a tick in a gutter every row keeps, so the
+     labels stay in one column — rather than with the outlined pill the filters
+     use for "this one is on too". Hover is the same wash on every row. */
+  .sorts .option.on {
+    background: none;
+    border-color: transparent;
+  }
+
+  .sorts .option:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--glass-ink) 11%, transparent);
+    border-color: transparent;
+  }
+
+  .mark {
+    flex: none;
+    width: 1em;
+    text-align: center;
+    color: var(--accent);
+    font-weight: 600;
   }
 
   /* ---------------------------------------------------------------- buttons */

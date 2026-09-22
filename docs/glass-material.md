@@ -44,16 +44,27 @@ editor's own defaults key for key, `SHIPPED` is what a `/tune` session over the 
 grid made of them — a harder bend, no Fresnel wash, a narrow clipped glare, a heavier
 shadow, a circular corner, a blur of 2 and both tints all but clear — plus the
 saturation, the count pane's height, the row's own two margins, the gap under it and
-the four colours upstream has no control for, and `apply()` writes both onto `:root`
+the five colours upstream has no control for, and `apply()` writes both onto `:root`
 as custom properties that `app.css` reads.
+
+**The bar is clear glass and the panels are frosted** — Apple's `.clear` and
+`.regular`, the first for a few controls over media and the second for a surface of
+text. The panels that drop out of the bar, and the stack overlay behind a fanned-out
+stack, share its rim, refraction and shadow, but sit over `--glass-blur-sheet` (the
+bar's blur plus 28px) and a tint of their own, `sheet` in `SHIPPED`: a near-black 0.42
+in dark over a backdrop dimmed to 0.8, a white 0.6 in light. That tint used to be the
+bar's pushed towards opaque, and a clear white tint deepened can only go milky — over
+a bright sky it left light text on a mid-grey ground. The panels also carry their own
+corner, `--r-4`, where the bar's 80px is clamped to a pill; `refract()` reads a pane's
+own `--glass-radius` back so the map bends the corner that is painted.
 
 `--glass-saturate` is not upstream's in any form — its shader has no saturation term —
 and it was a literal 200% in `app.css` beside a second literal 170% on the panels
 until the two became one number: it multiplies the chroma of the photograph behind the
 pane, and past a point that is what a reader sees instead of the glass, so it is a
 slider like the blur rather than a constant. A panel takes the bar's own value, because
-saturation is not one of the two depths (`deepen()`'s tint, `+12px` of blur) that
-separate a panel from the bar.
+saturation is not one of the two things (the tint and the blur) that separate a panel
+from the bar.
 
 The last four pairs are not upstream's at all — its editor tints a blob with nothing
 written on it. They exist because the tint alone cannot answer for legibility at a low
@@ -177,13 +188,13 @@ viewport for exactly that case, because a literal there is short on a wide monit
 meaningless on a laptop. The `--bar-min` clamp means the last of that range moves
 nothing, which the page says.
 
-The five colours — tint, control fill, control ink, then the count pane's own tint and
-ink — are the same four channels five times over, per theme, with one button flipping
-which side you are editing. Each control carries its own reset, and it goes back to
-**`STUDIO`**, not to `SHIPPED`: the button is the exact inverse of the amber name
-beside it, which already says that this number is no longer upstream's. The nine
-settings upstream has no control for — the saturation, the count pane's height, the
-three placement numbers and the four colours — are the exception and revert to
+The six colours — tint, panel tint, control fill, control ink, then the count pane's
+own tint and ink — are the same four channels six times over, per theme, with one
+button flipping which side you are editing. Each control carries its own reset, and it
+goes back to **`STUDIO`**, not to `SHIPPED`: the button is the exact inverse of the
+amber name beside it, which already says that this number is no longer upstream's. The
+ten settings upstream has no control for — the saturation, the count pane's height,
+the three placement numbers and the five colours — are the exception and revert to
 `SHIPPED`, which the page says, and "Studio defaults" puts them back to `SHIPPED` for
 the same reason. One `baseOf()` decides which of the two a control answers to, by
 asking whether `STUDIO` holds the key at all, so a setting that upstream has no
