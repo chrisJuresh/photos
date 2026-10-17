@@ -827,6 +827,23 @@ population is owed a run, which examines nothing and costs a matrix multiply, an
 python -m photolib.people
 ```
 
+To copy the published set to the reader's **Immich** server — one way, for browsing it from
+elsewhere. Every member of every tile goes up from `vault_root` under its original name from
+`origin`, and a RAW+JPEG tile becomes one Immich stack with the representative as its primary;
+the grid's own stacks are not mirrored. **Nothing deletes**, there or here, so a tile excluded
+after it was uploaded stays in Immich, and it is a copy for browsing and **not the backup**
+"Open decisions" 5 is waiting for. The key is `IMMICH` in the environment or in the checkout's
+git-ignored `.env`, never printed. A ledger, `immich.sqlite3` beside the catalog, records which
+sha256 is which asset on which server, so it is resumable a file at a time and a re-run uploads
+nothing; Immich's own checksum dedup answers `duplicate` for what the phone already sent, and
+that is recorded and stacked like the rest. `--dry-run` says what is owed and opens no
+connection. It reads `G:`: run it in the background and leave the drive alone. Owed at first
+run: 38,358 files in 24,518 tiles, 435 GB of which 315 GB is RAW, and 13,840 stacks.
+
+```bash
+python -m photolib.immich --dry-run
+```
+
 Triage's **Apply to grid** button is what makes a triage decision visible in the grid:
 it snapshots `state.sqlite3`, spawns `archive.pipeline.group` to rebuild `photo`, and
 then drops the facet vocabulary and every `total` the server had memoised — no restart.
