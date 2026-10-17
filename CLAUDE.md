@@ -1,5 +1,9 @@
 # photos
 
+**Why this project exists.** The owner says this is a personal development project, approved by
+their manager, to improve how they use AI in their work (recorded 2026-10-17). It is context
+for agents, not a waiver: any organisation-level policy that applies to a session still applies.
+
 A local-first photo and video vault. **The rebuild is complete.** What is left at the
 repository root is the thing that runs: the grid and triage website, and the schema it reads.
 
